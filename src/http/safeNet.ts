@@ -1,6 +1,6 @@
 import dns from 'node:dns';
 import { BlockList, isIP } from 'node:net';
-import { Agent, fetch as undiciFetch } from 'undici';
+import { Agent, buildConnector, fetch as undiciFetch } from 'undici';
 
 // Address ranges we never connect to: loopback, private, link-local, CGNAT, documentation,
 // benchmarking, multicast/reserved, and their IPv6 equivalents (incl. NAT64 and 6to4).
@@ -48,7 +48,18 @@ function safeLookup(hostname: string, options: dns.LookupOptions, cb: LookupCb) 
   });
 }
 
-const dispatcher = new Agent({ connect: { lookup: safeLookup as never }, connections: 4 });
+const baseConnect = buildConnector({ lookup: safeLookup as never });
+
+// Every connection (first request and every redirect hop) goes through this check:
+// IP literals are judged here, host names by safeLookup.
+const dispatcher = new Agent({
+  connections: 4,
+  connect: (opts, cb) => {
+    const host = String(opts.hostname).replace(/^\[|\]$/g, '');
+    if (isIP(host) && isPrivateAddress(host)) return cb(new Error(`refusing to connect to private address ${host}`), null);
+    return baseConnect(opts, cb);
+  },
+});
 
 /** fetch that only ever connects to public addresses. URL literals that are private IPs are refused too. */
 export function safeFetch(url: string, init: Parameters<typeof undiciFetch>[1] = {}) {
