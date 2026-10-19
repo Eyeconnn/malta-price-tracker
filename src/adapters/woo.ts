@@ -107,6 +107,10 @@ export const woo: Adapter = {
         result = await getPage(ctx, url, adaptive && size > 1 ? 1 : undefined);
       } catch (e) {
         if (e instanceof ShopAbortError || e instanceof DisallowedError) throw e;
+        if (e instanceof HttpError && (e.status === 401 || e.status === 403)) {
+          // blocked (e.g. a bot challenge): do not keep knocking
+          throw new ShopAbortError(`access denied (HTTP ${e.status}) on ${url}`);
+        }
         // Slow servers (AtoZ): retry the same items with a smaller page size.
         const smaller = [10, 5, 2, 1].find((d) => d < size && fetched % d === 0);
         if (adaptive && smaller) {
