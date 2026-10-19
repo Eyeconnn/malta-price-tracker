@@ -60,8 +60,9 @@ function obsHash(r: NormalisedRecord): string {
   return createHash('sha1').update(key).digest('hex').slice(0, 16);
 }
 
-export function reviewFlag(price: number | null, prev: number | null): string | null {
-  if (price === null) return 'missing_price';
+export function reviewFlag(price: number | null, prev: number | null, inStock: boolean | null = null): string | null {
+  // some shops hide the price of out-of-stock products; that is not a data problem
+  if (price === null) return inStock === false ? null : 'missing_price';
   if (price === 0) return 'zero_price';
   if (prev !== null && prev > 0 && Math.abs(price - prev) / prev > 0.7) return 'jump_70pct';
   return null;
@@ -145,7 +146,7 @@ export async function saveBatch(
   const obsRows = records.map((r) => {
     const pid = idByExt.get(r.external_id)!;
     const before = prev.get(pid) ?? null;
-    const flag = reviewFlag(r.price_cents, before);
+    const flag = reviewFlag(r.price_cents, before, r.in_stock);
     if (flag) {
       flagged.push({
         product_id: pid,
@@ -181,4 +182,14 @@ export async function saveBatch(
     on conflict (product_id, observed_at) do nothing`;
 
   return { saved: obsRows.length, flagged };
+}
+
+/** External ids that are new or have never had a product-page read (meta.detailed not set). */
+export async function idsNeedingDetail(shopId: number, ids: string[]): Promise<Set<string>> {
+  if (!ids.length) return new Set();
+  const done = await db()<{ external_id: string }[]>`
+    select external_id from products
+    where shop_id = ${shopId} and external_id in ${db()(ids)} and (meta->>'detailed') is not null`;
+  const have = new Set(done.map((r) => r.external_id));
+  return new Set(ids.filter((id) => !have.has(id)));
 }

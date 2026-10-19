@@ -222,7 +222,8 @@ export class ShopFetcher {
     }
     const origin = new URL(url).origin;
     const rules = await this.robotsFor(url);
-    const allow = new Set([200, 404, 410, ...(opts.allowStatus ?? [])]);
+    // 202 is deliberately not success: some shops answer bot challenges with 202 and an HTML page
+    const allow = new Set([200, 203, 204, 206, 404, 410, ...(opts.allowStatus ?? [])]);
 
     for (let attempt = 0; ; attempt++) {
       await this.waitTurn(origin, rules.crawlDelayMs);
@@ -233,7 +234,7 @@ export class ShopFetcher {
       try {
         const res = await this.fetchFollowingRedirects(url, opts);
         status = res.status;
-        if (allow.has(status) || (status >= 200 && status < 300)) {
+        if (allow.has(status)) {
           this.lastRequestEnd.set(origin, Date.now());
           this.consecutiveFailures = 0;
           return res;

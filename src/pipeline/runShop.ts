@@ -4,7 +4,7 @@ import { ShopAbortError, ShopFetcher } from '../http/fetcher.js';
 import { userAgent } from '../env.js';
 import type { CrawlContext, NormalisedRecord, Shop } from '../types.js';
 import { applyIdentifierRules } from '../util/normalise.js';
-import { finishRun, saveBatch, startRun, type FlaggedRow, type RunTotals } from './store.js';
+import { finishRun, idsNeedingDetail, saveBatch, startRun, type FlaggedRow, type RunTotals } from './store.js';
 
 const cents = z.number().int().nullable();
 export const recordSchema = z.object({
@@ -69,6 +69,7 @@ export async function runShop(shop: Shop, opts: RunOptions = {}): Promise<RunRes
   const errors: string[] = [];
   const ctx = makeContext(shop, opts, errors);
   const runId = opts.dryRun ? null : await startRun(shop.id, 'full');
+  if (runId !== null) ctx.needsDetail = (ids) => idsNeedingDetail(shop.id, ids);
   const seen = new Set<string>();
   const flagged: FlaggedRow[] = [];
   const sample: NormalisedRecord[] = [];

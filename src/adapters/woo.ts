@@ -95,6 +95,7 @@ export const woo: Adapter = {
     let produced = 0;
     let totalPages: number | null = null;
     let fastStreak = 0;
+    let pageErrors = 0;
     const variableParents = new Map<number, WooProduct>();
 
     while (true) {
@@ -107,7 +108,7 @@ export const woo: Adapter = {
         result = await getPage(ctx, url, adaptive && size > 1 ? 1 : undefined);
       } catch (e) {
         if (e instanceof ShopAbortError || e instanceof DisallowedError) throw e;
-        if (e instanceof HttpError && (e.status === 401 || e.status === 403)) {
+        if (e instanceof HttpError && (e.status === 401 || e.status === 403 || e.status === 202)) {
           // blocked (e.g. a bot challenge): do not keep knocking
           throw new ShopAbortError(`access denied (HTTP ${e.status}) on ${url}`);
         }
@@ -119,12 +120,14 @@ export const woo: Adapter = {
           fastStreak = 0;
           continue;
         }
-        // Skip this page and carry on; the run is marked partial.
+        // Skip this page and carry on (the run is marked partial), but not forever.
+        if (++pageErrors >= 3) throw new ShopAbortError(`3 listing pages in a row failed, last: ${(e as Error).message}`);
         ctx.error(`products page ${page} (size ${size}): ${(e as Error).message}`);
         fetched += size;
         if (totalPages !== null && page >= totalPages) break;
         continue;
       }
+      pageErrors = 0;
       const elapsed = Date.now() - t0;
       if (result.totalPages !== null && fetched === 0) totalPages = result.totalPages;
       const items = result.items;

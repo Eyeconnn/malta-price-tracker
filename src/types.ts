@@ -75,6 +75,11 @@ export interface CrawlContext {
   log: (msg: string) => void;
   /** record a non-fatal problem; counted in scrape_runs.errors */
   error: (msg: string) => void;
+  /**
+   * Which of these external ids still need a product-page read (no identifiers stored yet).
+   * Without a database (dry runs) every id needs one.
+   */
+  needsDetail?: (externalIds: string[]) => Promise<Set<string>>;
 }
 
 export interface Adapter {
