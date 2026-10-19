@@ -32,7 +32,37 @@ export interface FetcherOptions {
   maxRetries?: number;
   maxConsecutiveFailures?: number;
   extraDisallow?: RegExp[];
+  /** only these hosts (and their subdomains) may be fetched; undefined means any public host */
+  allowedHosts?: string[];
+  maxBodyBytes?: number;
   log?: (msg: string) => void;
+}
+
+/** Shop host without a leading www., so www and apex variants are both in scope. */
+export function scopeHost(baseUrl: string): string {
+  return new URL(baseUrl).hostname.replace(/^www\./, '');
+}
+
+const PRIVATE_HOST =
+  /^(localhost|.*\.local|.*\.internal|127\.|10\.|192\.168\.|169\.254\.|172\.(1[6-9]|2\d|3[01])\.|0\.|\[::1\]|\[f[cd][0-9a-f]{2}:|\[fe80:)/i;
+
+export class OutOfScopeError extends Error {
+  constructor(public url: string) {
+    super(`refusing to fetch out-of-scope URL ${url}`);
+  }
+}
+
+function compilePatterns(list: unknown, log: (m: string) => void): RegExp[] {
+  if (!Array.isArray(list)) return [];
+  const out: RegExp[] = [];
+  for (const s of list) {
+    try {
+      out.push(new RegExp(String(s)));
+    } catch {
+      log(`ignoring invalid extra_disallow pattern ${String(s)}`);
+    }
+  }
+  return out;
 }
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
@@ -51,6 +81,8 @@ export class ShopFetcher {
   private maxRetries: number;
   private maxConsecutiveFailures: number;
   private extraDisallow: RegExp[];
+  private allowedHosts?: string[];
+  private maxBodyBytes: number;
   private log: (msg: string) => void;
   private robots = new Map<string, Promise<RobotsRules>>();
   private queue: Promise<unknown> = Promise.resolve();
@@ -69,23 +101,42 @@ export class ShopFetcher {
     this.maxRetries = opts.maxRetries ?? 3;
     this.maxConsecutiveFailures = opts.maxConsecutiveFailures ?? 6;
     this.extraDisallow = opts.extraDisallow ?? [];
+    this.allowedHosts = opts.allowedHosts?.map((h) => h.toLowerCase());
+    this.maxBodyBytes = opts.maxBodyBytes ?? 30 * 1024 * 1024;
     this.log = opts.log ?? (() => {});
   }
 
-  static fromConfig(cfg: ShopConfig, userAgent: string, log?: (m: string) => void): ShopFetcher {
+  static fromConfig(cfg: ShopConfig, userAgent: string, baseUrl: string, log?: (m: string) => void): ShopFetcher {
+    const extraHosts = Array.isArray(cfg.extra_hosts) ? (cfg.extra_hosts as string[]) : [];
     return new ShopFetcher({
+      allowedHosts: [scopeHost(baseUrl), ...extraHosts],
       userAgent,
       minDelayMs: cfg.min_delay_ms,
       maxDelayMs: cfg.max_delay_ms,
       timeoutMs: cfg.timeout_ms,
       maxConsecutiveFailures: cfg.max_consecutive_failures,
-      extraDisallow: (cfg.extra_disallow ?? []).map((s) => new RegExp(s)),
+      extraDisallow: compilePatterns(cfg.extra_disallow, log ?? (() => {})),
       log,
     });
   }
 
   get isAborted() {
     return this.aborted;
+  }
+
+  /** http(s) only, public hosts only, and (for shop fetchers) only the shop's own hosts. */
+  inScope(url: string): boolean {
+    let u: URL;
+    try {
+      u = new URL(url);
+    } catch {
+      return false;
+    }
+    if (u.protocol !== 'https:' && u.protocol !== 'http:') return false;
+    const host = u.hostname.toLowerCase();
+    if (PRIVATE_HOST.test(host)) return false;
+    if (!this.allowedHosts) return true;
+    return this.allowedHosts.some((h) => host === h || host.endsWith(`.${h}`));
   }
 
   /** robots.txt for the origin of url, fetched once per fetcher (i.e. once per run). */
@@ -161,6 +212,7 @@ export class ShopFetcher {
   ): Promise<FetchResult> {
     if (this.aborted) throw new ShopAbortError('shop run already abandoned after repeated failures');
     let url = startUrl;
+    if (!this.inScope(url)) throw new OutOfScopeError(url);
     if (!(await this.isAllowed(url))) {
       this.stats.disallowed++;
       if (this.disallowedUrls.length < 50) this.disallowedUrls.push(url);
@@ -234,6 +286,7 @@ export class ShopFetcher {
       if (res.status >= 300 && res.status < 400 && res.headers.get('location')) {
         await res.body?.cancel();
         const next = new URL(res.headers.get('location')!, url).toString();
+        if (!this.inScope(next)) throw new OutOfScopeError(next);
         if (!(await this.isAllowed(next))) {
           this.stats.disallowed++;
           throw new DisallowedError(next);
@@ -241,7 +294,7 @@ export class ShopFetcher {
         url = next;
         continue;
       }
-      const body = Buffer.from(await res.arrayBuffer());
+      const body = await readCapped(res, this.maxBodyBytes);
       return {
         url,
         status: res.status,
@@ -255,6 +308,23 @@ export class ShopFetcher {
   }
 }
 
+async function readCapped(res: Response, max: number): Promise<Buffer> {
+  const declared = Number(res.headers.get('content-length') ?? 0);
+  if (declared > max) {
+    await res.body?.cancel();
+    throw new Error(`response too large (${declared} bytes)`);
+  }
+  if (!res.body) return Buffer.alloc(0);
+  const chunks: Buffer[] = [];
+  let size = 0;
+  for await (const chunk of res.body) {
+    size += chunk.length;
+    if (size > max) throw new Error(`response larger than ${max} bytes`);
+    chunks.push(Buffer.from(chunk));
+  }
+  return Buffer.concat(chunks);
+}
+
 /** Some shops pad JSON responses with HTML (The Model Shop): drop anything before the first [ or {. */
 export function parseJsonLenient(text: string): unknown {
   try {
@@ -263,7 +333,8 @@ export function parseJsonLenient(text: string): unknown {
     const i = text.search(/[\[{]/);
     if (i < 0) throw new Error('response contains no JSON');
     // try every [ or { from the first one onwards until one parses (HTML can contain braces too)
-    for (let pos = i; pos >= 0 && pos < text.length; ) {
+    // bounded: try at most 50 candidate start positions
+    for (let pos = i, tries = 0; pos >= 0 && pos < text.length && tries < 50; tries++) {
       try {
         return JSON.parse(text.slice(pos));
       } catch {

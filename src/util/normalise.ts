@@ -51,12 +51,16 @@ export function cleanGtin(v: unknown): string | null {
   return isValidGtin(s) ? s : null;
 }
 
+function codePoint(cp: number, raw: string): string {
+  return Number.isInteger(cp) && cp >= 0 && cp <= 0x10ffff ? String.fromCodePoint(cp) : raw;
+}
+
 /** Decodes the HTML entities WordPress leaves in product names. */
 export function decodeEntities(s: string | null | undefined): string | null {
   if (s === null || s === undefined) return null;
   return s
-    .replace(/&#(\d+);/g, (_, n) => String.fromCodePoint(Number(n)))
-    .replace(/&#x([0-9a-f]+);/gi, (_, n) => String.fromCodePoint(parseInt(n, 16)))
+    .replace(/&#(\d+);/g, (m, n) => codePoint(Number(n), m))
+    .replace(/&#x([0-9a-f]+);/gi, (m, n) => codePoint(parseInt(n, 16), m))
     .replace(/&amp;/g, '&')
     .replace(/&quot;/g, '"')
     .replace(/&apos;|&#039;/g, "'")

@@ -49,7 +49,7 @@ export interface RunOptions {
 
 export function makeContext(shop: Shop, opts: { limit?: number; log?: (m: string) => void }, errors: string[]): CrawlContext {
   const log = opts.log ?? ((m: string) => console.log(`[${shop.slug}] ${m}`));
-  const fetcher = ShopFetcher.fromConfig(shop.config, userAgent(), log);
+  const fetcher = ShopFetcher.fromConfig(shop.config, userAgent(), shop.base_url, log);
   return {
     shop,
     fetcher,
