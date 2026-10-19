@@ -192,11 +192,11 @@
       "category": "toys",
       "adapter": "woo",
       "tier": "P1",
-      "active": true,
+      "active": false,
       "config": {
         "page_size": 100
       },
-      "notes": "Store API responses padded with HTML."
+      "notes": "Store API responses padded with HTML. Inactive: Cloudflare bot challenge (403) to our scraper; re-enable if the shop allowlists our user agent."
     },
     {
       "slug": "soundvision",

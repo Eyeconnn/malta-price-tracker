@@ -21,6 +21,10 @@ async function main() {
   const missing = rows.filter((r) => r.status === null);
   const total = rows.reduce((a, r) => a + (r.products_seen ?? 0), 0);
   const [{ products }] = await db()<{ products: number }[]>`select count(*)::int as products from products`;
+  const [{ bytes }] = await db()<{ bytes: string }[]>`select pg_database_size(current_database())::text as bytes`;
+  const mb = Math.round(Number(bytes) / 1e6);
+  // Neon free plan storage is 0.5 GB: warn well before it fills
+  const storage = `Database size: ${mb} MB${mb > 400 ? '  WARNING: close to the 0.5 GB Neon free plan limit, upgrade before it fills' : ''}.`;
   const lines = rows.map(
     (r) =>
       `${(r.status ?? 'NO RUN').padEnd(8)} ${r.slug.padEnd(14)} ${String(r.products_seen ?? '').padStart(7)} products` +
@@ -28,10 +32,11 @@ async function main() {
   );
   const subject =
     `[price tracker] daily: ${count('ok')} ok, ${count('partial')} partial, ${count('failed')} failed` +
-    `${missing.length ? `, ${missing.length} missing` : ''}, ${total.toLocaleString('en')} prices`;
+    `${missing.length ? `, ${missing.length} missing` : ''}, ${total.toLocaleString('en')} prices${mb > 400 ? ', DB nearly full' : ''}`;
   const text = [
     `Shops: ${count('ok')} ok, ${count('partial')} partial, ${count('failed')} failed, ${missing.length} with no run in the last 26 hours.`,
     `Prices recorded in the latest runs: ${total.toLocaleString('en')}. Products in the database: ${products.toLocaleString('en')}.`,
+    storage,
     '',
     ...lines,
   ].join('\n');

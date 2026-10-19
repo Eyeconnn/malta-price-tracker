@@ -1,4 +1,4 @@
-# Adaptive re-checks: re-reads products whose next_check_at has passed.
+# Adaptive re-checks: re-reads warm and hot products whose next_check_at has passed.
 # Disabled until switched on: set the repository variable SCRAPE_DUE_ENABLED to true (planned for 1 Nov).
 # Manual runs always work.
 name: scrape-due
@@ -12,28 +12,35 @@ concurrency:
   group: scrape-due
   cancel-in-progress: false
 
+permissions:
+  contents: read
+
 jobs:
   due:
     if: ${{ vars.SCRAPE_DUE_ENABLED == 'true' || github.event_name == 'workflow_dispatch' }}
     runs-on: ubuntu-latest
     timeout-minutes: 55
-    env:
-      DATABASE_URL: ${{ secrets.DATABASE_URL }}
-      R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
-      R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
-      R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
-      R2_BUCKET: ${{ secrets.R2_BUCKET }}
-      RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}
-      ALERT_EMAIL: ${{ secrets.ALERT_EMAIL }}
-      ALERT_FROM: ${{ vars.ALERT_FROM }}
-      SCRAPER_USER_AGENT: ${{ vars.SCRAPER_USER_AGENT }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: pnpm/action-setup@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: 22
           cache: pnpm
       - run: pnpm install --frozen-lockfile
-      - run: pnpm migrate
-      - run: pnpm scrape-due
+      - name: Migrate
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+        run: pnpm migrate
+      - name: Re-check due products
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
+          R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          R2_BUCKET: ${{ secrets.R2_BUCKET }}
+          RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}
+          ALERT_EMAIL: ${{ secrets.ALERT_EMAIL }}
+          ALERT_FROM: ${{ vars.ALERT_FROM }}
+          SCRAPER_USER_AGENT: ${{ vars.SCRAPER_USER_AGENT }}
+        run: pnpm scrape-due
