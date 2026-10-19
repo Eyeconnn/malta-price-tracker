@@ -30,7 +30,7 @@ pnpm scrape --shop klikk --limit 20 --dry-run
 | `R2_ACCOUNT_ID`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`, `R2_BUCKET` | Cloudflare R2 bucket for images and HTML snapshots. Without them, images are skipped. |
 | `RESEND_API_KEY`, `ALERT_EMAIL` | Alert and summary emails. Without them, emails are printed to the console. `ALERT_EMAIL` may hold several comma separated addresses. |
 | `ALERT_FROM` | Optional sender on a domain verified in Resend (default `onboarding@resend.dev`, which only delivers to the Resend account owner). |
-| `SCRAPER_USER_AGENT` | Sent on every request, e.g. `MaltaPriceTracker/1.0 (+https://example.com/bot)`. The first word (before `/`) is the token matched against robots.txt groups. |
+| `SCRAPER_USER_AGENT` | Sent on every request, as `Token/version (short description)`. The token (before `/`, or after `compatible;`) is matched against robots.txt groups. Keep the real value in `.env` and the GitHub variable only. Tested 20 Oct: UAs starting `Mozilla/5.0 (compatible; ...)` or containing `example.com` get 403 from AtoZ, Digital Zone and Sound & Vision. |
 
 In GitHub Actions the secrets are repository secrets with the same names; `SCRAPER_USER_AGENT`,
 `ALERT_FROM` and `SCRAPE_DUE_ENABLED` are repository variables.

@@ -17,5 +17,5 @@ export function optionalEnv(name: string): string | undefined {
 }
 
 export function userAgent(): string {
-  return optionalEnv('SCRAPER_USER_AGENT') ?? 'MaltaPriceTracker/0.1 (contact URL not configured)';
+  return optionalEnv('SCRAPER_USER_AGENT')?.trim() ?? 'PriceIndexBot/0.1 (price index crawler)';
 }

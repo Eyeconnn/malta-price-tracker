@@ -18,7 +18,9 @@ export interface RobotsRules {
 
 /** Product token used for robots.txt group matching, e.g. "MaltaPriceTracker/0.1 (...)" gives "maltapricetracker". */
 export function productToken(ua: string): string {
-  return ua.split(/[\/\s]/)[0]!.toLowerCase();
+  // "Mozilla/5.0 (compatible; MTPIndex/1.0)" gives "mtpindex"; "Foo/1.0 (...)" gives "foo"
+  const compatible = /compatible;\s*([^\/;\s)]+)/i.exec(ua);
+  return (compatible ? compatible[1]! : ua.split(/[\/\s]/)[0]!).toLowerCase();
 }
 
 /**

@@ -3,7 +3,7 @@ import { isPrivateAddress } from '../src/http/safeNet.js';
 import { parseJsonLenient } from '../src/http/fetcher.js';
 import { applyIdentifierRules, blankRecord, cleanGtin, decodeEntities, minorToCents, toCents } from '../src/util/normalise.js';
 import { reviewFlag } from '../src/pipeline/store.js';
-import { parseRobots } from '../src/http/robots.js';
+import { parseRobots, productToken } from '../src/http/robots.js';
 
 describe('isPrivateAddress', () => {
   it.each(['127.0.0.1', '10.1.2.3', '172.16.0.1', '192.168.1.1', '169.254.169.254', '100.64.0.1', '0.0.0.0',
@@ -47,6 +47,13 @@ describe('identifiers', () => {
   it('decodes entities safely', () => {
     expect(decodeEntities('T&#8217;nB &amp; Co')).toBe('T’nB & Co');
     expect(decodeEntities('bad &#99999999; ok')).toBe('bad &#99999999; ok');
+  });
+});
+
+describe('productToken', () => {
+  it('reads the compatible token', () => {
+    expect(productToken('Mozilla/5.0 (compatible; MTPIndex/1.0)')).toBe('mtpindex');
+    expect(productToken('Foo/1.0 (+x)')).toBe('foo');
   });
 });
 
