@@ -43,4 +43,4 @@ jobs:
           ALERT_EMAIL: ${{ secrets.ALERT_EMAIL }}
           ALERT_FROM: ${{ vars.ALERT_FROM }}
           SCRAPER_USER_AGENT: ${{ vars.SCRAPER_USER_AGENT }}
-        run: pnpm scrape-due
+        run: pnpm scrape-due --runner cloud

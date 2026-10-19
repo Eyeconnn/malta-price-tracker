@@ -51,7 +51,7 @@ jobs:
           SHOP_INPUT: ${{ inputs.shop }}
           LIMIT_INPUT: ${{ inputs.limit }}
         run: |
-          ARGS="--adapter woo"
+          ARGS="--adapter woo --runner cloud"
           if [ -n "$SHOP_INPUT" ]; then ARGS="--shop $SHOP_INPUT"; fi
           if [ -n "$LIMIT_INPUT" ]; then ARGS="$ARGS --limit $LIMIT_INPUT"; fi
           pnpm scrape $ARGS

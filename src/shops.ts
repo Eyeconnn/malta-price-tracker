@@ -6,6 +6,8 @@ export interface ShopFilter {
   shop?: string;
   adapter?: AdapterName;
   tier?: string;
+  /** 'cloud' (GitHub Actions) or 'local'; shops default to cloud */
+  runner?: string;
   includeInactive?: boolean;
 }
 
@@ -22,6 +24,7 @@ function matches(s: Omit<Shop, 'id'>, f: ShopFilter): boolean {
   if (f.shop && s.slug !== f.shop) return false;
   if (f.adapter && s.adapter !== f.adapter) return false;
   if (f.tier && s.tier !== f.tier) return false;
+  if (f.runner && (String(s.config?.runner ?? 'cloud')) !== f.runner) return false;
   // a shop named explicitly runs even when inactive (manual testing)
   if (!f.shop && !f.includeInactive && !s.active) return false;
   return true;

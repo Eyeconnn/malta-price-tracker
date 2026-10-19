@@ -20,9 +20,10 @@
         "page_size": 25,
         "timeout_ms": 120000,
         "adaptive_page_size": true,
-        "sku_is_gtin": true
+        "sku_is_gtin": true,
+        "runner": "local"
       },
-      "notes": "~5,250 products; very slow server. SKUs often real UPC/EAN barcodes."
+      "notes": "~5,250 products; very slow server. SKUs often real UPC/EAN barcodes. Refuses GitHub Actions (datacenter) IPs with 202/403 (tested 20 Oct): runs from the local machine."
     },
     {
       "slug": "digitalzone",
@@ -34,9 +35,10 @@
       "active": true,
       "config": {
         "page_size": 100,
-        "mpn_from_sku": "^[A-Z]{2,4}-[A-Z0-9]{1,5}-([A-Z0-9][A-Z0-9.-/]{3,})$"
+        "mpn_from_sku": "^[A-Z]{2,4}-[A-Z0-9]{1,5}-([A-Z0-9][A-Z0-9.-/]{3,})$",
+        "runner": "local"
       },
-      "notes": "~1,480 products. House SKUs embed part numbers."
+      "notes": "~1,480 products. House SKUs embed part numbers. Refuses GitHub Actions (datacenter) IPs with 202/403 (tested 20 Oct): runs from the local machine."
     },
     {
       "slug": "scan",
@@ -52,9 +54,10 @@
           "[?&]q="
         ],
         "min_delay_ms": 2500,
-        "max_delay_ms": 5000
+        "max_delay_ms": 5000,
+        "runner": "local"
       },
-      "notes": "~3,000 products. GraphQL errors, no sitemap: category crawl only."
+      "notes": "~3,000 products. GraphQL errors, no sitemap: category crawl only. Refuses GitHub Actions (datacenter) IPs with 202/403 (tested 20 Oct): runs from the local machine."
     },
     {
       "slug": "intercomp",
@@ -207,9 +210,10 @@
       "tier": "P1",
       "active": true,
       "config": {
-        "page_size": 100
+        "page_size": 100,
+        "runner": "local"
       },
-      "notes": null
+      "notes": "Refuses GitHub Actions (datacenter) IPs with 202/403 (tested 20 Oct): runs from the local machine."
     },
     {
       "slug": "gamestore",
@@ -247,9 +251,10 @@
         "page_size": 100,
         "min_delay_ms": 10000,
         "max_delay_ms": 12000,
-        "max_requests_per_hour": 300
+        "max_requests_per_hour": 300,
+        "runner": "local"
       },
-      "notes": "Crawl-delay 10 s. ~41,500 products."
+      "notes": "Crawl-delay 10 s. ~41,500 products. Refuses GitHub Actions (datacenter) IPs with 202/403 (tested 20 Oct): runs from the local machine."
     },
     {
       "slug": "juniors",
@@ -260,9 +265,10 @@
       "tier": "P1",
       "active": true,
       "config": {
-        "page_size": 100
+        "page_size": 100,
+        "runner": "local"
       },
-      "notes": "robots.txt blocks ?type= so variations cannot be listed."
+      "notes": "robots.txt blocks ?type= so variations cannot be listed. Refuses GitHub Actions (datacenter) IPs with 202/403 (tested 20 Oct): runs from the local machine."
     },
     {
       "slug": "eurosport",

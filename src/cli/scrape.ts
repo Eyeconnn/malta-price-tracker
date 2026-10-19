@@ -13,6 +13,7 @@ const { values } = parseArgs({
     shop: { type: 'string' },
     adapter: { type: 'string' },
     tier: { type: 'string' },
+    runner: { type: 'string' },
     limit: { type: 'string' },
     'dry-run': { type: 'boolean', default: false },
     concurrency: { type: 'string', default: '12' },
@@ -57,12 +58,12 @@ function printSample(r: RunResult) {
 
 async function main() {
   const dryRun = values['dry-run'];
-  if (!values.shop && !values.adapter && !values.tier) {
-    throw new Error('choose shops with --shop <slug>, --adapter <name> or --tier <P1|P2|P3>');
+  if (!values.shop && !values.adapter && !values.tier && !values.runner) {
+    throw new Error('choose shops with --shop <slug>, --adapter <name>, --tier <P1|P2|P3> or --runner <cloud|local>');
   }
   const noDb = dryRun && !optionalEnv('DATABASE_URL');
   const shops: Shop[] = await loadShops(
-    { shop: values.shop, adapter: values.adapter as AdapterName | undefined, tier: values.tier },
+    { shop: values.shop, adapter: values.adapter as AdapterName | undefined, tier: values.tier, runner: values.runner },
     noDb,
   );
   if (!shops.length) {

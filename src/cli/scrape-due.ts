@@ -11,6 +11,7 @@ import type { RunResult } from '../pipeline/runShop.js';
 const { values } = parseArgs({
   options: {
     shop: { type: 'string' },
+    runner: { type: 'string' },
     minutes: { type: 'string', default: '50' },
     'dry-run': { type: 'boolean', default: false },
   },
@@ -18,7 +19,7 @@ const { values } = parseArgs({
 
 async function main() {
   await closeStaleRuns();
-  const shops = (await loadShops({ shop: values.shop })).filter((s) => ['shopify', 'woo', 'magento', 'html'].includes(s.adapter));
+  const shops = (await loadShops({ shop: values.shop, runner: values.runner })).filter((s) => ['shopify', 'woo', 'magento', 'html'].includes(s.adapter));
   const results: RunResult[] = [];
   await Promise.all(
     shops.map(async (shop) => {
