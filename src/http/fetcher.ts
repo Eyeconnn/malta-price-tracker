@@ -1,3 +1,5 @@
+import { lookup } from 'node:dns/promises';
+import { isIP } from 'node:net';
 import { parseRobots, type RobotsRules } from './robots.js';
 import type { ShopConfig } from '../types.js';
 
@@ -45,6 +47,35 @@ export function scopeHost(baseUrl: string): string {
 
 const PRIVATE_HOST =
   /^(localhost|.*\.local|.*\.internal|127\.|10\.|192\.168\.|169\.254\.|172\.(1[6-9]|2\d|3[01])\.|0\.|\[::1\]|\[f[cd][0-9a-f]{2}:|\[fe80:)/i;
+
+/** True for loopback, RFC1918, link-local, CGNAT, unspecified and IPv6 ULA/link-local addresses (incl. IPv4-mapped). */
+export function isPrivateAddress(ip: string): boolean {
+  const v4 = ip.startsWith('::ffff:') ? ip.slice(7) : ip;
+  if (isIP(v4) === 4) {
+    const [a, b] = v4.split('.').map(Number) as [number, number];
+    return a === 0 || a === 10 || a === 127 || (a === 169 && b === 254) || (a === 172 && b >= 16 && b <= 31) ||
+      (a === 192 && b === 168) || (a === 100 && b >= 64 && b <= 127) || a >= 224;
+  }
+  const v6 = ip.toLowerCase();
+  return v6 === '::' || v6 === '::1' || /^f[cd]/.test(v6) || /^fe[89ab]/.test(v6);
+}
+
+const resolved = new Map<string, Promise<boolean>>();
+
+/** Resolves a hostname and refuses it if any address is private. Cached per process. */
+async function hostIsPublic(host: string): Promise<boolean> {
+  const h = host.replace(/^\[|\]$/g, '');
+  if (isIP(h)) return !isPrivateAddress(h);
+  let p = resolved.get(h);
+  if (!p) {
+    p = lookup(h, { all: true }).then(
+      (addrs) => addrs.length > 0 && addrs.every((a) => !isPrivateAddress(a.address)),
+      () => true, // let fetch report the DNS failure itself
+    );
+    resolved.set(h, p);
+  }
+  return p;
+}
 
 export class OutOfScopeError extends Error {
   constructor(public url: string) {
@@ -212,7 +243,7 @@ export class ShopFetcher {
   ): Promise<FetchResult> {
     if (this.aborted) throw new ShopAbortError('shop run already abandoned after repeated failures');
     let url = startUrl;
-    if (!this.inScope(url)) throw new OutOfScopeError(url);
+    if (!this.inScope(url) || !(await hostIsPublic(new URL(url).hostname))) throw new OutOfScopeError(url);
     if (!(await this.isAllowed(url))) {
       this.stats.disallowed++;
       if (this.disallowedUrls.length < 50) this.disallowedUrls.push(url);
@@ -286,7 +317,7 @@ export class ShopFetcher {
       if (res.status >= 300 && res.status < 400 && res.headers.get('location')) {
         await res.body?.cancel();
         const next = new URL(res.headers.get('location')!, url).toString();
-        if (!this.inScope(next)) throw new OutOfScopeError(next);
+        if (!this.inScope(next) || !(await hostIsPublic(new URL(next).hostname))) throw new OutOfScopeError(next);
         if (!(await this.isAllowed(next))) {
           this.stats.disallowed++;
           throw new DisallowedError(next);

@@ -21,16 +21,21 @@ export async function dHash(buf: Buffer): Promise<string> {
 const EXT: Record<string, string> = { jpeg: 'jpg', png: 'png', webp: 'webp', gif: 'gif', avif: 'avif', svg: 'svg', tiff: 'tif' };
 const MIME: Record<string, string> = { jpg: 'image/jpeg', png: 'image/png', webp: 'image/webp', gif: 'image/gif', avif: 'image/avif', svg: 'image/svg+xml', tif: 'image/tiff' };
 
-// CDN hosts (cdn.shopify.com etc.) are shared by many shops: one fetcher per host for the whole process.
+// Image hosts outside a shop's own domain that we accept. Others need the shop config key image_hosts.
+const IMAGE_CDNS = ['cdn.shopify.com', 'i0.wp.com', 'i1.wp.com', 'i2.wp.com', 'cloudfront.net', 'cloudinary.com', 'imgix.net', 'wixstatic.com'];
+
+// CDN hosts are shared by many shops: one fetcher per host for the whole process.
 const cdnFetchers = new Map<string, ShopFetcher>();
 
 function fetcherFor(url: string, shop: Shop, shopFetcher: ShopFetcher): ShopFetcher {
   const host = new URL(url).hostname;
   const scope = scopeHost(shop.base_url);
   if (host === scope || host.endsWith(`.${scope}`)) return shopFetcher;
+  const allowed = [...IMAGE_CDNS, ...((shop.config.image_hosts as string[] | undefined) ?? [])];
+  if (!allowed.some((h) => host === h || host.endsWith(`.${h}`))) throw new Error(`image host ${host} not in the allowlist`);
   let f = cdnFetchers.get(host);
   if (!f) {
-    f = new ShopFetcher({ userAgent: userAgent(), minDelayMs: 300, maxDelayMs: 800, maxBodyBytes: 15 * 1024 * 1024 });
+    f = new ShopFetcher({ userAgent: userAgent(), allowedHosts: [host], minDelayMs: 300, maxDelayMs: 800, maxBodyBytes: 15 * 1024 * 1024 });
     cdnFetchers.set(host, f);
   }
   return f;
