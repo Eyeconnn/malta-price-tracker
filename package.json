@@ -1,0 +1,36 @@
+{
+  "name": "malta-price-tracker",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Daily price logging for Maltese web shops, to test Black Friday discounts against the EU 30-day lowest price rule.",
+  "engines": {
+    "node": ">=22"
+  },
+  "packageManager": "pnpm@11.20.0",
+  "scripts": {
+    "migrate": "tsx src/cli/migrate.ts",
+    "seed": "tsx src/cli/seed.ts",
+    "scrape": "tsx src/cli/scrape.ts",
+    "scrape-due": "tsx src/cli/scrape-due.ts",
+    "summary": "tsx src/cli/summary.ts",
+    "snapshot": "tsx src/cli/snapshot.ts",
+    "probe": "tsx src/cli/probe.ts",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@aws-sdk/client-s3": "^3.1152.0",
+    "cheerio": "^1.2.0",
+    "postgres": "^3.4.9",
+    "robots-parser": "^3.0.1",
+    "sharp": "^0.35.5",
+    "zod": "^4.6.7"
+  },
+  "devDependencies": {
+    "@types/node": "^22.20.5",
+    "tsx": "^4.23.15",
+    "typescript": "^7.0.2",
+    "vitest": "^5.0.5"
+  }
+}

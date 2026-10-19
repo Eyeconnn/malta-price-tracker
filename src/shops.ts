@@ -1,0 +1,38 @@
+import { readFile } from 'node:fs/promises';
+import { db } from './db.js';
+import type { AdapterName, Shop } from './types.js';
+
+export interface ShopFilter {
+  shop?: string;
+  adapter?: AdapterName;
+  tier?: string;
+  includeInactive?: boolean;
+}
+
+export interface SeedFile {
+  do_not_scrape: string[];
+  shops: (Omit<Shop, 'id'> & { notes?: string | null })[];
+}
+
+export async function readSeed(): Promise<SeedFile> {
+  return JSON.parse(await readFile('shops.seed.json', 'utf8')) as SeedFile;
+}
+
+function matches(s: Omit<Shop, 'id'>, f: ShopFilter): boolean {
+  if (f.shop && s.slug !== f.shop) return false;
+  if (f.adapter && s.adapter !== f.adapter) return false;
+  if (f.tier && s.tier !== f.tier) return false;
+  // a shop named explicitly runs even when inactive (manual testing)
+  if (!f.shop && !f.includeInactive && !s.active) return false;
+  return true;
+}
+
+/** Shops from the database, or from shops.seed.json when there is no database (dry runs). */
+export async function loadShops(f: ShopFilter, fromSeed = false): Promise<Shop[]> {
+  if (fromSeed) {
+    const seed = await readSeed();
+    return seed.shops.filter((s) => matches(s, f)).map((s, i) => ({ ...s, id: -(i + 1), config: s.config ?? {} }));
+  }
+  const rows = await db()<Shop[]>`select id, slug, name, base_url, category, adapter, config, tier, active from shops order by slug`;
+  return rows.filter((s) => matches(s, f));
+}

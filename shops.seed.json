@@ -1,0 +1,771 @@
+{
+  "_comment": "Seeded into the shops table by pnpm seed (upsert on slug). config keys: see README.",
+  "do_not_scrape": [
+    "Sports Direct Malta",
+    "Intersport",
+    "Lava.mt",
+    "Forestals",
+    "Celletronic"
+  ],
+  "shops": [
+    {
+      "slug": "atoz",
+      "name": "AtoZ Electronics",
+      "base_url": "https://atoz.com.mt",
+      "category": "electronics",
+      "adapter": "woo",
+      "tier": "P1",
+      "active": true,
+      "config": {
+        "page_size": 25,
+        "timeout_ms": 120000,
+        "adaptive_page_size": true,
+        "sku_is_gtin": true
+      },
+      "notes": "~5,250 products; very slow server. SKUs often real UPC/EAN barcodes."
+    },
+    {
+      "slug": "digitalzone",
+      "name": "Digital Zone",
+      "base_url": "https://digitalzone.com.mt",
+      "category": "electronics",
+      "adapter": "woo",
+      "tier": "P1",
+      "active": true,
+      "config": {
+        "page_size": 100,
+        "mpn_from_sku": "^[A-Z]{2,4}-[A-Z0-9]{1,5}-([A-Z0-9][A-Z0-9.-/]{3,})$"
+      },
+      "notes": "~1,480 products. House SKUs embed part numbers."
+    },
+    {
+      "slug": "scan",
+      "name": "Scan",
+      "base_url": "https://www.scanmalta.com/shop",
+      "category": "electronics",
+      "adapter": "magento",
+      "tier": "P1",
+      "active": true,
+      "config": {
+        "extra_disallow": [
+          "/catalogsearch",
+          "[?&]q="
+        ],
+        "min_delay_ms": 2500,
+        "max_delay_ms": 5000
+      },
+      "notes": "~3,000 products. GraphQL errors, no sitemap: category crawl only."
+    },
+    {
+      "slug": "intercomp",
+      "name": "Intercomp",
+      "base_url": "https://www.intercomp.com.mt",
+      "category": "electronics",
+      "adapter": "magento",
+      "tier": "P1",
+      "active": true,
+      "config": {
+        "extra_disallow": [
+          "/catalogsearch",
+          "/rest/"
+        ]
+      },
+      "notes": "Platform signals conflict. robots.txt Crawl-delay 5."
+    },
+    {
+      "slug": "klikk",
+      "name": "Klikk",
+      "base_url": "https://www.klikk.com.mt",
+      "category": "electronics",
+      "adapter": "shopify",
+      "tier": "P1",
+      "active": true,
+      "config": {},
+      "notes": null
+    },
+    {
+      "slug": "telecom",
+      "name": "Telecom Electronics",
+      "base_url": "https://www.telecom.com.mt",
+      "category": "electronics",
+      "adapter": "html",
+      "tier": "P1",
+      "active": true,
+      "config": {},
+      "notes": "Custom webshop."
+    },
+    {
+      "slug": "decathlon",
+      "name": "Decathlon Malta",
+      "base_url": "https://www.decathlon.mt",
+      "category": "sports",
+      "adapter": "html",
+      "tier": "P1",
+      "active": true,
+      "config": {
+        "min_delay_ms": 3000,
+        "max_delay_ms": 6000
+      },
+      "notes": "Likely PrestaShop. Parses the EU 30-day lowest price line. Filtered query-string URLs are robots-blocked."
+    },
+    {
+      "slug": "retail",
+      "name": "Retail International",
+      "base_url": "https://retail.com.mt",
+      "category": "fashion",
+      "adapter": "shopify",
+      "tier": "P1",
+      "active": true,
+      "config": {},
+      "notes": "M&S, LC Waikiki, ALDO, GEOX, Punt Roma."
+    },
+    {
+      "slug": "perfandco",
+      "name": "Perf and Co",
+      "base_url": "https://perfandco.com",
+      "category": "beauty",
+      "adapter": "shopify",
+      "tier": "P1",
+      "active": true,
+      "config": {},
+      "notes": null
+    },
+    {
+      "slug": "farsons",
+      "name": "Farsons Direct",
+      "base_url": "https://farsonsdirect.com",
+      "category": "drinks",
+      "adapter": "shopify",
+      "tier": "P1",
+      "active": true,
+      "config": {},
+      "notes": "Keep tags (some products tagged Black Friday 30%)."
+    },
+    {
+      "slug": "toymagic",
+      "name": "Toymagic",
+      "base_url": "https://toymagic.com.mt",
+      "category": "toys",
+      "adapter": "shopify",
+      "tier": "P1",
+      "active": true,
+      "config": {},
+      "notes": null
+    },
+    {
+      "slug": "toytastic",
+      "name": "Toytastic Malta",
+      "base_url": "https://toytasticmalta.com",
+      "category": "toys",
+      "adapter": "shopify",
+      "tier": "P1",
+      "active": true,
+      "config": {},
+      "notes": "Leaves SKUs blank."
+    },
+    {
+      "slug": "swanky",
+      "name": "Swanky Boutique",
+      "base_url": "https://swankyboutique.com",
+      "category": "fashion",
+      "adapter": "shopify",
+      "tier": "P1",
+      "active": true,
+      "config": {},
+      "notes": "Keep tags (e.g. NOTINCBF25)."
+    },
+    {
+      "slug": "toysmalta",
+      "name": "Toysmalta",
+      "base_url": "https://toysmalta.com",
+      "category": "toys",
+      "adapter": "shopify",
+      "tier": "P1",
+      "active": true,
+      "config": {},
+      "notes": null
+    },
+    {
+      "slug": "modelshop",
+      "name": "The Model Shop",
+      "base_url": "https://modelshop.com.mt",
+      "category": "toys",
+      "adapter": "woo",
+      "tier": "P1",
+      "active": true,
+      "config": {
+        "page_size": 100
+      },
+      "notes": "Store API responses padded with HTML."
+    },
+    {
+      "slug": "soundvision",
+      "name": "Sound & Vision",
+      "base_url": "https://soundandvision.com.mt",
+      "category": "electronics",
+      "adapter": "woo",
+      "tier": "P1",
+      "active": true,
+      "config": {
+        "page_size": 100
+      },
+      "notes": null
+    },
+    {
+      "slug": "gamestore",
+      "name": "Gamestore Malta",
+      "base_url": "https://gamestore.mt",
+      "category": "gaming",
+      "adapter": "shopify",
+      "tier": "P1",
+      "active": true,
+      "config": {},
+      "notes": null
+    },
+    {
+      "slug": "gamesplus",
+      "name": "GamesPlus Malta",
+      "base_url": "https://gamesplusmalta.com",
+      "category": "gaming",
+      "adapter": "woo",
+      "tier": "P1",
+      "active": true,
+      "config": {
+        "page_size": 100
+      },
+      "notes": "~16,700 products."
+    },
+    {
+      "slug": "gamebreaker",
+      "name": "Gamebreaker Malta",
+      "base_url": "https://gamebreakermalta.com",
+      "category": "gaming",
+      "adapter": "woo",
+      "tier": "P1",
+      "active": true,
+      "config": {
+        "page_size": 100,
+        "min_delay_ms": 10000,
+        "max_delay_ms": 12000,
+        "max_requests_per_hour": 300
+      },
+      "notes": "Crawl-delay 10 s. ~41,500 products."
+    },
+    {
+      "slug": "juniors",
+      "name": "Junior's",
+      "base_url": "https://juniors.com.mt",
+      "category": "toys",
+      "adapter": "woo",
+      "tier": "P1",
+      "active": true,
+      "config": {
+        "page_size": 100
+      },
+      "notes": "robots.txt blocks ?type= so variations cannot be listed."
+    },
+    {
+      "slug": "eurosport",
+      "name": "Eurosport",
+      "base_url": "https://www.eurosport.com.mt",
+      "category": "sports",
+      "adapter": "html",
+      "tier": "P1",
+      "active": true,
+      "config": {},
+      "notes": "nopCommerce; old and new prices in HTML."
+    },
+    {
+      "slug": "okfashion",
+      "name": "OK Fashion",
+      "base_url": "https://www.okfashion.com.mt",
+      "category": "fashion",
+      "adapter": "shopify",
+      "tier": "P1",
+      "active": true,
+      "config": {},
+      "notes": "Swarovski, Furla, DKNY, Birkenstock and more."
+    },
+    {
+      "slug": "travellers",
+      "name": "Travellers",
+      "base_url": "https://travellersmalta.com",
+      "category": "travel",
+      "adapter": "shopify",
+      "tier": "P1",
+      "active": true,
+      "config": {},
+      "notes": null
+    },
+    {
+      "slug": "mvintage",
+      "name": "Mvintage",
+      "base_url": "https://mvintage.com",
+      "category": "fashion",
+      "adapter": "shopify",
+      "tier": "P1",
+      "active": true,
+      "config": {},
+      "notes": null
+    },
+    {
+      "slug": "bodyshop",
+      "name": "The Body Shop Malta",
+      "base_url": "https://thebodyshop.mt",
+      "category": "beauty",
+      "adapter": "shopify",
+      "tier": "P1",
+      "active": true,
+      "config": {},
+      "notes": null
+    },
+    {
+      "slug": "calzedonia",
+      "name": "Calzedonia Malta",
+      "base_url": "https://calzedoniamalta.com",
+      "category": "fashion",
+      "adapter": "shopify",
+      "tier": "P1",
+      "active": true,
+      "config": {},
+      "notes": null
+    },
+    {
+      "slug": "tezenis",
+      "name": "Tezenis Malta",
+      "base_url": "https://tezenismalta.com",
+      "category": "fashion",
+      "adapter": "shopify",
+      "tier": "P1",
+      "active": true,
+      "config": {},
+      "notes": null
+    },
+    {
+      "slug": "samsonite",
+      "name": "Samsonite Malta",
+      "base_url": "https://www.samsonite.mt",
+      "category": "travel",
+      "adapter": "shopify",
+      "tier": "P1",
+      "active": true,
+      "config": {},
+      "notes": null
+    },
+    {
+      "slug": "atrium",
+      "name": "The Atrium",
+      "base_url": "https://www.theatrium.com.mt",
+      "category": "home",
+      "adapter": "headless",
+      "tier": "P1",
+      "active": false,
+      "config": {},
+      "notes": "ASP.NET postback pagination; needs Playwright (later session)."
+    },
+    {
+      "slug": "topchoice",
+      "name": "Top Choice",
+      "base_url": "https://www.topchoice.com.mt",
+      "category": "electronics",
+      "adapter": "woo",
+      "tier": "P2",
+      "active": false,
+      "config": {
+        "page_size": 100
+      },
+      "notes": "~2,400 products."
+    },
+    {
+      "slug": "oxfordhouse",
+      "name": "Oxford House",
+      "base_url": "https://oxfordhouse.com.mt",
+      "category": "home",
+      "adapter": "html",
+      "tier": "P2",
+      "active": false,
+      "config": {},
+      "notes": "WooCommerce theme but Store API returns 404 (rest_no_route); needs HTML selectors. Test before enabling."
+    },
+    {
+      "slug": "ultimate",
+      "name": "Ultimate",
+      "base_url": "https://www.ultimate.com.mt",
+      "category": "electronics",
+      "adapter": "woo",
+      "tier": "P2",
+      "active": false,
+      "config": {
+        "page_size": 100
+      },
+      "notes": "~1,300 products. Test before enabling."
+    },
+    {
+      "slug": "epic",
+      "name": "Epic",
+      "base_url": "https://www.epic.com.mt",
+      "category": "electronics",
+      "adapter": "woo",
+      "tier": "P2",
+      "active": false,
+      "config": {
+        "page_size": 100
+      },
+      "notes": "Small device catalogue (~64); prices may be instalment-adjusted."
+    },
+    {
+      "slug": "icentre",
+      "name": "iCentre",
+      "base_url": "https://www.icentre.com.mt",
+      "category": "electronics",
+      "adapter": "shopify",
+      "tier": "P2",
+      "active": false,
+      "config": {},
+      "notes": null
+    },
+    {
+      "slug": "sterling",
+      "name": "Sterling Jewellers",
+      "base_url": "https://www.sterling.com.mt",
+      "category": "jewellery",
+      "adapter": "shopify",
+      "tier": "P2",
+      "active": false,
+      "config": {},
+      "notes": null
+    },
+    {
+      "slug": "hudsonstore",
+      "name": "Hudsonstore",
+      "base_url": "https://hudsonstore.com",
+      "category": "fashion",
+      "adapter": "shopify",
+      "tier": "P2",
+      "active": false,
+      "config": {},
+      "notes": null
+    },
+    {
+      "slug": "spades",
+      "name": "Spades",
+      "base_url": "https://spades.com.mt",
+      "category": "drinks",
+      "adapter": "shopify",
+      "tier": "P2",
+      "active": false,
+      "config": {},
+      "notes": "Wines and spirits."
+    },
+    {
+      "slug": "welbees",
+      "name": "Welbee's",
+      "base_url": "https://welbees.mt",
+      "category": "baby",
+      "adapter": "html",
+      "tier": "P2",
+      "active": false,
+      "config": {},
+      "notes": "Custom PHP shop, no JSON-LD; categories under /shop/category/. No robots.txt."
+    },
+    {
+      "slug": "browns",
+      "name": "Brown's Pharmacy",
+      "base_url": "https://browns.pharmacy",
+      "category": "health",
+      "adapter": "woo",
+      "tier": "P2",
+      "active": false,
+      "config": {},
+      "notes": "Headless SvelteKit front end; Store API not on this host. Needs investigation before enabling."
+    },
+    {
+      "slug": "agenda",
+      "name": "Agenda Bookshop",
+      "base_url": "https://agendabookshop.com",
+      "category": "books",
+      "adapter": "shopify",
+      "tier": "P2",
+      "active": false,
+      "config": {},
+      "notes": null
+    },
+    {
+      "slug": "graciousbabies",
+      "name": "Gracious Babies",
+      "base_url": "https://graciousbabies.com",
+      "category": "baby",
+      "adapter": "shopify",
+      "tier": "P2",
+      "active": false,
+      "config": {},
+      "notes": null
+    },
+    {
+      "slug": "topspot",
+      "name": "Top Spot",
+      "base_url": "https://topspotmt.com",
+      "category": "toys",
+      "adapter": "shopify",
+      "tier": "P2",
+      "active": false,
+      "config": {},
+      "notes": "Domain found by DNS only; confirm it is the Maltese Top Spot."
+    },
+    {
+      "slug": "vanillamummy",
+      "name": "Vanilla Mummy",
+      "base_url": "https://vanillamummy.com",
+      "category": "baby",
+      "adapter": "shopify",
+      "tier": "P2",
+      "active": false,
+      "config": {},
+      "notes": null
+    },
+    {
+      "slug": "bikeitup",
+      "name": "Bikeitup",
+      "base_url": "https://www.bikeitup.com.mt",
+      "category": "bikes",
+      "adapter": "woo",
+      "tier": "P2",
+      "active": false,
+      "config": {
+        "page_size": 100
+      },
+      "notes": null
+    },
+    {
+      "slug": "thecyclist",
+      "name": "The Cyclist Malta",
+      "base_url": "https://thecyclistmalta.com",
+      "category": "bikes",
+      "adapter": "woo",
+      "tier": "P2",
+      "active": false,
+      "config": {
+        "page_size": 100
+      },
+      "notes": null
+    },
+    {
+      "slug": "knightmusic",
+      "name": "Knight Music",
+      "base_url": "https://knightmusic.com",
+      "category": "music",
+      "adapter": "woo",
+      "tier": "P2",
+      "active": false,
+      "config": {
+        "page_size": 100
+      },
+      "notes": null
+    },
+    {
+      "slug": "bandaid",
+      "name": "Band Aid Music",
+      "base_url": "https://bandaidmusic.com",
+      "category": "music",
+      "adapter": "html",
+      "tier": "P2",
+      "active": false,
+      "config": {},
+      "notes": "Website not found (TLS mismatch). Needs a manual domain lookup."
+    },
+    {
+      "slug": "olimpus",
+      "name": "Olimpus Music",
+      "base_url": "https://olimpusmusic.com",
+      "category": "music",
+      "adapter": "woo",
+      "tier": "P2",
+      "active": false,
+      "config": {
+        "page_size": 100
+      },
+      "notes": null
+    },
+    {
+      "slug": "squaredeal",
+      "name": "Square Deal",
+      "base_url": "https://online.squaredeal.com.mt",
+      "category": "fashion",
+      "adapter": "shopify",
+      "tier": "P2",
+      "active": false,
+      "config": {},
+      "notes": "Celio, Tom Tailor, Flormar."
+    },
+    {
+      "slug": "accessorize",
+      "name": "Accessorize",
+      "base_url": "https://monsoonaccessorize.com.mt",
+      "category": "fashion",
+      "adapter": "woo",
+      "tier": "P2",
+      "active": false,
+      "config": {
+        "page_size": 100,
+        "min_delay_ms": 10000,
+        "max_delay_ms": 12000,
+        "max_requests_per_hour": 300
+      },
+      "notes": "Crawl-delay 10 s."
+    },
+    {
+      "slug": "kitchenstore",
+      "name": "The Kitchen Store",
+      "base_url": "https://tks-onlinestore.com",
+      "category": "home",
+      "adapter": "woo",
+      "tier": "P2",
+      "active": false,
+      "config": {
+        "page_size": 100
+      },
+      "notes": null
+    },
+    {
+      "slug": "homemate",
+      "name": "Homemate",
+      "base_url": "https://www.homemate.com.mt",
+      "category": "home",
+      "adapter": "html",
+      "tier": "P2",
+      "active": false,
+      "config": {},
+      "notes": "Custom ASP.NET behind Cloudflare; prices in HTML."
+    },
+    {
+      "slug": "crosscraft",
+      "name": "Crosscraft",
+      "base_url": "https://crosscraft.com.mt",
+      "category": "home",
+      "adapter": "woo",
+      "tier": "P2",
+      "active": false,
+      "config": {
+        "page_size": 100,
+        "min_delay_ms": 30000,
+        "max_delay_ms": 32000,
+        "max_requests_per_hour": 100
+      },
+      "notes": "Crawl-delay 30 s. Apex homepage behind Cloudflare challenge but Store API answers."
+    },
+    {
+      "slug": "hollandbarrett",
+      "name": "Holland & Barrett",
+      "base_url": "https://www.hollandandbarrett.com.mt",
+      "category": "health",
+      "adapter": "woo",
+      "tier": "P2",
+      "active": false,
+      "config": {
+        "page_size": 100
+      },
+      "notes": "Some variable products return price 0."
+    },
+    {
+      "slug": "eyeland",
+      "name": "Eyeland Opticians",
+      "base_url": "https://eyeland.mt",
+      "category": "health",
+      "adapter": "woo",
+      "tier": "P2",
+      "active": false,
+      "config": {
+        "page_size": 100,
+        "sku_is_gtin": true
+      },
+      "notes": "SKUs are EANs."
+    },
+    {
+      "slug": "pandora",
+      "name": "Pandora Malta",
+      "base_url": "https://www.pandorashop.mt",
+      "category": "jewellery",
+      "adapter": "magento",
+      "tier": "P2",
+      "active": false,
+      "config": {
+        "extra_disallow": [
+          "/rest/",
+          "/graphql",
+          "?(?!p=d+$)"
+        ]
+      },
+      "notes": "robots.txt blocks /rest, /graphql and query strings except ?p=. Crawl-delay 2."
+    },
+    {
+      "slug": "womensecret",
+      "name": "Women'secret",
+      "base_url": "https://www.womensecret.com.mt",
+      "category": "fashion",
+      "adapter": "shopify",
+      "tier": "P2",
+      "active": false,
+      "config": {},
+      "notes": "Vendor field holds numeric codes."
+    },
+    {
+      "slug": "solaris",
+      "name": "Solaris",
+      "base_url": "https://www.sunglasses.mt",
+      "category": "fashion",
+      "adapter": "shopify",
+      "tier": "P2",
+      "active": false,
+      "config": {},
+      "notes": null
+    },
+    {
+      "slug": "nespresso",
+      "name": "Nespresso Malta",
+      "base_url": "https://nespresso.com.mt",
+      "category": "home",
+      "adapter": "woo",
+      "tier": "P2",
+      "active": false,
+      "config": {
+        "page_size": 100
+      },
+      "notes": "Local franchise site, ~115 products."
+    },
+    {
+      "slug": "bortex",
+      "name": "Bortex",
+      "base_url": "https://bortex.com.mt",
+      "category": "fashion",
+      "adapter": "shopify",
+      "tier": "P2",
+      "active": false,
+      "config": {},
+      "notes": null
+    },
+    {
+      "slug": "terranova",
+      "name": "Terranova Malta",
+      "base_url": "https://terranova.com.mt",
+      "category": "fashion",
+      "adapter": "woo",
+      "tier": "P2",
+      "active": false,
+      "config": {
+        "page_size": 100
+      },
+      "notes": null
+    },
+    {
+      "slug": "twinset",
+      "name": "Twinset",
+      "base_url": "https://www.twinset.com/en-mt",
+      "category": "fashion",
+      "adapter": "shopify",
+      "tier": "P2",
+      "active": false,
+      "config": {},
+      "notes": "Base URL carries the /en-mt path prefix."
+    }
+  ]
+}
