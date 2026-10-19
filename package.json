@@ -27,6 +27,7 @@
     "postgres": "^3.4.9",
     "robots-parser": "^3.0.1",
     "sharp": "^0.35.5",
+    "undici": "^8.12.2",
     "zod": "^4.6.7"
   },
   "devDependencies": {
