@@ -102,8 +102,10 @@ Helpers for later promo discovery: `shopifyCollections()` and `wooCategories()`.
    ```
 2. Check its robots.txt by hand, then test: `pnpm scrape --shop newshop --limit 20 --dry-run` and
    `pnpm tsx src/cli/verify.ts out/<the file it wrote>`.
-3. Set `"active": true`, run `pnpm seed` (or the `db-setup` workflow). The nightly workflow for its
-   adapter picks it up.
+3. Set `"active": true` and commit. Every scrape workflow runs `pnpm seed` before scraping, so
+   `shops.seed.json` is the source of truth for shops (edits made only in the database are overwritten).
+4. If the shop refuses GitHub Actions IPs, add `"runner": "local"` to its config: GitHub then skips it
+   and `pnpm scrape --runner local` (run on your own machine) covers it.
 
 ### Shop config keys
 
@@ -121,6 +123,7 @@ Helpers for later promo discovery: `shopifyCollections()` and `wooCategories()`.
 | `mpn_from_sku` | regex with one capture group that extracts an MPN from the SKU |
 | `images_per_run`, `images_minutes` | image download budget per night |
 | `sitemap_fallback_max` | Shopify: max products read one by one when paging misses some |
+| `runner` | `cloud` (default, GitHub Actions) or `local` (only `pnpm scrape --runner local` on your machine) |
 
 ## Schedule (GitHub Actions)
 

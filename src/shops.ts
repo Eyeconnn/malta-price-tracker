@@ -24,7 +24,11 @@ function matches(s: Omit<Shop, 'id'>, f: ShopFilter): boolean {
   if (f.shop && s.slug !== f.shop) return false;
   if (f.adapter && s.adapter !== f.adapter) return false;
   if (f.tier && s.tier !== f.tier) return false;
-  if (f.runner && (String(s.config?.runner ?? 'cloud')) !== f.runner) return false;
+  if (f.runner) {
+    const r = s.config?.runner ?? 'cloud';
+    if (r !== 'cloud' && r !== 'local') throw new Error(`shop ${s.slug}: unknown config.runner "${String(r)}"`);
+    if (r !== f.runner) return false;
+  }
   // a shop named explicitly runs even when inactive (manual testing)
   if (!f.shop && !f.includeInactive && !s.active) return false;
   return true;
@@ -32,6 +36,7 @@ function matches(s: Omit<Shop, 'id'>, f: ShopFilter): boolean {
 
 /** Shops from the database, or from shops.seed.json when there is no database (dry runs). */
 export async function loadShops(f: ShopFilter, fromSeed = false): Promise<Shop[]> {
+  if (f.runner && f.runner !== 'cloud' && f.runner !== 'local') throw new Error(`--runner must be cloud or local`);
   if (fromSeed) {
     const seed = await readSeed();
     return seed.shops.filter((s) => matches(s, f)).map((s, i) => ({ ...s, id: -(i + 1), config: s.config ?? {} }));

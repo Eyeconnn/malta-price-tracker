@@ -28,10 +28,10 @@ jobs:
           node-version: 22
           cache: pnpm
       - run: pnpm install --frozen-lockfile
-      - name: Migrate
+      - name: Migrate and seed shops
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
-        run: pnpm migrate
+        run: pnpm migrate && pnpm seed
       - name: Re-check due products
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}

@@ -34,10 +34,10 @@ jobs:
           node-version: 22
           cache: pnpm
       - run: pnpm install --frozen-lockfile
-      - name: Migrate
+      - name: Migrate and seed shops
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
-        run: pnpm migrate
+        run: pnpm migrate && pnpm seed
       - name: Scrape
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
@@ -52,7 +52,8 @@ jobs:
           SHOP_INPUT: ${{ inputs.shop }}
           LIMIT_INPUT: ${{ inputs.limit }}
         run: |
-          ARGS="--adapter magento --runner cloud"
-          if [ -n "$SHOP_INPUT" ]; then ARGS="--shop $SHOP_INPUT"; fi
+          # --runner cloud stays on every branch: shops marked local never run from GitHub
+          ARGS="--runner cloud --adapter magento"
+          if [ -n "$SHOP_INPUT" ]; then ARGS="--runner cloud --shop $SHOP_INPUT"; fi
           if [ -n "$LIMIT_INPUT" ]; then ARGS="$ARGS --limit $LIMIT_INPUT"; fi
           pnpm scrape $ARGS
