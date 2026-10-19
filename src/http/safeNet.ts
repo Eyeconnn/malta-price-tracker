@@ -57,7 +57,15 @@ const dispatcher = new Agent({
   connect: (opts, cb) => {
     const host = String(opts.hostname).replace(/^\[|\]$/g, '');
     if (isIP(host) && isPrivateAddress(host)) return cb(new Error(`refusing to connect to private address ${host}`), null);
-    return baseConnect(opts, cb);
+    return baseConnect(opts, (err, sock) => {
+      // belt and braces: judge the address the socket actually connected to
+      const remote = (sock as { remoteAddress?: string } | null)?.remoteAddress;
+      if (!err && sock && remote && isPrivateAddress(remote)) {
+        sock.destroy();
+        return cb(new Error(`refusing connection to private address ${remote}`), null);
+      }
+      return err ? cb(err, null) : cb(null, sock!);
+    });
   },
 });
 
