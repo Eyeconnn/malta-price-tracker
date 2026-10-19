@@ -3,7 +3,7 @@ import { isPrivateAddress } from '../src/http/safeNet.js';
 import { parseJsonLenient } from '../src/http/fetcher.js';
 import { applyIdentifierRules, blankRecord, cleanGtin, decodeEntities, minorToCents, toCents } from '../src/util/normalise.js';
 import { reviewFlag } from '../src/pipeline/store.js';
-import { parseRobots, productToken } from '../src/http/robots.js';
+import { parseRobots, productTokens } from '../src/http/robots.js';
 
 describe('isPrivateAddress', () => {
   it.each(['127.0.0.1', '10.1.2.3', '172.16.0.1', '192.168.1.1', '169.254.169.254', '100.64.0.1', '0.0.0.0',
@@ -50,10 +50,18 @@ describe('identifiers', () => {
   });
 });
 
-describe('productToken', () => {
-  it('reads the compatible token', () => {
-    expect(productToken('Mozilla/5.0 (compatible; MTPIndex/1.0)')).toBe('mtpindex');
-    expect(productToken('Foo/1.0 (+x)')).toBe('foo');
+describe('productTokens', () => {
+  it('collects leading and compatible tokens', () => {
+    expect(productTokens('MTPIndex/1.0 (price index crawler)')).toEqual(['mtpindex']);
+    expect(productTokens('Mozilla/5.0 (compatible; MTPIndex/1.0)')).toEqual(['mozilla', 'mtpindex']);
+  });
+  it('applies the strictest rule across tokens', () => {
+    const txt = ['User-agent: mozilla', 'Disallow: /a', 'Crawl-delay: 2', '', 'User-agent: mtpindex', 'Disallow: /b', 'Crawl-delay: 9'].join('\n');
+    const r = parseRobots('https://s.mt', txt, 'Mozilla/5.0 (compatible; MTPIndex/1.0)');
+    expect(r.isAllowed('https://s.mt/a')).toBe(false);
+    expect(r.isAllowed('https://s.mt/b')).toBe(false);
+    expect(r.isAllowed('https://s.mt/c')).toBe(true);
+    expect(r.crawlDelayMs).toBe(9000);
   });
 });
 

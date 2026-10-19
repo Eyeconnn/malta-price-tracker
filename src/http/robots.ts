@@ -16,32 +16,37 @@ export interface RobotsRules {
   status: 'ok' | 'none' | 'unreachable';
 }
 
-/** Product token used for robots.txt group matching, e.g. "MaltaPriceTracker/0.1 (...)" gives "maltapricetracker". */
-export function productToken(ua: string): string {
-  // "Mozilla/5.0 (compatible; MTPIndex/1.0)" gives "mtpindex"; "Foo/1.0 (...)" gives "foo"
-  const compatible = /compatible;\s*([^\/;\s)]+)/i.exec(ua);
-  return (compatible ? compatible[1]! : ua.split(/[\/\s]/)[0]!).toLowerCase();
+/**
+ * Every product token in the user agent: the leading one ("MTPIndex/1.0 (...)" gives "mtpindex")
+ * plus any "compatible; Name/x" token in the comment. Rules are applied for all of them.
+ */
+export function productTokens(ua: string): string[] {
+  const out = new Set<string>();
+  const lead = ua.trim().split(/[\/\s(]/)[0];
+  if (lead) out.add(lead.toLowerCase());
+  for (const m of ua.matchAll(/\(\s*compatible;\s*([A-Za-z0-9_.-]+)/gi)) out.add(m[1]!.toLowerCase());
+  return [...out];
 }
 
 /**
  * Parses robots.txt text. Only real crawl directives matter: robots-parser reads
  * User-agent / Allow / Disallow / Crawl-delay / Sitemap lines and ignores everything else,
- * including any prose addressed at bots or AI agents.
+ * including any prose addressed at bots or AI agents. With several tokens, the strictest
+ * verdict and the longest crawl delay win.
  */
 export function parseRobots(origin: string, text: string, ua: string, status: RobotsRules['status'] = 'ok'): RobotsRules {
   const robotsUrl = `${origin}/robots.txt`;
   const parser = robotsParser(robotsUrl, text);
-  const token = productToken(ua);
-  const delay = parser.getCrawlDelay(token);
+  const tokens = productTokens(ua);
+  const delays = tokens.map((t) => parser.getCrawlDelay(t)).filter((d): d is number => typeof d === 'number' && d > 0);
   return {
     origin,
     status,
-    crawlDelayMs: typeof delay === 'number' && delay > 0 ? Math.round(delay * 1000) : 0,
+    crawlDelayMs: delays.length ? Math.round(Math.max(...delays) * 1000) : 0,
     isAllowed(url: string) {
       if (status === 'unreachable') return false;
-      const verdict = parser.isAllowed(url, token);
-      // undefined means the URL is on another origin; callers check that origin's robots instead
-      return verdict !== false;
+      // false from any token blocks; undefined means another origin, whose own robots.txt is checked instead
+      return !tokens.some((t) => parser.isAllowed(url, t) === false);
     },
   };
 }
