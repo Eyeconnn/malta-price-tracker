@@ -15,7 +15,7 @@ const { values } = parseArgs({
     tier: { type: 'string' },
     limit: { type: 'string' },
     'dry-run': { type: 'boolean', default: false },
-    concurrency: { type: 'string', default: '6' },
+    concurrency: { type: 'string', default: '12' },
     'no-images': { type: 'boolean', default: false },
     'no-alerts': { type: 'boolean', default: false },
     sample: { type: 'string', default: '5' },
@@ -65,7 +65,10 @@ async function main() {
     { shop: values.shop, adapter: values.adapter as AdapterName | undefined, tier: values.tier },
     noDb,
   );
-  if (!shops.length) throw new Error('no matching shops');
+  if (!shops.length) {
+    console.log('no matching active shops, nothing to do');
+    return;
+  }
   const limit = values.limit ? Number(values.limit) : undefined;
   console.log(`${dryRun ? 'DRY RUN: ' : ''}scraping ${shops.map((s) => s.slug).join(', ')}${limit ? ` (limit ${limit})` : ''}`);
 

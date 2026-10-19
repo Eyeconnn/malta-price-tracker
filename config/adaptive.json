@@ -1,0 +1,9 @@
+{
+  "_comment": "Adaptive re-check frequency. scrape-due reads next_check_at; the hourly workflow stays disabled until switched on (1 Nov).",
+  "intervals_hours": { "normal": 24, "warm": 6, "hot": 2 },
+  "hot_window": { "from": "2026-11-20", "to": "2026-12-01" },
+  "promotion": { "warm_changes_7d": 1, "hot_changes_48h": 2 },
+  "category_warm_from": "2026-11-01",
+  "warm_shop_categories": ["electronics", "gaming", "toys", "baby"],
+  "warm_category_pattern": "electronic|appliance|gaming|console|playstation|xbox|nintendo|\btoys?\b|lego|\bbaby\b|babies|nursery|television|\btvs?\b|laptop|smartphone"
+}

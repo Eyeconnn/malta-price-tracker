@@ -32,6 +32,7 @@ export const recordSchema = z.object({
 
 export interface RunResult {
   shop: Shop;
+  kind?: 'full' | 'due';
   runId: number | null;
   totals: RunTotals;
   flagged: FlaggedRow[];
