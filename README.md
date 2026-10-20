@@ -133,13 +133,15 @@ All cron times are UTC. Malta is UTC+2 until 25 October, then UTC+1, so 01:xx UT
 
 | Workflow | When | What |
 | --- | --- | --- |
-| `scrape-shopify` | 01:07 daily | `pnpm scrape --adapter shopify` |
-| `scrape-woo` | 01:13 daily | `pnpm scrape --adapter woo` |
-| `scrape-magento` | manual until tested | `pnpm scrape --adapter magento` |
-| `scrape-html` | manual until tested | `pnpm scrape --adapter html` |
+| `scrape-shopify` | started by the PC task at 02:30 Malta; cron 01:07 UTC as a backup | `pnpm scrape --adapter shopify` |
+| `scrape-woo` | started by the PC task at 02:30 Malta; cron 01:13 UTC as a backup | `pnpm scrape --adapter woo` |
+| `scrape-magento` | started by the PC task at 02:30 Malta; cron 01:19 UTC as a backup | `pnpm scrape --adapter magento` |
+| `scrape-html` | started by the PC task at 02:30 Malta; cron 01:25 UTC as a backup | `pnpm scrape --adapter html` |
 | `scrape-due` | hourly at :41, only when the repository variable `SCRAPE_DUE_ENABLED` is `true` | adaptive re-checks |
 | `daily-summary` | 05:30 daily | summary email |
 | `db-setup` | manual | migrations and seed |
+
+GitHub cron is best-effort and has run up to 5 hours late, so the Windows task `MTP Nightly Local Scrape` (02:30 Malta, `scripts/run-local.ps1`) starts the four scrape workflows with `gh workflow run` and then scrapes the local shops. Scheduled (cron) runs pass `--skip-done-hours 18`, so a late backup does nothing for shops already scraped. Windows tasks are installed with `scripts/install-tasks.ps1`.
 
 Every workflow can also be run by hand from the Actions tab (scrape workflows accept a shop slug and a limit).
 

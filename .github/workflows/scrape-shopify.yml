@@ -52,9 +52,12 @@ jobs:
           SCRAPER_USER_AGENT: ${{ vars.SCRAPER_USER_AGENT }}
           SHOP_INPUT: ${{ inputs.shop }}
           LIMIT_INPUT: ${{ inputs.limit }}
+          EVENT_NAME: ${{ github.event_name }}
         run: |
           # --runner cloud stays on every branch: shops marked local never run from GitHub
           ARGS="--runner cloud --adapter shopify"
           if [ -n "$SHOP_INPUT" ]; then ARGS="--runner cloud --shop $SHOP_INPUT"; fi
           if [ -n "$LIMIT_INPUT" ]; then ARGS="$ARGS --limit $LIMIT_INPUT"; fi
+          # the scheduled run is a backup for the dispatch from the PC at 02:30: skip shops already done
+          if [ "$EVENT_NAME" = "schedule" ]; then ARGS="$ARGS --skip-done-hours 18"; fi
           pnpm scrape $ARGS

@@ -229,3 +229,13 @@ async function updateBlackFriday(shop: Shop, bf: Map<number, ReturnType<typeof d
     where p.id = x.id
       and (x.bf_status = 'marked' or p.bf_status is distinct from x.bf_status or p.bf_marker is distinct from x.bf_marker)`;
 }
+
+/** Shop ids with an ok or partial full run that started within the last `hours`. */
+export async function recentlyScraped(shopIds: number[], hours: number): Promise<number[]> {
+  if (!shopIds.length) return [];
+  const rows = await db()<{ shop_id: number }[]>`
+    select distinct shop_id from scrape_runs
+    where shop_id in ${db()(shopIds)} and kind = 'full' and status in ('ok', 'partial')
+      and started_at > now() - make_interval(hours => ${hours})`;
+  return rows.map((r) => Number(r.shop_id));
+}

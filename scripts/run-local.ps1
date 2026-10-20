@@ -11,4 +11,11 @@ git pull --ff-only *>> $log
 pnpm install --frozen-lockfile *>> $log
 pnpm migrate *>> $log
 pnpm seed *>> $log
+
+# Start the cloud scrapes now. GitHub's own cron is unreliable (it ran up to 5 hours late) and stays
+# only as a backup that skips shops already scraped.
+foreach ($w in 'scrape-shopify', 'scrape-woo', 'scrape-magento', 'scrape-html') {
+  gh workflow run $w --repo Eyeconnn/malta-price-tracker *>> $log
+}
+
 pnpm scrape --runner local *>> $log
