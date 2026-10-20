@@ -74,8 +74,8 @@ export const PAGE = /* html */ `<!doctype html>
     <div id="shopview"></div>
   </section>
 </main>
-<dialog id="dlg"><div id="dlgbody"></div><p><button onclick="dlg.close()">Close</button></p></dialog>
-<script>
+<dialog id="dlg"><div id="dlgbody"></div><p><button data-close>Close</button></p></dialog>
+<script nonce="__NONCE__">
 const $ = (s) => document.querySelector(s);
 const esc = (v) => String(v ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const safeUrl = (u) => (/^https?:\\/\\//i.test(u || '') ? esc(u) : '#');
@@ -163,7 +163,7 @@ function renderGroup(g) {
       (r.variants > 1 ? ' <span class="chip">' + r.variants + ' variants, from</span>' : '') + (r.variant_title ? '<div class="muted">' + esc(r.variant_title) + '</div>' : '') +
       '</td><td class="num">' + eur(r.price_cents) + '</td><td class="num muted">' + eur(r.was_price_cents) + '</td><td class="num">' + eur(r.low_30d_cents) +
       '</td><td>' + (r.in_stock === false ? '<span class="muted">out</span>' : r.in_stock ? 'in' : '') +
-      '</td><td><span class="link" onclick="showProduct(' + Number(r.id) + ')">history</span> &middot; <a href="' + safeUrl(r.url) + '" target="_blank" rel="noopener noreferrer">shop</a></td></tr>').join('') +
+      '</td><td><span class="link" data-product="' + Number(r.id) + '">history</span> &middot; <a href="' + safeUrl(r.url) + '" target="_blank" rel="noopener noreferrer">shop</a></td></tr>').join('') +
     '</table></div></div>';
 }
 
@@ -172,7 +172,7 @@ function showShops() {
   const v = $('#shopview');
   v.dataset.loaded = '1';
   v.innerHTML = '<div class="scroll"><table><tr><th>Shop</th><th>Category</th><th>Runs on</th><th>Last run</th><th class="num">Products</th><th>Status</th></tr>' +
-    SHOPS.map((s) => '<tr><td><span class="link" onclick="showShop(\\'' + esc(s.slug) + '\\')">' + esc(s.name) + '</span></td><td>' + esc(s.category) +
+    SHOPS.map((s) => '<tr><td><span class="link" data-shop="' + esc(s.slug) + '">' + esc(s.name) + '</span></td><td>' + esc(s.category) +
       '</td><td>' + esc(s.runner === 'local' ? 'this PC' : 'GitHub') + '</td><td>' + when(s.started_at) + '</td><td class="num">' + (s.products_seen ?? '') +
       '</td><td class="' + esc(s.status || '') + '">' + esc(s.status || (s.started_at ? 'running' : 'no run yet')) + '</td></tr>').join('') + '</table></div>';
 }
@@ -183,7 +183,7 @@ async function showShop(slug) {
   const d = await api('/api/shop/' + encodeURIComponent(slug));
   const s = d.stats, last = d.runs[0];
   const pct = (x) => (x > 0 ? '<span class="up">+' + x + '%</span>' : '<span class="down">' + x + '%</span>');
-  v.innerHTML = '<p><span class="link" onclick="showShops()">&larr; all shops</span></p><h2 style="margin:4px 0 2px">' + esc(d.shop.name) + '</h2>' +
+  v.innerHTML = '<p><span class="link" data-allshops>&larr; all shops</span></p><h2 style="margin:4px 0 2px">' + esc(d.shop.name) + '</h2>' +
     '<p class="note"><a href="' + safeUrl(d.shop.base_url) + '" target="_blank" rel="noopener noreferrer">' + esc(d.shop.base_url) + '</a> &middot; ' + esc(d.shop.adapter) + ' &middot; ' + esc(d.shop.notes || '') + '</p>' +
     '<div class="grid"><div class="stat"><span class="muted">Products</span><b>' + s.products.toLocaleString('en') + '</b></div>' +
     '<div class="stat"><span class="muted">Listed now</span><b>' + s.listed_now.toLocaleString('en') + '</b></div>' +
@@ -191,12 +191,12 @@ async function showShop(slug) {
     '<div class="stat"><span class="muted">Last run</span><b class="' + esc(last?.status || '') + '">' + esc(last?.status || 'none') + '</b><span class="muted">' + when(last?.started_at) + '</span></div></div>' +
     '<h3>Top price changes (latest vs previous check)</h3>' +
     (d.changes.length ? '<div class="scroll"><table><tr><th>Product</th><th class="num">Before</th><th class="num">Now</th><th class="num">Change</th><th>When</th></tr>' +
-      d.changes.map((c) => '<tr><td><span class="link" onclick="showProduct(' + Number(c.id) + ')">' + esc(c.title) + '</span>' + (c.variant_title ? ' <span class="muted">' + esc(c.variant_title) + '</span>' : '') +
+      d.changes.map((c) => '<tr><td><span class="link" data-product="' + Number(c.id) + '">' + esc(c.title) + '</span>' + (c.variant_title ? ' <span class="muted">' + esc(c.variant_title) + '</span>' : '') +
         '</td><td class="num">' + eur(c.prev_cents) + '</td><td class="num">' + eur(c.now_cents) + '</td><td class="num">' + pct(c.pct) + '</td><td>' + when(c.observed_at) + '</td></tr>').join('') + '</table></div>'
       : '<p class="note">No price changes yet. Changes appear once a product has been checked at least twice.</p>') +
     '<h3>Biggest claimed discounts now</h3>' +
     (d.discounts.length ? '<div class="scroll"><table><tr><th>Product</th><th class="num">Was</th><th class="num">Now</th><th class="num">Claimed</th><th class="num">30-day low</th></tr>' +
-      d.discounts.map((c) => '<tr><td><span class="link" onclick="showProduct(' + Number(c.id) + ')">' + esc(c.title) + '</span>' + (c.variant_title ? ' <span class="muted">' + esc(c.variant_title) + '</span>' : '') +
+      d.discounts.map((c) => '<tr><td><span class="link" data-product="' + Number(c.id) + '">' + esc(c.title) + '</span>' + (c.variant_title ? ' <span class="muted">' + esc(c.variant_title) + '</span>' : '') +
         '</td><td class="num muted">' + eur(c.was_price_cents) + '</td><td class="num">' + eur(c.now_cents) + '</td><td class="num">-' + c.claimed_pct + '%</td><td class="num">' + eur(c.low_30d_cents) + '</td></tr>').join('') + '</table></div>'
       : '<p class="note">No products shown with a was price.</p>') +
     '<h3>Recent runs</h3><div class="scroll"><table><tr><th>Started</th><th>Kind</th><th>Status</th><th class="num">Products</th><th class="num">Requests</th><th>Notes</th></tr>' +
@@ -225,6 +225,16 @@ async function showProduct(id) {
       '</td><td>' + (x.in_stock === false ? 'out' : x.in_stock ? 'in' : '') + '</td><td class="failed">' + esc(x.review_flag || '') + '</td></tr>').join('') + '</table></div>';
   $('#dlg').showModal();
 }
+
+// One delegated click handler: values come from data-* attributes, never from generated code.
+document.addEventListener('click', (e) => {
+  const t = e.target.closest('[data-product],[data-shop],[data-allshops],[data-close]');
+  if (!t) return;
+  if (t.dataset.product) showProduct(Number(t.dataset.product));
+  else if (t.dataset.shop && /^[a-z0-9-]+$/.test(t.dataset.shop)) showShop(t.dataset.shop);
+  else if ('allshops' in t.dataset) showShops();
+  else if ('close' in t.dataset) $('#dlg').close();
+});
 
 loadShops().catch((e) => { $('#totals').textContent = 'error: ' + e.message; });
 </script>

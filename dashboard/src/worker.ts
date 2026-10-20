@@ -19,8 +19,8 @@ function json(data: unknown, status = 200): Response {
   });
 }
 
-/** HTTP Basic auth; any user name, the password must match DASHBOARD_PASSWORD. */
-function authorised(req: Request, env: Env): boolean {
+/** HTTP Basic auth; any user name, the password must match DASHBOARD_PASSWORD. Compares SHA-256 digests. */
+async function authorised(req: Request, env: Env): Promise<boolean> {
   const h = req.headers.get('authorization') ?? '';
   if (!h.startsWith('Basic ') || !env.DASHBOARD_PASSWORD) return false;
   let decoded = '';
@@ -29,12 +29,17 @@ function authorised(req: Request, env: Env): boolean {
   } catch {
     return false;
   }
-  const pass = decoded.slice(decoded.indexOf(':') + 1);
-  const a = new TextEncoder().encode(pass);
-  const b = new TextEncoder().encode(env.DASHBOARD_PASSWORD);
-  if (a.length !== b.length) return false;
+  const sep = decoded.indexOf(':');
+  if (sep < 0) return false;
+  const enc = new TextEncoder();
+  const [a, b] = await Promise.all([
+    crypto.subtle.digest('SHA-256', enc.encode(decoded.slice(sep + 1))),
+    crypto.subtle.digest('SHA-256', enc.encode(env.DASHBOARD_PASSWORD)),
+  ]);
+  const x = new Uint8Array(a);
+  const y = new Uint8Array(b);
   let diff = 0;
-  for (let i = 0; i < a.length; i++) diff |= a[i]! ^ b[i]!;
+  for (let i = 0; i < x.length; i++) diff |= x[i]! ^ y[i]!;
   return diff === 0;
 }
 
@@ -47,7 +52,9 @@ const SECURITY_HEADERS = {
 
 export default {
   async fetch(req: Request, env: Env): Promise<Response> {
-    if (!authorised(req, env)) {
+    if (!(await authorised(req, env))) {
+      // slow down password guessing
+      await new Promise((r) => setTimeout(r, 750));
       return new Response('Login required', {
         status: 401,
         headers: { 'www-authenticate': 'Basic realm="Price tracker", charset="UTF-8"', ...SECURITY_HEADERS },
@@ -58,7 +65,8 @@ export default {
     try {
       res = await route(url, env);
     } catch (e) {
-      res = json({ error: (e as Error).message }, 500);
+      console.error('dashboard error', url.pathname, (e as Error).message);
+      res = json({ error: 'internal error' }, 500);
     }
     for (const [k, v] of Object.entries(SECURITY_HEADERS)) res.headers.set(k, v);
     return res;
@@ -70,7 +78,16 @@ async function route(url: URL, env: Env): Promise<Response> {
   const p = url.pathname;
 
   if (p === '/' || p === '/index.html') {
-    return new Response(PAGE, { headers: { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store' } });
+    const nonce = btoa(String.fromCharCode(...crypto.getRandomValues(new Uint8Array(16))));
+    return new Response(PAGE.replace('__NONCE__', nonce), {
+      headers: {
+        'content-type': 'text/html; charset=utf-8',
+        'cache-control': 'no-store',
+        'content-security-policy':
+          `default-src 'none'; script-src 'nonce-${nonce}'; style-src 'unsafe-inline'; connect-src 'self'; img-src 'self' data:; ` +
+          "base-uri 'none'; form-action 'none'; frame-ancestors 'none'",
+      },
+    });
   }
 
   if (p === '/api/shops') {
