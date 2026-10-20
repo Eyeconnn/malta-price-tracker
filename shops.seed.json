@@ -139,9 +139,10 @@
             "stock": "span.stock-notice-instock"
           }
         },
-        "sku_is_gtin": true
+        "sku_is_gtin": true,
+        "runner": "local"
       },
-      "notes": "Custom shop. Sitemap has no products; categories from /en/shop.htm, 24 per page. \"Not Available Online\" products show prices but count as out of stock."
+      "notes": "Custom shop. Sitemap has no products; categories from /en/shop.htm, 24 per page. \"Not Available Online\" products show prices but count as out of stock. Refuses GitHub Actions IPs (403, 20 Oct): runs locally."
     },
     {
       "slug": "decathlon",
@@ -502,7 +503,7 @@
       "category": "electronics",
       "adapter": "shopify",
       "tier": "P2",
-      "active": false,
+      "active": true,
       "config": {},
       "notes": null
     },
@@ -513,7 +514,7 @@
       "category": "jewellery",
       "adapter": "shopify",
       "tier": "P2",
-      "active": false,
+      "active": true,
       "config": {},
       "notes": null
     },
@@ -524,7 +525,7 @@
       "category": "fashion",
       "adapter": "shopify",
       "tier": "P2",
-      "active": false,
+      "active": true,
       "config": {},
       "notes": null
     },
@@ -535,7 +536,7 @@
       "category": "drinks",
       "adapter": "shopify",
       "tier": "P2",
-      "active": false,
+      "active": true,
       "config": {},
       "notes": "Wines and spirits."
     },
@@ -579,7 +580,7 @@
       "category": "baby",
       "adapter": "shopify",
       "tier": "P2",
-      "active": false,
+      "active": true,
       "config": {},
       "notes": null
     },
@@ -592,7 +593,7 @@
       "tier": "P2",
       "active": false,
       "config": {},
-      "notes": "Domain found by DNS only; confirm it is the Maltese Top Spot."
+      "notes": "Domain found by DNS only (topspotmt.com sells Disney Store items); waiting for the user to confirm it is the right shop."
     },
     {
       "slug": "vanillamummy",
@@ -601,7 +602,7 @@
       "category": "baby",
       "adapter": "shopify",
       "tier": "P2",
-      "active": false,
+      "active": true,
       "config": {},
       "notes": null
     },
@@ -675,7 +676,7 @@
       "category": "fashion",
       "adapter": "shopify",
       "tier": "P2",
-      "active": false,
+      "active": true,
       "config": {},
       "notes": "Celio, Tom Tailor, Flormar."
     },
@@ -786,7 +787,7 @@
       "category": "fashion",
       "adapter": "shopify",
       "tier": "P2",
-      "active": false,
+      "active": true,
       "config": {},
       "notes": "Vendor field holds numeric codes."
     },
@@ -797,7 +798,7 @@
       "category": "fashion",
       "adapter": "shopify",
       "tier": "P2",
-      "active": false,
+      "active": true,
       "config": {},
       "notes": null
     },
@@ -821,7 +822,7 @@
       "category": "fashion",
       "adapter": "shopify",
       "tier": "P2",
-      "active": false,
+      "active": true,
       "config": {},
       "notes": null
     },
@@ -845,7 +846,7 @@
       "category": "fashion",
       "adapter": "shopify",
       "tier": "P2",
-      "active": false,
+      "active": true,
       "config": {},
       "notes": "Base URL carries the /en-mt path prefix."
     }
