@@ -9,7 +9,7 @@ matching, promo discovery and the verdict engine come later.
 ## Stack
 
 TypeScript on Node 22 (ESM, run with `tsx`), pnpm, Postgres on Neon (`postgres` package), native `fetch`,
-`cheerio`, `zod`, `robots-parser`, Cloudflare R2 through `@aws-sdk/client-s3`, Resend for email (plain HTTP),
+`cheerio`, `zod`, `robots-parser`, Cloudflare R2 through `@aws-sdk/client-s3`, Gmail SMTP (`nodemailer`) for email,
 GitHub Actions cron for scheduling. `sharp` decodes images for the perceptual hash.
 
 ## Setup
@@ -28,8 +28,9 @@ pnpm scrape --shop klikk --limit 20 --dry-run
 | --- | --- |
 | `DATABASE_URL` | Neon Postgres connection string |
 | `R2_ACCOUNT_ID`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`, `R2_BUCKET` | Cloudflare R2 bucket for images and HTML snapshots. Without them, images are skipped. |
-| `RESEND_API_KEY`, `ALERT_EMAIL` | Alert and summary emails. Without them, emails are printed to the console. `ALERT_EMAIL` may hold several comma separated addresses. |
-| `ALERT_FROM` | Optional sender on a domain verified in Resend (default `onboarding@resend.dev`, which only delivers to the Resend account owner). |
+| `GMAIL_USER`, `GMAIL_APP_PASSWORD` | Alert and summary emails through Gmail SMTP. The password is a Google app password (needs 2-step verification), not the account password. |
+| `ALERT_EMAIL` | Recipients, comma separated. Defaults to `GMAIL_USER`. Without mail settings, emails are printed to the console. |
+| `RESEND_API_KEY`, `ALERT_FROM` | Optional fallback sender through Resend. |
 | `SCRAPER_USER_AGENT` | Sent on every request, as `Token/version (short description)`. The token (before `/`, or after `compatible;`) is matched against robots.txt groups. Keep the real value in `.env` and the GitHub variable only. Tested 20 Oct: UAs starting `Mozilla/5.0 (compatible; ...)` or containing `example.com` get 403 from AtoZ, Digital Zone and Sound & Vision. |
 
 In GitHub Actions the secrets are repository secrets with the same names; `SCRAPER_USER_AGENT`,
