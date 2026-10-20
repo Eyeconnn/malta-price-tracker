@@ -3,7 +3,7 @@ import sharp from 'sharp';
 import { db } from '../db.js';
 import { userAgent } from '../env.js';
 import { ShopFetcher, scopeHost } from '../http/fetcher.js';
-import { r2Configured, putObject } from '../r2.js';
+import { r2Configured, r2Writable, putObject } from '../r2.js';
 import type { Shop } from '../types.js';
 
 /** 64-bit difference hash (dHash) as 16 hex chars: 9x8 greyscale, compare horizontal neighbours. */
@@ -47,8 +47,8 @@ function fetcherFor(url: string, shop: Shop, shopFetcher: ShopFetcher): ShopFetc
  * fetched at most once: later products with the same URL are linked to the stored row.
  */
 export async function downloadImagesForShop(shop: Shop): Promise<{ downloaded: number; linked: number }> {
-  if (!r2Configured()) {
-    console.log(`[${shop.slug}] images skipped: R2 is not configured`);
+  if (!r2Configured() || !(await r2Writable())) {
+    console.log(`[${shop.slug}] images skipped: R2 is not configured or not writable`);
     return { downloaded: 0, linked: 0 };
   }
   const sql = db();
@@ -81,7 +81,14 @@ export async function downloadImagesForShop(shop: Shop): Promise<{ downloaded: n
       const phash = meta.format === 'svg' ? null : await dHash(buf);
       const [existing] = await sql<{ r2_key: string }[]>`select r2_key from images where sha256 = ${sha256} and r2_key is not null limit 1`;
       const key = existing?.r2_key ?? `images/${sha256}.${ext}`;
-      if (!existing) await putObject(key, buf, MIME[ext] ?? 'application/octet-stream');
+      if (!existing) {
+        try {
+          await putObject(key, buf, MIME[ext] ?? 'application/octet-stream');
+        } catch (e) {
+          console.error(`[${shop.slug}] R2 upload failed, stopping images for this run: ${(e as Error).message}`);
+          break;
+        }
+      }
       await sql`
         insert into images (source_url, r2_key, sha256, phash, width, height, content_type, bytes)
         values (${image_url}, ${key}, ${sha256}, ${phash}, ${meta.width ?? null}, ${meta.height ?? null}, ${MIME[ext] ?? null}, ${buf.length})

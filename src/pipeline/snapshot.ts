@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto';
 import { db } from '../db.js';
 import { userAgent } from '../env.js';
 import { ShopFetcher } from '../http/fetcher.js';
-import { putObject, r2Configured } from '../r2.js';
+import { putObject, r2Configured, r2Writable } from '../r2.js';
 import type { Shop } from '../types.js';
 
 /**
@@ -17,8 +17,8 @@ export async function snapshotUrl(url: string, shop?: Shop, dryRun = false) {
   const sha256 = createHash('sha256').update(res.body).digest('hex');
   const now = new Date();
   const key = `snapshots/${new URL(url).hostname}/${now.toISOString().slice(0, 10)}/${now.toISOString().replace(/[:.]/g, '-')}-${sha256.slice(0, 12)}.html`;
-  if (dryRun || !r2Configured()) {
-    console.log(`snapshot of ${url}: HTTP ${res.status}, ${res.body.length} bytes, sha256 ${sha256} (not stored${dryRun ? ': dry run' : ': R2 not configured'})`);
+  if (dryRun || !r2Configured() || !(await r2Writable())) {
+    console.log(`snapshot of ${url}: HTTP ${res.status}, ${res.body.length} bytes, sha256 ${sha256} (not stored${dryRun ? ': dry run' : ': R2 not configured or not writable'})`);
     return { key: null, sha256, status: res.status, bytes: res.body.length };
   }
   await putObject(key, res.body, 'text/html; charset=utf-8');

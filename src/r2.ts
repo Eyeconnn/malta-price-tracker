@@ -21,3 +21,18 @@ function r2(): S3Client {
 export async function putObject(key: string, body: Buffer, contentType: string): Promise<void> {
   await r2().send(new PutObjectCommand({ Bucket: env('R2_BUCKET'), Key: key, Body: body, ContentType: contentType }));
 }
+
+let writable: Promise<boolean> | undefined;
+
+/** Checks once per process that the R2 credentials can write (a read-only token would fail every upload). */
+export function r2Writable(): Promise<boolean> {
+  if (!writable) {
+    writable = putObject('healthcheck/last-write.txt', Buffer.from(new Date().toISOString()), 'text/plain')
+      .then(() => true)
+      .catch((e) => {
+        console.error(`R2 is not writable (${(e as { Code?: string }).Code ?? (e as Error).message}): images and snapshots are skipped`);
+        return false;
+      });
+  }
+  return writable;
+}
