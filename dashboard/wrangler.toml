@@ -1,0 +1,6 @@
+# Private dashboard (Cloudflare Worker). Secrets: DATABASE_URL (read-only role), DASHBOARD_PASSWORD.
+name = "mtp-dashboard"
+main = "src/worker.ts"
+compatibility_date = "2026-10-01"
+workers_dev = true
+preview_urls = false

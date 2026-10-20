@@ -5,3 +5,7 @@ node_modules/
 out/
 *.log
 .remember/
+
+# Cloudflare Worker local secrets and state
+.dev.vars
+.wrangler/

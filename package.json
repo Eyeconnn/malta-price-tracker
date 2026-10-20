@@ -19,7 +19,9 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "dev-db": "tsx scripts/dev-db.ts",
-    "sql": "tsx scripts/sql.ts"
+    "sql": "tsx scripts/sql.ts",
+    "dashboard:dev": "wrangler dev --cwd dashboard --port 8787",
+    "dashboard:deploy": "wrangler deploy --cwd dashboard"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1152.0",

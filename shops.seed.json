@@ -628,9 +628,10 @@
       "tier": "P2",
       "active": true,
       "config": {
-        "page_size": 100
+        "page_size": 100,
+        "runner": "local"
       },
-      "notes": null
+      "notes": "Blocks full runs from GitHub Actions IPs (403/202, 20 Oct): runs locally."
     },
     {
       "slug": "knightmusic",
@@ -641,9 +642,10 @@
       "tier": "P2",
       "active": true,
       "config": {
-        "page_size": 100
+        "page_size": 100,
+        "runner": "local"
       },
-      "notes": null
+      "notes": "Blocks full runs from GitHub Actions IPs (403/202, 20 Oct): runs locally."
     },
     {
       "slug": "bandaid",
@@ -706,9 +708,10 @@
       "tier": "P2",
       "active": true,
       "config": {
-        "page_size": 100
+        "page_size": 100,
+        "runner": "local"
       },
-      "notes": null
+      "notes": "Blocks full runs from GitHub Actions IPs (403/202, 20 Oct): runs locally."
     },
     {
       "slug": "homemate",
@@ -746,9 +749,10 @@
       "tier": "P2",
       "active": true,
       "config": {
-        "page_size": 100
+        "page_size": 100,
+        "runner": "local"
       },
-      "notes": "Some variable products return price 0."
+      "notes": "Some variable products return price 0. Blocks full runs from GitHub Actions IPs (403/202, 20 Oct): runs locally."
     },
     {
       "slug": "eyeland",
@@ -836,9 +840,10 @@
       "tier": "P2",
       "active": true,
       "config": {
-        "page_size": 100
+        "page_size": 100,
+        "runner": "local"
       },
-      "notes": null
+      "notes": "Blocks full runs from GitHub Actions IPs (403/202, 20 Oct): runs locally."
     },
     {
       "slug": "twinset",
