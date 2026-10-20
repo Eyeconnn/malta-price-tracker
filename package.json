@@ -23,6 +23,7 @@
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1152.0",
+    "@neondatabase/serverless": "^1.2.0",
     "cheerio": "^1.2.0",
     "nodemailer": "^10.1.7",
     "postgres": "^3.4.9",
@@ -38,6 +39,7 @@
     "@types/nodemailer": "^8.0.2",
     "tsx": "^4.23.15",
     "typescript": "^7.0.2",
-    "vitest": "^5.0.5"
+    "vitest": "^5.0.5",
+    "wrangler": "^4.151.1"
   }
 }
