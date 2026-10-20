@@ -97,8 +97,51 @@
       "adapter": "html",
       "tier": "P1",
       "active": true,
-      "config": {},
-      "notes": "Custom webshop."
+      "config": {
+        "html": {
+          "start_urls": [
+            "/en/shop.htm"
+          ],
+          "category_links": "a[href*=\"/en/shop/webshop/bycategory/\"]",
+          "category_pattern": "/bycategory/\\d+/",
+          "normalise": [
+            "/bycategory/(\\d+)/name/asc/\\d+/\\d+/",
+            "/bycategory/$1/name/asc/24/1/"
+          ],
+          "page_url": [
+            "/24/1/([^/]+)\\.htm$",
+            "/24/{page}/$1.htm"
+          ],
+          "last_page": "ul.pagination a.page-link",
+          "tile": "div.card.shop-card",
+          "link": ".card-title a",
+          "id": {
+            "url_regex": "/webshop/(\\d+)/"
+          },
+          "title": ".card-title a",
+          "sku": ".card-body small.text-secondary",
+          "brand": "small.d-block.text-c2",
+          "price": ".item-sale-price, .card-footer div[class*=\"price_\"] > span.m-0",
+          "old_price": ".card-footer span.text-decoration-line-through",
+          "stock": ".card-body p.m-0 small",
+          "in_stock": "in stock",
+          "out_of_stock": "not available",
+          "product": {
+            "id": {
+              "url_regex": "/webshop/(\\d+)/"
+            },
+            "title": "h1",
+            "sku": "h3#sku",
+            "brand": "span#product_brand",
+            "gtin": ".shop-item-topright small.text-c5.d-block",
+            "price": "div.shop-item-price span.text-c2.fw-bold, div.shop-item-price p.text-c2.fw-bold",
+            "old_price": "div.shop-item-price span.text-decoration-line-through",
+            "stock": "span.stock-notice-instock"
+          }
+        },
+        "sku_is_gtin": true
+      },
+      "notes": "Custom shop. Sitemap has no products; categories from /en/shop.htm, 24 per page. \"Not Available Online\" products show prices but count as out of stock."
     },
     {
       "slug": "decathlon",
@@ -107,12 +150,12 @@
       "category": "sports",
       "adapter": "html",
       "tier": "P1",
-      "active": true,
+      "active": false,
       "config": {
         "min_delay_ms": 3000,
         "max_delay_ms": 6000
       },
-      "notes": "Likely PrestaShop. Parses the EU 30-day lowest price line. Filtered query-string URLs are robots-blocked."
+      "notes": "Inactive: every HTML page answers with a Cloudflare challenge (403, cf-mitigated) to our crawler (20 Oct). Sitemaps list ~22,500 products. Needs an allowlist or feed from Decathlon; do not work around the challenge."
     },
     {
       "slug": "retail",
@@ -281,8 +324,38 @@
       "adapter": "html",
       "tier": "P1",
       "active": true,
-      "config": {},
-      "notes": "nopCommerce; old and new prices in HTML."
+      "config": {
+        "html": {
+          "start_urls": [
+            "/"
+          ],
+          "category_links": "ul.top-menu > li > a, li.has-sublist > a",
+          "category_pattern": "^https://www\\.eurosport\\.com\\.mt/[a-z0-9-]+$",
+          "page_url": "{url}?pagenumber={page}",
+          "last_page": "div.pager li.individual-page a, div.pager li.last-page a",
+          "tile": "div.item-box .product-item",
+          "link": ".product-title a",
+          "id": {
+            "attr": "data-productid"
+          },
+          "title": ".product-title a",
+          "brand": ".brand-manufacturer",
+          "price": ".prices .actual-price",
+          "old_price": ".prices .old-price",
+          "product": {
+            "id": {
+              "selector": "button.add-to-cart-button",
+              "attr": "data-productid"
+            },
+            "title": ".overview .product-name h1",
+            "brand": ".overview .manufacturers .value a",
+            "sku": ".overview .sku .value",
+            "price": ".product-price span[id^=\"price-value-\"]",
+            "old_price": ".old-product-price span"
+          }
+        }
+      },
+      "notes": "nopCommerce. Listing tiles carry prices; no JSON-LD (microdata gtin/mpn empty, availability unreliable), so stock is left unknown. Use https."
     },
     {
       "slug": "okfashion",
