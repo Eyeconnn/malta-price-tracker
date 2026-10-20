@@ -453,7 +453,7 @@
       "category": "electronics",
       "adapter": "woo",
       "tier": "P2",
-      "active": false,
+      "active": true,
       "config": {
         "page_size": 100
       },
@@ -477,7 +477,7 @@
       "category": "electronics",
       "adapter": "woo",
       "tier": "P2",
-      "active": false,
+      "active": true,
       "config": {
         "page_size": 100
       },
@@ -490,7 +490,7 @@
       "category": "electronics",
       "adapter": "woo",
       "tier": "P2",
-      "active": false,
+      "active": true,
       "config": {
         "page_size": 100
       },
@@ -613,7 +613,7 @@
       "category": "bikes",
       "adapter": "woo",
       "tier": "P2",
-      "active": false,
+      "active": true,
       "config": {
         "page_size": 100
       },
@@ -626,7 +626,7 @@
       "category": "bikes",
       "adapter": "woo",
       "tier": "P2",
-      "active": false,
+      "active": true,
       "config": {
         "page_size": 100
       },
@@ -639,7 +639,7 @@
       "category": "music",
       "adapter": "woo",
       "tier": "P2",
-      "active": false,
+      "active": true,
       "config": {
         "page_size": 100
       },
@@ -663,7 +663,7 @@
       "category": "music",
       "adapter": "woo",
       "tier": "P2",
-      "active": false,
+      "active": true,
       "config": {
         "page_size": 100
       },
@@ -687,14 +687,15 @@
       "category": "fashion",
       "adapter": "woo",
       "tier": "P2",
-      "active": false,
+      "active": true,
       "config": {
         "page_size": 100,
         "min_delay_ms": 10000,
         "max_delay_ms": 12000,
-        "max_requests_per_hour": 300
+        "max_requests_per_hour": 300,
+        "runner": "local"
       },
-      "notes": "Crawl-delay 10 s."
+      "notes": "Crawl-delay 10 s. Refuses GitHub Actions IPs (20 Oct): runs locally."
     },
     {
       "slug": "kitchenstore",
@@ -703,7 +704,7 @@
       "category": "home",
       "adapter": "woo",
       "tier": "P2",
-      "active": false,
+      "active": true,
       "config": {
         "page_size": 100
       },
@@ -727,7 +728,7 @@
       "category": "home",
       "adapter": "woo",
       "tier": "P2",
-      "active": false,
+      "active": true,
       "config": {
         "page_size": 100,
         "min_delay_ms": 30000,
@@ -743,7 +744,7 @@
       "category": "health",
       "adapter": "woo",
       "tier": "P2",
-      "active": false,
+      "active": true,
       "config": {
         "page_size": 100
       },
@@ -756,7 +757,7 @@
       "category": "health",
       "adapter": "woo",
       "tier": "P2",
-      "active": false,
+      "active": true,
       "config": {
         "page_size": 100,
         "sku_is_gtin": true
@@ -809,7 +810,7 @@
       "category": "home",
       "adapter": "woo",
       "tier": "P2",
-      "active": false,
+      "active": true,
       "config": {
         "page_size": 100
       },
@@ -833,7 +834,7 @@
       "category": "fashion",
       "adapter": "woo",
       "tier": "P2",
-      "active": false,
+      "active": true,
       "config": {
         "page_size": 100
       },
