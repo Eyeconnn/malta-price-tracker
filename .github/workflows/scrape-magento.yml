@@ -3,9 +3,8 @@
 name: scrape-magento
 
 on:
-  # Schedule switched on once the adapter has passed its --limit 20 tests on two shops.
-  # schedule:
-  #   - cron: '19 1 * * *'
+  schedule:
+    - cron: '19 1 * * *'
   workflow_dispatch:
     inputs:
       shop:
