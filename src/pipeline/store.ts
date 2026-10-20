@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
 import { db } from '../db.js';
 import type { NormalisedRecord, Shop } from '../types.js';
+import { detectBlackFriday } from '../util/blackfriday.js';
 
 export interface FlaggedRow {
   product_id: number;
@@ -85,6 +86,8 @@ export async function saveBatch(
     const partial = Boolean(r.meta?.partial);
     const meta = { ...(r.meta ?? {}) };
     delete meta.partial;
+    delete meta.no_bf;
+    delete meta.bf_collection;
     return {
       external_id: r.external_id,
       parent_external_id: r.parent_external_id ?? null,
@@ -142,6 +145,11 @@ export async function saveBatch(
     order by product_id, observed_at desc`;
   const prev = new Map(prevRows.map((r) => [Number(r.product_id), r.price_cents]));
 
+  // Black Friday marker: tags, categories, collections and badges (partial re-reads carry none, so skip them)
+  const bf = new Map<number, ReturnType<typeof detectBlackFriday>>();
+  for (const r of records) if (!r.meta?.partial && !r.meta?.no_bf) bf.set(idByExt.get(r.external_id)!, detectBlackFriday(r));
+  await updateBlackFriday(shop, bf, observedAt);
+
   const flagged: FlaggedRow[] = [];
   const obsRows = records.map((r) => {
     const pid = idByExt.get(r.external_id)!;
@@ -168,17 +176,18 @@ export async function saveBatch(
       badge_text: r.badge_text,
       raw_hash: obsHash(r),
       review_flag: flag,
+      bf_marked: bf.has(pid) ? bf.get(pid)?.status === 'marked' : null,
     };
   });
 
   await sql`
     insert into price_observations (product_id, observed_at, run_id, price_cents, was_price_cents,
-      shop_30d_low_cents, in_stock, on_sale, badge_text, raw_hash, review_flag)
+      shop_30d_low_cents, in_stock, on_sale, badge_text, raw_hash, review_flag, bf_marked)
     select x.product_id, ${observedAt}, ${runId}, x.price_cents, x.was_price_cents, x.shop_30d_low_cents,
-      x.in_stock, x.on_sale, x.badge_text, x.raw_hash, x.review_flag
+      x.in_stock, x.on_sale, x.badge_text, x.raw_hash, x.review_flag, x.bf_marked
     from jsonb_to_recordset(${sql.json(obsRows as never)}) as x(
       product_id bigint, price_cents integer, was_price_cents integer, shop_30d_low_cents integer,
-      in_stock boolean, on_sale boolean, badge_text text, raw_hash text, review_flag text)
+      in_stock boolean, on_sale boolean, badge_text text, raw_hash text, review_flag text, bf_marked boolean)
     on conflict (product_id, observed_at) do nothing`;
 
   return { saved: obsRows.length, flagged };
@@ -192,4 +201,31 @@ export async function idsNeedingDetail(shopId: number, ids: string[]): Promise<S
     where shop_id = ${shopId} and external_id in ${db()(ids)} and (meta->>'detailed') is not null`;
   const have = new Set(done.map((r) => r.external_id));
   return new Set(ids.filter((id) => !have.has(id)));
+}
+
+/**
+ * Writes each product's Black Friday status. first/last marked dates move only while a current
+ * marker is present. A marker already there when the product was first seen, during the shop's
+ * first two days of tracking, is "preexisting": its real start date is unknown.
+ * Only rows whose status changes, or that are marked (their last date moves), are rewritten.
+ */
+async function updateBlackFriday(shop: Shop, bf: Map<number, ReturnType<typeof detectBlackFriday>>, observedAt: Date) {
+  const rows = [...bf].map(([id, r]) => ({ id, bf_status: r?.status ?? null, bf_marker: r?.marker ?? null }));
+  if (!rows.length) return;
+  const sql = db();
+  await sql`
+    update products p set
+      bf_status = x.bf_status,
+      bf_marker = x.bf_marker,
+      bf_first_marked_at = case when x.bf_status = 'marked' then coalesce(p.bf_first_marked_at, ${observedAt}::timestamptz)
+                                else p.bf_first_marked_at end,
+      bf_last_marked_at = case when x.bf_status = 'marked' then ${observedAt}::timestamptz else p.bf_last_marked_at end,
+      bf_preexisting = case
+        when x.bf_status = 'marked' and p.bf_first_marked_at is null then
+          p.first_seen > ${observedAt}::timestamptz - interval '6 hours'
+          and p.first_seen < coalesce((select min(started_at) from scrape_runs where shop_id = ${shop.id}), now()) + interval '2 days'
+        else p.bf_preexisting end
+    from jsonb_to_recordset(${sql.json(rows as never)}) as x(id bigint, bf_status text, bf_marker text)
+    where p.id = x.id
+      and (x.bf_status = 'marked' or p.bf_status is distinct from x.bf_status or p.bf_marker is distinct from x.bf_marker)`;
 }

@@ -1,6 +1,7 @@
 import type { Adapter, CrawlContext, KnownProduct, NormalisedRecord } from '../types.js';
 import { DisallowedError, ShopAbortError } from '../http/fetcher.js';
 import { blankRecord, cleanGtin, emptyToNull, toCents } from '../util/normalise.js';
+import { classify } from '../util/blackfriday.js';
 
 interface ShopifyVariant {
   id: number;
@@ -93,6 +94,12 @@ export const shopify: Adapter = {
     const base = baseUrl(ctx.shop.base_url);
     const pageSize = Math.min(Number(ctx.shop.config.page_size ?? 250), 250);
     const seen = new Set<string>();
+    const bfByHandle = ctx.limit ? new Map<string, string>() : await blackFridayCollections(ctx, base);
+    const tagBf = (recs: NormalisedRecord[], handle: string) => {
+      const col = bfByHandle.get(handle);
+      if (col) for (const r of recs) r.meta = { ...r.meta, bf_collection: col };
+      return recs;
+    };
     let produced = 0;
     let pagingBroke = false;
 
@@ -116,7 +123,7 @@ export const shopify: Adapter = {
       const records: NormalisedRecord[] = [];
       for (const p of products) {
         seen.add(p.handle);
-        records.push(...shopifyProductToRecords(p, base));
+        records.push(...tagBf(shopifyProductToRecords(p, base), p.handle));
       }
       produced += records.length;
       yield records;
@@ -142,7 +149,7 @@ export const shopify: Adapter = {
     let batch: NormalisedRecord[] = [];
     for (const handle of missing.slice(0, cap)) {
       try {
-        batch.push(...(await fetchByHandle(ctx, base, handle)));
+        batch.push(...tagBf(await fetchByHandle(ctx, base, handle), handle));
       } catch (e) {
         if (e instanceof ShopAbortError) throw e;
         if (!(e instanceof DisallowedError)) ctx.error(`product ${handle}: ${(e as Error).message}`);
@@ -180,6 +187,40 @@ async function fetchByHandle(ctx: CrawlContext, base: string, handle: string): P
   const res = await ctx.fetcher.get(`${base}/products/${encodeURIComponent(handle)}.json`);
   if (res.status !== 200) return [];
   return shopifyProductToRecords(res.json<{ product: ShopifyProduct }>().product, base);
+}
+
+/**
+ * Products in collections whose title or handle marks a current Black Friday sale
+ * (e.g. "Black Friday", "bf-2026"). Returns product handle -> collection title.
+ */
+async function blackFridayCollections(ctx: CrawlContext, base: string): Promise<Map<string, string>> {
+  const out = new Map<string, string>();
+  let cols: Awaited<ReturnType<typeof shopifyCollections>> = [];
+  try {
+    cols = await shopifyCollections(ctx);
+  } catch (e) {
+    if (e instanceof ShopAbortError) throw e;
+    ctx.error(`collections.json: ${(e as Error).message}`);
+    return out;
+  }
+  const bfCols = cols.filter((c) => classify(c.title) === 'marked' || classify(c.handle.replace(/-/g, ' ')) === 'marked');
+  for (const c of bfCols) {
+    for (let page = 1; page <= 40; page++) {
+      try {
+        const res = await ctx.fetcher.get(`${base}/collections/${encodeURIComponent(c.handle)}/products.json?limit=250&page=${page}`);
+        if (res.status !== 200) break;
+        const products = res.json<{ products: { handle: string }[] }>().products ?? [];
+        if (!products.length) break;
+        for (const p of products) if (!out.has(p.handle)) out.set(p.handle, c.title);
+      } catch (e) {
+        if (e instanceof ShopAbortError) throw e;
+        if (!(e instanceof DisallowedError)) ctx.error(`collection ${c.handle}: ${(e as Error).message}`);
+        break;
+      }
+    }
+  }
+  if (bfCols.length) ctx.log(`Black Friday collections: ${bfCols.map((c) => c.title).join(', ')} (${out.size} products)`);
+  return out;
 }
 
 /** Collections list, for promo discovery later. */

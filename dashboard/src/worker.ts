@@ -117,6 +117,7 @@ async function route(url: URL, env: Env): Promise<Response> {
       sql`select set_config('pg_trgm.word_similarity_threshold', '0.5', true)`,
       sql`
         select p.id, p.title, p.variant_title, p.brand, p.gtin, p.mpn, p.sku, p.url,
+          p.bf_status, p.bf_marker, p.bf_first_marked_at, p.bf_preexisting,
           s.name as shop, s.slug,
           word_similarity(${q}, p.title) as score,
           lo.price_cents, lo.was_price_cents, lo.in_stock, lo.observed_at,
@@ -148,7 +149,9 @@ async function route(url: URL, env: Env): Promise<Response> {
       select count(*)::int as products,
         count(*) filter (where p.watch_tier = 'warm')::int as warm,
         count(*) filter (where p.watch_tier = 'hot')::int as hot,
-        count(*) filter (where p.last_seen > now() - interval '2 days')::int as listed_now
+        count(*) filter (where p.last_seen > now() - interval '2 days')::int as listed_now,
+        count(*) filter (where p.bf_status = 'marked')::int as bf_marked,
+        count(*) filter (where p.bf_status = 'marked' and not coalesce(p.bf_preexisting, false))::int as bf_new
       from products p where p.shop_id = ${shop.id}`;
     const changes = await sql`
       with obs as (
@@ -182,7 +185,14 @@ async function route(url: URL, env: Env): Promise<Response> {
       where l.was_price_cents > l.price_cents and l.price_cents > 0
       order by (l.was_price_cents - l.price_cents)::float / l.was_price_cents desc
       limit 60`;
-    return json({ shop, runs, stats, changes, discounts });
+    const blackFriday = await sql`
+      select p.id, p.title, p.variant_title, p.url, p.bf_marker, p.bf_first_marked_at, p.bf_preexisting,
+        (select price_cents from price_observations po where po.product_id = p.id order by observed_at desc limit 1) as now_cents
+      from products p
+      where p.shop_id = ${shop.id} and p.bf_status = 'marked'
+      order by coalesce(p.bf_preexisting, false), p.bf_first_marked_at desc nulls last
+      limit 60`;
+    return json({ shop, runs, stats, changes, discounts, blackFriday });
   }
 
   const productMatch = /^\/api\/product\/(\d+)$/.exec(p);
@@ -190,11 +200,12 @@ async function route(url: URL, env: Env): Promise<Response> {
     const id = Number(productMatch[1]);
     const [product] = await sql`
       select p.id, p.title, p.variant_title, p.brand, p.sku, p.gtin, p.mpn, p.url, p.category_path, p.tags,
-        p.first_seen, p.last_seen, p.watch_tier, s.name as shop, s.slug
+        p.first_seen, p.last_seen, p.watch_tier, p.bf_status, p.bf_marker, p.bf_first_marked_at, p.bf_last_marked_at,
+        p.bf_preexisting, s.name as shop, s.slug
       from products p join shops s on s.id = p.shop_id where p.id = ${id}`;
     if (!product) return json({ error: 'unknown product' }, 404);
     const history = await sql`
-      select observed_at, price_cents, was_price_cents, shop_30d_low_cents, in_stock, review_flag
+      select observed_at, price_cents, was_price_cents, shop_30d_low_cents, in_stock, review_flag, bf_marked
       from price_observations where product_id = ${id} and observed_at > now() - interval '60 days'
       order by observed_at`;
     return json({ product, history });

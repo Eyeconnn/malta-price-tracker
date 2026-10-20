@@ -92,7 +92,8 @@ export async function runDue(shop: Shop, opts: { dryRun?: boolean; minutes?: num
         const parsed = recordSchema.safeParse(applyIdentifierRules(raw, shop.config));
         if (!parsed.success) continue;
         seen.add(raw.external_id);
-        clean.push(parsed.data as NormalisedRecord);
+        // re-reads do not see Shopify collections: keep the Black Friday status from the nightly run
+        clean.push({ ...(parsed.data as NormalisedRecord), meta: { ...parsed.data.meta, no_bf: true } });
       }
       if (runId !== null && clean.length) flagged.push(...(await saveBatch(shop, runId, clean, new Date())).flagged);
     }

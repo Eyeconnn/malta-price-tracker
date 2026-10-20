@@ -38,6 +38,7 @@ export const PAGE = /* html */ `<!doctype html>
   td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
   .best td { background: color-mix(in srgb, var(--good) 12%, transparent); }
   .up { color: var(--bad); } .down { color: var(--good); }
+  .chip.bf { background: color-mix(in srgb, var(--warn) 22%, transparent); }
   .chip { display: inline-block; padding: 1px 8px; border-radius: 99px; background: var(--chip); font-size: 12px; }
   .ok { color: var(--good); } .partial { color: var(--warn); } .failed { color: var(--bad); }
   a { color: var(--accent); text-decoration: none; } a:hover { text-decoration: underline; }
@@ -80,6 +81,11 @@ const $ = (s) => document.querySelector(s);
 const esc = (v) => String(v ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const safeUrl = (u) => (/^https?:\\/\\//i.test(u || '') ? esc(u) : '#');
 const eur = (c) => (c === null || c === undefined ? '' : '\\u20ac' + (c / 100).toLocaleString('en-MT', { minimumFractionDigits: 2, maximumFractionDigits: 2 }));
+const day = (t) => (t ? new Date(t).toLocaleDateString('en-GB', { day: '2-digit', month: 'short' }) : '');
+// Black Friday chip: "BF since 21 Oct", or "BF (already tagged)" when the marker predates our tracking
+const bfChip = (r) => (r.bf_status === 'marked'
+  ? ' <span class="chip bf" title="' + esc(r.bf_marker || '') + '">BF ' + (r.bf_preexisting ? '(already tagged)' : 'since ' + day(r.bf_first_marked_at)) + '</span>'
+  : r.bf_status === 'excluded' ? ' <span class="chip" title="' + esc(r.bf_marker || '') + '">not in BF</span>' : '');
 const when = (t) => (t ? new Date(t).toLocaleString('en-GB', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' }) : '');
 const api = async (path) => { const r = await fetch(new URL(path, location.origin)); if (!r.ok) throw new Error((await r.json()).error || r.status); return r.json(); };
 
@@ -159,7 +165,7 @@ function renderGroup(g) {
   const ids = [g.brand, g.gtin && 'EAN ' + g.gtin, g.mpn && 'MPN ' + g.mpn].filter(Boolean).map(esc).join(' &middot; ');
   return '<div class="card"><h3>' + esc(g.title) + '</h3><div class="ids">' + (ids || '&nbsp;') +
     (rows.length > 1 ? ' <span class="chip">' + rows.length + ' shops</span>' : '') + '</div><div class="scroll"><table><tr><th>Shop</th><th class="num">Price</th><th class="num">Was</th><th class="num">30-day low</th><th>Stock</th><th></th></tr>' +
-    rows.map((r) => '<tr class="' + (rows.length > 1 && r.price_cents === best ? 'best' : '') + '"><td>' + esc(r.shop) +
+    rows.map((r) => '<tr class="' + (rows.length > 1 && r.price_cents === best ? 'best' : '') + '"><td>' + esc(r.shop) + bfChip(r) +
       (r.variants > 1 ? ' <span class="chip">' + r.variants + ' variants, from</span>' : '') + (r.variant_title ? '<div class="muted">' + esc(r.variant_title) + '</div>' : '') +
       '</td><td class="num">' + eur(r.price_cents) + '</td><td class="num muted">' + eur(r.was_price_cents) + '</td><td class="num">' + eur(r.low_30d_cents) +
       '</td><td>' + (r.in_stock === false ? '<span class="muted">out</span>' : r.in_stock ? 'in' : '') +
@@ -188,6 +194,7 @@ async function showShop(slug) {
     '<div class="grid"><div class="stat"><span class="muted">Products</span><b>' + s.products.toLocaleString('en') + '</b></div>' +
     '<div class="stat"><span class="muted">Listed now</span><b>' + s.listed_now.toLocaleString('en') + '</b></div>' +
     '<div class="stat"><span class="muted">Warm / hot</span><b>' + s.warm + ' / ' + s.hot + '</b></div>' +
+    '<div class="stat"><span class="muted">Marked Black Friday</span><b>' + s.bf_marked.toLocaleString('en') + '</b><span class="muted">' + s.bf_new + ' newly marked</span></div>' +
     '<div class="stat"><span class="muted">Last run</span><b class="' + esc(last?.status || '') + '">' + esc(last?.status || 'none') + '</b><span class="muted">' + when(last?.started_at) + '</span></div></div>' +
     '<h3>Top price changes (latest vs previous check)</h3>' +
     (d.changes.length ? '<div class="scroll"><table><tr><th>Product</th><th class="num">Before</th><th class="num">Now</th><th class="num">Change</th><th>When</th></tr>' +
@@ -199,6 +206,11 @@ async function showShop(slug) {
       d.discounts.map((c) => '<tr><td><span class="link" data-product="' + Number(c.id) + '">' + esc(c.title) + '</span>' + (c.variant_title ? ' <span class="muted">' + esc(c.variant_title) + '</span>' : '') +
         '</td><td class="num muted">' + eur(c.was_price_cents) + '</td><td class="num">' + eur(c.now_cents) + '</td><td class="num">-' + c.claimed_pct + '%</td><td class="num">' + eur(c.low_30d_cents) + '</td></tr>').join('') + '</table></div>'
       : '<p class="note">No products shown with a was price.</p>') +
+    '<h3>Marked for Black Friday</h3>' +
+    (d.blackFriday.length ? '<p class="note">Newly marked first. "Already tagged" means the marker was there when we started tracking, so its real start date is unknown.</p><div class="scroll"><table><tr><th>Product</th><th>Marker</th><th>Marked since</th><th class="num">Price now</th></tr>' +
+      d.blackFriday.map((c) => '<tr><td><span class="link" data-product="' + Number(c.id) + '">' + esc(c.title) + '</span>' + (c.variant_title ? ' <span class="muted">' + esc(c.variant_title) + '</span>' : '') +
+        '</td><td class="muted">' + esc(c.bf_marker) + '</td><td>' + (c.bf_preexisting ? 'already tagged' : day(c.bf_first_marked_at)) + '</td><td class="num">' + eur(c.now_cents) + '</td></tr>').join('') + '</table></div>'
+      : '<p class="note">No products marked for Black Friday on this site yet.</p>') +
     '<h3>Recent runs</h3><div class="scroll"><table><tr><th>Started</th><th>Kind</th><th>Status</th><th class="num">Products</th><th class="num">Requests</th><th>Notes</th></tr>' +
     d.runs.map((r) => '<tr><td>' + when(r.started_at) + '</td><td>' + esc(r.kind) + '</td><td class="' + esc(r.status || '') + '">' + esc(r.status || 'running') + '</td><td class="num">' + r.products_seen +
       '</td><td class="num">' + r.requests + (r.failed_requests ? ' (' + r.failed_requests + ' failed)' : '') + '</td><td class="muted">' + esc((r.notes || '').slice(0, 160)) + '</td></tr>').join('') + '</table></div>';
@@ -219,10 +231,11 @@ async function showProduct(id) {
   }
   $('#dlgbody').innerHTML = '<h3 style="margin-top:0">' + esc(p.title) + (p.variant_title ? ' <span class="muted">' + esc(p.variant_title) + '</span>' : '') + '</h3>' +
     '<p class="note">' + esc(p.shop) + ' &middot; ' + [p.brand, p.sku && 'SKU ' + p.sku, p.gtin && 'EAN ' + p.gtin, p.mpn && 'MPN ' + p.mpn].filter(Boolean).map(esc).join(' &middot; ') +
-    ' &middot; tier ' + esc(p.watch_tier) + ' &middot; <a href="' + safeUrl(p.url) + '" target="_blank" rel="noopener noreferrer">open in shop</a></p>' + chart +
-    '<div class="scroll"><table><tr><th>When</th><th class="num">Price</th><th class="num">Was</th><th>Stock</th><th>Flag</th></tr>' +
+    ' &middot; tier ' + esc(p.watch_tier) + (p.bf_status ? ' &middot; Black Friday: ' + esc(p.bf_status) + (p.bf_marker ? ' (' + esc(p.bf_marker) + ')' : '') +
+      (p.bf_status === 'marked' ? (p.bf_preexisting ? ', already tagged when tracking began' : ', since ' + day(p.bf_first_marked_at)) : '') : '') + ' &middot; <a href="' + safeUrl(p.url) + '" target="_blank" rel="noopener noreferrer">open in shop</a></p>' + chart +
+    '<div class="scroll"><table><tr><th>When</th><th class="num">Price</th><th class="num">Was</th><th>Stock</th><th>BF</th><th>Flag</th></tr>' +
     d.history.slice().reverse().map((x) => '<tr><td>' + when(x.observed_at) + '</td><td class="num">' + eur(x.price_cents) + '</td><td class="num muted">' + eur(x.was_price_cents) +
-      '</td><td>' + (x.in_stock === false ? 'out' : x.in_stock ? 'in' : '') + '</td><td class="failed">' + esc(x.review_flag || '') + '</td></tr>').join('') + '</table></div>';
+      '</td><td>' + (x.in_stock === false ? 'out' : x.in_stock ? 'in' : '') + '</td><td>' + (x.bf_marked ? 'yes' : '') + '</td><td class="failed">' + esc(x.review_flag || '') + '</td></tr>').join('') + '</table></div>';
   $('#dlg').showModal();
 }
 
