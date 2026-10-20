@@ -88,8 +88,10 @@ function stockFrom(t: string | null, c: HtmlConfig): boolean | null {
 }
 
 function pageUrl(c: HtmlConfig, url: string, page: number): string {
-  if (!c.page_url || page === 1) return url;
+  if (!c.page_url) return url;
+  // a string template applies to page 1 too (it may carry a page size); a regex rewrite only from page 2
   if (typeof c.page_url === 'string') return c.page_url.replace('{url}', url).replace('{page}', String(page));
+  if (page === 1) return url;
   return url.replace(new RegExp(c.page_url[0]), c.page_url[1].replace('{page}', String(page)));
 }
 

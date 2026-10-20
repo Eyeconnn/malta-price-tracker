@@ -330,9 +330,9 @@
           "start_urls": [
             "/"
           ],
-          "category_links": "ul.top-menu > li > a, li.has-sublist > a",
-          "category_pattern": "^https://www\\.eurosport\\.com\\.mt/[a-z0-9-]+$",
-          "page_url": "{url}?pagenumber={page}",
+          "category_links": "li.has-sublist > a",
+          "category_pattern": "^https://www\\.eurosport\\.com\\.mt/(men|women|boys|girls|fitness-13|sports)$",
+          "page_url": "{url}?pagesize=72&pagenumber={page}",
           "last_page": "div.pager li.individual-page a, div.pager li.last-page a",
           "tile": "div.item-box .product-item",
           "link": ".product-title a",

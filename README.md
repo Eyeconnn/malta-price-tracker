@@ -73,7 +73,7 @@ To test database writes without Neon, `pnpm dev-db` starts an in-memory Postgres
 - **Alerts** (one email per scrape invocation): run failed or did not finish, products seen more than 30% below
   the shop's 7-day average, more than 5% of fetches failed, flagged rows. Runs left unfinished for 7 hours are
   marked failed.
-- **Daily summary** at 05:30 UTC: shops ok / partial / failed / missing, product counts.
+- **Daily summary** at 05:30 UTC: shops ok / partial / failed / missing, product counts, and database size against the Neon plan (5 GB on Build, set `DB_LIMIT_MB` to change). Over 80% it says it is time to shrink the data.
 - **Images:** each new `image_url` is downloaded once, stored in R2 as `images/{sha256}.{ext}` with sha256,
   a 64-bit dHash and dimensions. Up to `images_per_run` (300) images per shop per night, so large catalogues
   fill in over several nights. Image fetches on the shop's own host use the shop's rate limit.

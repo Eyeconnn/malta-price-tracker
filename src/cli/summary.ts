@@ -23,8 +23,10 @@ async function main() {
   const [{ products }] = await db()<{ products: number }[]>`select count(*)::int as products from products`;
   const [{ bytes }] = await db()<{ bytes: string }[]>`select pg_database_size(current_database())::text as bytes`;
   const mb = Math.round(Number(bytes) / 1e6);
-  // Neon free plan storage is 0.5 GB: warn well before it fills
-  const storage = `Database size: ${mb} MB${mb > 400 ? '  WARNING: close to the 0.5 GB Neon free plan limit, upgrade before it fills' : ''}.`;
+  // Neon Build plan includes 5 GB (DB_LIMIT_MB to change); at 80% it is time to shrink the data
+  const limitMb = Number(process.env.DB_LIMIT_MB ?? 5000);
+  const full = mb >= limitMb * 0.8;
+  const storage = `Database size: ${mb} MB of ${limitMb} MB (${Math.round((100 * mb) / limitMb)}%)${full ? '  WARNING: over 80%, time to shrink the data (collapse same-price variants, slim product rows)' : ''}.`;
   const lines = rows.map(
     (r) =>
       `${(r.status ?? 'NO RUN').padEnd(8)} ${r.slug.padEnd(14)} ${String(r.products_seen ?? '').padStart(7)} products` +
@@ -32,7 +34,7 @@ async function main() {
   );
   const subject =
     `[price tracker] daily: ${count('ok')} ok, ${count('partial')} partial, ${count('failed')} failed` +
-    `${missing.length ? `, ${missing.length} missing` : ''}, ${total.toLocaleString('en')} prices${mb > 400 ? ', DB nearly full' : ''}`;
+    `${missing.length ? `, ${missing.length} missing` : ''}, ${total.toLocaleString('en')} prices${full ? ', DB over 80%' : ''}`;
   const text = [
     `Shops: ${count('ok')} ok, ${count('partial')} partial, ${count('failed')} failed, ${missing.length} with no run in the last 26 hours.`,
     `Prices recorded in the latest runs: ${total.toLocaleString('en')}. Products in the database: ${products.toLocaleString('en')}.`,
