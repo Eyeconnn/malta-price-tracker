@@ -21,7 +21,8 @@ export async function readSeed(): Promise<SeedFile> {
 }
 
 function matches(s: Omit<Shop, 'id'>, f: ShopFilter): boolean {
-  if (f.shop && s.slug !== f.shop) return false;
+  // --shop accepts one slug or a comma separated list
+  if (f.shop && !f.shop.split(',').map((x) => x.trim()).includes(s.slug)) return false;
   if (f.adapter && s.adapter !== f.adapter) return false;
   if (f.tier && s.tier !== f.tier) return false;
   if (f.runner) {

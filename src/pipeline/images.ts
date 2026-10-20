@@ -62,7 +62,9 @@ export async function downloadImagesForShop(shop: Shop): Promise<{ downloaded: n
   const todo = await sql<{ image_url: string }[]>`
     select distinct p.image_url from products p
     left join images i on i.source_url = p.image_url
-    where p.shop_id = ${shop.id} and p.image_id is null and p.image_url is not null and i.id is null
+    where p.shop_id = ${shop.id} and p.image_id is null and p.image_url is not null
+      -- never fetched, or failed more than 7 days ago (retry once a week)
+      and (i.id is null or (i.r2_key is null and i.created_at < now() - interval '7 days'))
     limit ${budget}`;
   if (!todo.length) return { downloaded: 0, linked: linked.count };
 
@@ -92,12 +94,14 @@ export async function downloadImagesForShop(shop: Shop): Promise<{ downloaded: n
       await sql`
         insert into images (source_url, r2_key, sha256, phash, width, height, content_type, bytes)
         values (${image_url}, ${key}, ${sha256}, ${phash}, ${meta.width ?? null}, ${meta.height ?? null}, ${MIME[ext] ?? null}, ${buf.length})
-        on conflict (source_url) do nothing`;
+        on conflict (source_url) do update set r2_key = excluded.r2_key, sha256 = excluded.sha256, phash = excluded.phash,
+          width = excluded.width, height = excluded.height, content_type = excluded.content_type, bytes = excluded.bytes,
+          error = null, created_at = now()`;
       downloaded++;
     } catch (e) {
       // remember the failure so the URL is not fetched again every night
       await sql`insert into images (source_url, error) values (${image_url}, ${(e as Error).message.slice(0, 300)})
-                on conflict (source_url) do nothing`;
+                on conflict (source_url) do update set error = excluded.error, created_at = now()`;
     }
   }
   await sql`
