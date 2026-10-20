@@ -71,9 +71,12 @@
         "extra_disallow": [
           "/catalogsearch",
           "/rest/"
-        ]
+        ],
+        "graphql": true,
+        "page_size": 100,
+        "mpn_from_sku": "^(.+)$"
       },
-      "notes": "Platform signals conflict. robots.txt Crawl-delay 5."
+      "notes": "Magento 2. Storefront GraphQL allowed by robots.txt: whole catalogue (~4,250) via products(category_id 2). robots.txt Crawl-delay 5."
     },
     {
       "slug": "klikk",

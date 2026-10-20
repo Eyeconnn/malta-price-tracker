@@ -3,6 +3,7 @@ import type { Adapter, CrawlContext, KnownProduct, NormalisedRecord } from '../t
 import { DisallowedError, ShopAbortError, OutOfScopeError } from '../http/fetcher.js';
 import { blankRecord, cleanGtin, emptyToNull, toCents } from '../util/normalise.js';
 import { firstLdProduct } from './jsonld.js';
+import { crawlGraphql, fetchOneGraphql } from './magentoGraphql.js';
 
 /**
  * Magento 2 page crawl.
@@ -161,6 +162,10 @@ function mergeDetail(listing: NormalisedRecord, detail: NormalisedRecord | null)
 
 export const magento: Adapter = {
   async *crawl(ctx: CrawlContext) {
+    if (ctx.shop.config.graphql) {
+      yield* crawlGraphql(ctx);
+      return;
+    }
     const base = baseOf(ctx);
     const cfg = ctx.shop.config;
     const include = cfg.category_include ? new RegExp(String(cfg.category_include)) : null;
@@ -255,6 +260,7 @@ export const magento: Adapter = {
   },
 
   async fetchOne(ctx: CrawlContext, product: KnownProduct) {
+    if (ctx.shop.config.graphql) return fetchOneGraphql(ctx, product);
     if (!product.url) throw new Error(`no URL for product ${product.external_id}`);
     const res = await ctx.fetcher.get(product.url, { accept: 'text/html' });
     if (res.status !== 200) return [];
