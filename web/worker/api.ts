@@ -1,9 +1,11 @@
 // API router. Access control already ran (index.ts); this validates parameters, calls Data and caches.
 // Every read except search is cached for 10 minutes (cache.ts); errors propagate to the handler's generic 500.
-// The one write, POST /api/reports, is handed to reports.ts before any read routing and is never cached.
+// The one public write, POST /api/reports, is handed to reports.ts before any read routing and is never cached.
+// /api/admin/* goes to admin.ts (its own auth check, the site_admin role, never cached).
 import { SITE_CATEGORIES } from '../../src/site/categories.js';
 import { computeRating } from '../../src/site/rating.js';
 import { DEFAULT_SETTINGS } from '../../src/site/settings.js';
+import { type AdminDeps, DEFAULT_ADMIN, handleAdmin } from './admin.js';
 import { type ResponseCache, cached } from './cache.js';
 import type { Card, Data, GroupItem, GroupResult, SearchHit, SearchPattern } from './data.js';
 import type { Env } from './env.js';
@@ -15,6 +17,8 @@ export interface ApiDeps {
   cache: () => ResponseCache | null;
   /** report store (site_reporter role) and Turnstile fetch; defaults to Neon and the global fetch */
   reports?: ReportDeps;
+  /** admin store (site_admin role); defaults to Neon */
+  admin?: AdminDeps;
 }
 
 const PAGE_SIZE = 24;
@@ -170,6 +174,7 @@ async function categories(data: Data): Promise<Response> {
 export async function handleApi(req: Request, env: Env, url: URL, deps: ApiDeps): Promise<Response> {
   const p = url.pathname;
   if (p === '/api/reports') return handleReport(req, env, url, deps.reports ?? DEFAULT_REPORTS);
+  if (p === '/api/admin' || p.startsWith('/api/admin/')) return handleAdmin(req, env, url, deps.admin ?? DEFAULT_ADMIN);
   const productMatch = /^\/api\/products\/([^/]*)$/.exec(p);
   const shopMatch = /^\/api\/shops\/([^/]*)$/.exec(p);
   const known = ['/api/home', '/api/search', '/api/deals', '/api/shops', '/api/categories'].includes(p) || productMatch || shopMatch;

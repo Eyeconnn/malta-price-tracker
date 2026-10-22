@@ -1,7 +1,7 @@
 // Black Friday Guide: one Worker serves the built web app (static assets) and the JSON API.
 // run_worker_first is on, so access control runs before any asset (private mode protects the HTML too).
 import { type ApiDeps, handleApi } from './api.js';
-import { checkAccess } from './auth.js';
+import { checkAccess, isAdminPath } from './auth.js';
 import { defaultCache } from './cache.js';
 import { neonData } from './data.js';
 import type { Env } from './env.js';
@@ -46,7 +46,8 @@ export function createHandler(deps: HandlerDeps) {
       const settings = await deps.loadSettings(env);
       const finish = (res: Response, nonce?: string): Response => {
         const out = withSecurityHeaders(res, nonce);
-        if (!settings.public) out.headers.set('x-robots-tag', 'noindex, nofollow');
+        // the admin area is never indexed, also while the site is public
+        if (!settings.public || isAdminPath(url.pathname)) out.headers.set('x-robots-tag', 'noindex, nofollow');
         return out;
       };
 

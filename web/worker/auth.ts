@@ -77,6 +77,18 @@ async function denied(realm: string): Promise<Response> {
   });
 }
 
+const ADMIN_REALM = 'Black Friday Guide admin';
+
+/**
+ * Null when the request carries ADMIN_PASSWORD (Basic auth, any user name), otherwise a slowed 401.
+ * checkAccess uses it for admin paths, and every admin handler calls it again itself (Ruling R26).
+ */
+export async function requireAdmin(req: Request, env: Env): Promise<Response | null> {
+  const password = basicPassword(req);
+  if (password !== null && (await matches(password, env.ADMIN_PASSWORD))) return null;
+  return denied(ADMIN_REALM);
+}
+
 /**
  * Null when the request may proceed, otherwise the response to send.
  * An /api path not already in canonical form gets 404, so API routing never sees a spelling the
@@ -89,10 +101,7 @@ export async function checkAccess(req: Request, env: Env, settings: AccessSettin
   if (isApiPath(canonical) && canonical !== pathname) return notFound();
   const password = basicPassword(req);
 
-  if (isAdminPath(canonical)) {
-    if (password !== null && (await matches(password, env.ADMIN_PASSWORD))) return null;
-    return denied('Black Friday Guide admin');
-  }
+  if (isAdminPath(canonical)) return requireAdmin(req, env);
   if (settings.public) return null;
   if (password !== null) {
     const [site, admin] = await Promise.all([matches(password, env.SITE_PASSWORD), matches(password, env.ADMIN_PASSWORD)]);

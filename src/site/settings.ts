@@ -66,6 +66,50 @@ export const DEFAULT_SETTINGS: SiteSettings = {
   categoryOverrides: {},
 };
 
+/** What the admin may store for each threshold (inclusive); integer thresholds count days or products. */
+export const THRESHOLD_LIMITS: Record<keyof Thresholds, { min: number; max: number; integer: boolean }> = {
+  minHistoryDays: { min: 1, max: 90, integer: true },
+  baselineDays: { min: 7, max: 120, integer: true },
+  raiseWindowDays: { min: 1, max: 60, integer: true },
+  raisePct: { min: 0.5, max: 50, integer: false },
+  goodDropPct: { min: 0.5, max: 90, integer: false },
+  cheaperPct: { min: 0, max: 50, integer: false },
+  minJudgedForRating: { min: 1, max: 1000, integer: true },
+};
+
+export const PHRASE_MIN = 3;
+export const PHRASE_MAX = 120;
+export const PHRASES_PER_SLOT_MAX = 30;
+export const OVERRIDES_MAX = 500;
+export const OVERRIDE_KEY_MAX = 100;
+
+/** `*` only in pairs around some text: "a *b* c" yes, "a *b" and "a ** b" no. */
+const BALANCED_STARS = /^[^*]*(\*[^*]+\*[^*]*)*$/;
+
+/**
+ * Why a headline phrase cannot be stored in `slot`, or null when it can. Checks the trimmed text: 3 to 120
+ * characters, no control characters, `*` in pairs around some text, `{days}` only in the bfweek slot.
+ */
+export function phraseProblem(phrase: string, slot: PhraseSlot): string | null {
+  const t = phrase.trim();
+  if (t.length < PHRASE_MIN || t.length > PHRASE_MAX) return `Use ${PHRASE_MIN} to ${PHRASE_MAX} characters.`;
+  if (/[\u0000-\u001f\u007f]/.test(t)) return 'Remove control characters such as tabs or line breaks.';
+  if (!BALANCED_STARS.test(t)) return 'Every * needs a partner, with text between the two.';
+  if (slot !== 'bfweek' && t.includes('{days}')) return '{days} only works in the Black Friday week slot.';
+  return null;
+}
+
+/** Characters that split a shop category path into segments (categories.ts); an override key is one segment. */
+const SEGMENT_SEPARATOR = /[>|/»›]/;
+
+/** Why a category override key cannot be stored, or null. Keys are single lowercase path segments. */
+export function overrideKeyProblem(key: string): string | null {
+  if (key.length === 0 || key.length > OVERRIDE_KEY_MAX) return `Use 1 to ${OVERRIDE_KEY_MAX} characters.`;
+  if (key !== key.trim().toLowerCase()) return 'Use lowercase, without spaces at either end.';
+  if (SEGMENT_SEPARATOR.test(key) || /[\u0000-\u001f\u007f]/.test(key)) return 'Use one part of the path, without > | / » ›.';
+  return null;
+}
+
 function isObject(v: unknown): v is Record<string, unknown> {
   return typeof v === 'object' && v !== null && !Array.isArray(v);
 }

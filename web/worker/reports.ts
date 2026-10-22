@@ -7,7 +7,7 @@
 import { neon } from '@neondatabase/serverless';
 import type { Statement } from './data.js';
 import type { Env } from './env.js';
-import { json } from './http.js';
+import { json, readJsonWrite } from './http.js';
 
 export const REPORT_TARGETS = ['product', 'shop', 'match'] as const;
 export const REPORT_REASONS = ['wrong-price', 'wrong-match', 'not-black-friday', 'other'] as const;
@@ -111,7 +111,7 @@ const bad = (field: string) => json({ error: field }, 400);
 const EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 /** Control characters other than tab and newline removed, lone surrogates replaced, trimmed; null when empty. */
-function cleanText(v: string): string | null {
+export function cleanText(v: string): string | null {
   const s = v
     .replace(/\r\n?/g, '\n')
     .replace(/[\u0000-\u0008\u000b-\u001f\u007f]/g, '')
@@ -189,45 +189,6 @@ export async function ipHash(salt: string, bucket: string): Promise<string> {
   return [...new Uint8Array(digest)].map((b) => b.toString(16).padStart(2, '0')).join('');
 }
 
-function originAllowed(req: Request, env: Env, url: URL): boolean {
-  const origin = req.headers.get('origin');
-  if (!origin) return false;
-  let site: string | null = null;
-  try {
-    site = new URL(env.SITE_ORIGIN).origin;
-  } catch {
-    // SITE_ORIGIN unset or malformed: only the request's own origin counts
-  }
-  return origin === url.origin || origin === site;
-}
-
-/** The body as text, or null when it is longer than BODY_MAX bytes (read in chunks, never buffered past the cap). */
-async function readCapped(req: Request): Promise<string | null> {
-  const declared = Number(req.headers.get('content-length'));
-  if (Number.isFinite(declared) && declared > BODY_MAX) return null;
-  if (!req.body) return '';
-  const reader = req.body.getReader();
-  const chunks: Uint8Array[] = [];
-  let size = 0;
-  for (;;) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    size += value.byteLength;
-    if (size > BODY_MAX) {
-      await reader.cancel();
-      return null;
-    }
-    chunks.push(value);
-  }
-  const all = new Uint8Array(size);
-  let at = 0;
-  for (const c of chunks) {
-    all.set(c, at);
-    at += c.byteLength;
-  }
-  return new TextDecoder().decode(all);
-}
-
 /** Hostnames a Turnstile token may have been issued on: SITE_ORIGIN's and the request's own. */
 function allowedHosts(env: Env, url: URL): string[] {
   const hosts = [url.hostname];
@@ -262,19 +223,9 @@ export async function handleReport(req: Request, env: Env, url: URL, deps: Repor
   if (req.method !== 'POST') return json({ error: 'method not allowed' }, 405, { allow: 'POST' });
   // fail closed: without a salt the stored hashes would be plain hashes of IP addresses
   if (!env.IP_SALT) throw new Error('IP_SALT is not set');
-  if (!originAllowed(req, env, url)) return json({ error: 'forbidden' }, 403);
-  const type = (req.headers.get('content-type') ?? '').split(';')[0]!.trim().toLowerCase();
-  if (type !== 'application/json') return json({ error: 'content-type' }, 415);
-
-  const text = await readCapped(req);
-  if (text === null) return json({ error: 'too large' }, 413);
-  let body: unknown;
-  try {
-    body = JSON.parse(text);
-  } catch {
-    return bad('body');
-  }
-  const valid = validateReport(body);
+  const read = await readJsonWrite(req, env, url, BODY_MAX);
+  if ('response' in read) return read.response;
+  const valid = validateReport(read.body);
   if ('error' in valid) return bad(valid.error);
 
   const ip = req.headers.get('cf-connecting-ip');
