@@ -1,5 +1,6 @@
 // Groups "the same product" across shops: same barcode, else same part number, else similar titles.
 // The title rule is ported from dashboard/src/page.ts (tokens and sameProduct).
+import { cleanGtin } from '../util/normalise.js';
 
 export type MatchInput = { id: number; shopId: number; gtin: string | null; mpn: string | null; title: string };
 export type MatchMethod = 'gtin' | 'mpn' | 'title';
@@ -35,16 +36,13 @@ export function sameTitle(a: string[], b: string[]): boolean {
   return inter / (sa.size + sb.size - inter) >= 0.5;
 }
 
-/** Digits only, leading zeros removed so UPC-A and EAN-13 forms of one code agree. Null when not a plausible GTIN. */
-function normaliseGtin(gtin: string | null): string | null {
-  if (!gtin) return null;
-  const digits = gtin.replace(/\D/g, '');
-  if (digits.length < 8 || digits.length > 14) return null;
-  const stripped = digits.replace(/^0+/, '');
-  return stripped === '' ? null : stripped;
+/** A valid GS1 code (check digit verified), zero-padded to 14 digits so UPC, EAN-13 and GTIN-14 forms agree. */
+function gtinKey(gtin: string | null): string | null {
+  const g = cleanGtin(gtin);
+  return g === null ? null : g.padStart(14, '0');
 }
 
-function normaliseMpn(mpn: string | null): string | null {
+function mpnKey(mpn: string | null): string | null {
   if (!mpn) return null;
   const n = mpn.toLowerCase().replace(/[^a-z0-9]/g, '');
   return n.length >= 5 ? n : null;
@@ -55,13 +53,7 @@ function distinctShops(items: MatchInput[]): boolean {
   return false;
 }
 
-/** Groups by an exact key; every member of a group that spans at least two shops is matched. */
-function matchByKey(
-  items: MatchInput[],
-  keyOf: (it: MatchInput) => string | null,
-  method: MatchMethod,
-  out: Map<number, Match>,
-): void {
+function groupByKey(items: MatchInput[], keyOf: (it: MatchInput) => string | null): Map<string, MatchInput[]> {
   const groups = new Map<string, MatchInput[]>();
   for (const it of items) {
     const key = keyOf(it);
@@ -70,45 +62,103 @@ function matchByKey(
     if (g) g.push(it);
     else groups.set(key, [it]);
   }
-  for (const [key, members] of groups) {
+  return groups;
+}
+
+function matchByGtin(items: MatchInput[], out: Map<number, Match>): void {
+  for (const [key, members] of groupByKey(items, (it) => gtinKey(it.gtin))) {
     if (!distinctShops(members)) continue;
-    for (const m of members) out.set(m.id, { key: `${method}:${key}`, method });
+    for (const m of members) out.set(m.id, { key: `gtin:${key}`, method: 'gtin' });
   }
 }
 
-/** Greedy grouping against each group's first item, using a numeric-token index so only plausible candidates are compared. */
+/**
+ * Same part number. As a sanity check, an item only counts when it shares at least one non-numeric title word
+ * (brand or model name) with an item of another shop in the same group.
+ */
+function matchByMpn(items: MatchInput[], out: Map<number, Match>): void {
+  for (const [key, members] of groupByKey(items, (it) => mpnKey(it.mpn))) {
+    if (!distinctShops(members)) continue;
+    const words = members.map((m) => new Set(titleTokens(m.title).filter((w) => !hasDigit(w))));
+    const shopsByWord = new Map<string, Set<number>>();
+    members.forEach((m, i) => {
+      for (const w of words[i]) {
+        const s = shopsByWord.get(w);
+        if (s) s.add(m.shopId);
+        else shopsByWord.set(w, new Set([m.shopId]));
+      }
+    });
+    members.forEach((m, i) => {
+      for (const w of words[i]) {
+        const s = shopsByWord.get(w)!;
+        if (s.size > 1 || !s.has(m.shopId)) {
+          out.set(m.id, { key: `mpn:${key}`, method: 'mpn' });
+          return;
+        }
+      }
+    });
+  }
+}
+
+/** A numeric token present in more than this share of items (and at least TITLE_MIN_COMMON items) is too common to probe with. */
+const TITLE_COMMON_SHARE = 0.02;
+const TITLE_MIN_COMMON = 50;
+/** Probe with this many of an item's rarest numeric tokens. */
+const TITLE_PROBE_TOKENS = 2;
+/** Candidate groups compared per item. */
+const TITLE_MAX_CANDIDATES = 200;
+
+/**
+ * Greedy grouping against each group's first item. Numeric tokens shared by many items (storage sizes,
+ * generation numbers) are not used to find candidates; an item is probed only through its rarest numeric tokens,
+ * so the cost stays near linear. Items with only common numeric tokens are not title-matched.
+ */
 function matchByTitle(items: MatchInput[], out: Map<number, Match>): void {
   type Group = { first: MatchInput; tokens: string[]; members: MatchInput[] };
+
+  const tokenised = items.map((it) => titleTokens(it.title));
+  const freq = new Map<string, number>();
+  for (const tokens of tokenised) {
+    for (const n of new Set(tokens.filter(hasDigit))) freq.set(n, (freq.get(n) ?? 0) + 1);
+  }
+  const commonAbove = Math.max(items.length * TITLE_COMMON_SHARE, TITLE_MIN_COMMON);
+
   const byNumber = new Map<string, Group[]>();
   const groups: Group[] = [];
 
-  for (const it of items) {
-    const tokens = titleTokens(it.title);
-    const numbers = [...new Set(tokens.filter(hasDigit))];
-    if (numbers.length === 0) continue;
-
-    const candidates = new Set<Group>();
-    for (const n of numbers) for (const g of byNumber.get(n) ?? []) candidates.add(g);
+  items.forEach((it, i) => {
+    const tokens = tokenised[i];
+    const keys = [...new Set(tokens.filter(hasDigit))]
+      .filter((n) => freq.get(n)! <= commonAbove)
+      .sort((a, b) => freq.get(a)! - freq.get(b)!);
+    if (keys.length === 0) return;
 
     let home: Group | undefined;
-    for (const g of candidates) {
-      if (sameTitle(g.tokens, tokens)) {
-        home = g;
-        break;
+    let examined = 0;
+    const seen = new Set<Group>();
+    probe: for (const n of keys.slice(0, TITLE_PROBE_TOKENS)) {
+      for (const g of byNumber.get(n) ?? []) {
+        if (seen.has(g)) continue;
+        seen.add(g);
+        if (sameTitle(g.tokens, tokens)) {
+          home = g;
+          break probe;
+        }
+        if (++examined >= TITLE_MAX_CANDIDATES) break probe;
       }
     }
     if (home) {
       home.members.push(it);
-      continue;
+      return;
     }
     const g: Group = { first: it, tokens, members: [it] };
     groups.push(g);
-    for (const n of numbers) {
+    for (const n of keys) {
       const list = byNumber.get(n);
       if (list) list.push(g);
       else byNumber.set(n, [g]);
     }
-  }
+  });
 
   for (const g of groups) {
     if (!distinctShops(g.members)) continue;
@@ -122,9 +172,9 @@ function matchByTitle(items: MatchInput[], out: Map<number, Match>): void {
  */
 export function assignMatches(items: MatchInput[]): Map<number, Match> {
   const out = new Map<number, Match>();
-  matchByKey(items, (it) => normaliseGtin(it.gtin), 'gtin', out);
+  matchByGtin(items, out);
   let rest = items.filter((it) => !out.has(it.id));
-  matchByKey(rest, (it) => normaliseMpn(it.mpn), 'mpn', out);
+  matchByMpn(rest, out);
   rest = rest.filter((it) => !out.has(it.id));
   matchByTitle(rest, out);
   return out;

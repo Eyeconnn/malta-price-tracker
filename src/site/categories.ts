@@ -30,7 +30,7 @@ export const CATEGORY_RULES: CategoryRule[] = [
   { slug: 'gaming', pattern: /\b(gaming|consoles?|video games?|playstation|ps[45]|xbox|nintendo)\b/i, on: ['category', 'tags', 'title'] },
   { slug: 'appliances', pattern: /\b(appliances?|fridges?|refrigerators?|freezers?|washing machines?|washers?|dryers?|dishwashers?|ovens?|microwaves?|cookers?|hobs?|vacuums?|air fryers?|coffee machines?|kettles?)\b/i, on: ['category', 'tags', 'title'] },
   { slug: 'toys', pattern: /\b(toys?|lego|playsets?|dolls?|puzzles?|board games?|barbie|playmobil|hot wheels)\b/i, on: ['category', 'tags', 'title'] },
-  { slug: 'baby', pattern: /\b(baby|babies|infants?|toddlers?|prams?|strollers?|nappies|car seats?)\b/i, on: ['category', 'tags', 'title'] },
+  { slug: 'baby', pattern: /\b(baby|babies|newborns?|infants?|toddlers?|prams?|strollers?|nappies|car seats?)\b/i, on: ['category', 'tags', 'title'] },
   { slug: 'fashion', pattern: /\b(fashion|clothing|clothes|apparel|shoes?|trainers|sneakers|dress(es)?|jackets?|jeans|handbags?|jewell?ery|watches)\b/i, on: ['category', 'tags', 'title'] },
   { slug: 'beauty-health', pattern: /\b(beauty|make-?up|perfumes?|fragrances?|skin ?care|cosmetics|shavers?|vitamins?|supplements?|personal care|health)\b/i, on: ['category', 'tags', 'title'] },
   { slug: 'home-kitchen', pattern: /\b(home|kitchen|furniture|garden|bedding|mattress(es)?|cookware|lighting|decor)\b/i, on: ['category', 'tags'] },
@@ -58,7 +58,7 @@ const SHOP_CATEGORY_MAP: Record<string, CategorySlug> = {
 };
 
 /** Path segments that describe the promotion, not the product, and must never decide a category. */
-const GENERIC_SEGMENT = /black.?friday|sale|offers?|deals?|clearance|new/i;
+const GENERIC_SEGMENT = /\b(black\W?friday|sale|offers?|deals?|clearance|new)\b/i;
 
 const SLUGS = new Set<string>(SITE_CATEGORIES.map((c) => c.slug));
 

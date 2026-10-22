@@ -33,7 +33,7 @@ describe('DEFAULT_SETTINGS', () => {
   });
 
   it('contains no em dash', () => {
-    expect(JSON.stringify(DEFAULT_SETTINGS)).not.toContain('\u2014');
+    expect(JSON.stringify(DEFAULT_SETTINGS)).not.toContain(String.fromCharCode(0x2014));
   });
 });
 

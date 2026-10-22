@@ -60,6 +60,14 @@ describe('categorize', () => {
     expect(categorize(input({ categoryPath: 'Black Friday Deals > Laptops' }))).toBe('laptops');
   });
 
+  it('treats generic words as whole words only', () => {
+    expect(categorize(input({ tags: ['Newborn'] }))).toBe('baby');
+    expect(categorize(input({ categoryPath: 'Renewed Laptops' }))).toBe('laptops');
+    expect(categorize(input({ categoryPath: 'Wholesale Laptops', shopCategory: 'sports' }))).toBe('laptops');
+    expect(categorize(input({ categoryPath: 'Wholesale', title: 'Something', shopCategory: 'sports' }))).toBe('sports');
+    expect(categorize(input({ categoryPath: 'New > Laptops' }))).toBe('laptops');
+  });
+
   it('returns other when nothing matches', () => {
     expect(categorize(input())).toBe('other');
     expect(categorize(input({ categoryPath: 'Miscellaneous', title: 'Widget', shopCategory: 'unknown' }))).toBe('other');
