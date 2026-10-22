@@ -532,4 +532,34 @@ describe.skipIf(!process.env.SITE_BUILD_TEST_DB)('site-build on PGlite', () => {
     const [ry] = await sql<Row[]>`select * from site_products where shop_id = ${y.id}`;
     expect([ry.canonical_id, ry.match_method, ry.match_confirmed]).toEqual([before[1].canonical_id, 'gtin', true]);
   }, 60_000);
+
+  it('stores the price, link and variant whose verdict and reason it stores, also for a judged none (R57)', async () => {
+    const [{ id: shopId }] = await sql<{ id: number }[]>`
+      insert into shops (slug, name, base_url, category, adapter) values ('variantshop', 'variantshop', 'https://variant.test', null, 'woo') returning id`;
+    const variantOf = async (key: string, bf: string | null) =>
+      (
+        await sql<{ id: string }[]>`
+          insert into products (shop_id, external_id, parent_external_id, title, url, bf_status, last_seen)
+          values (${shopId}, ${key}, 'V1', 'Variant Phone', ${'https://variant.test/' + key}, ${bf}, ${new Date(NOW.getTime() - HOUR)}) returning id`
+      )[0].id;
+    // the cheapest variant is not marked and claims nothing (not judged); the dearer one is marked Black Friday
+    const cheap = await variantOf('V1-64', null);
+    const marked = await variantOf('V1-256', 'marked');
+    const rows = [];
+    for (let i = 0; i < 17; i++) {
+      const at = new Date(`${addDays('2026-10-06', i)}T12:00:00Z`);
+      rows.push({ product_id: cheap, observed_at: at, price_cents: 69900, was_price_cents: null, in_stock: true, bf_marked: false });
+      rows.push({ product_id: marked, observed_at: at, price_cents: 89900, was_price_cents: null, in_stock: true, bf_marked: true });
+    }
+    await sql`insert into price_observations ${sql(rows as never)}`;
+    await buildSiteProducts(sql, DEFAULT_SETTINGS, NOW, { shop: 'variantshop' });
+    const [g] = await sql<Row[]>`select * from site_products where shop_id = ${shopId}`;
+    expect(g.verdict).toBe('none');
+    expect(g.reason).toBe('Price has been €899.00 on every day it showed a price since 6 Oct.');
+    expect(g.facts?.judged).toBe(true);
+    expect(g.price_cents).toBe(89900);
+    expect(g.rep_product_id).toBe(marked);
+    expect(g.url).toBe('https://variant.test/V1-256');
+    expect(g.in_stock).toBe(true);
+  }, 60_000);
 });

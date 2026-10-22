@@ -127,16 +127,15 @@ export function pickVerdictVariant(vs: VariantResult[], rep: VariantResult): Var
 }
 
 /**
- * One site_products row. A good or avoid group shows the variant that produced the label (its link, prices and
- * codes); a none or insufficient group shows the representative. Title, brand and category always come from
- * the representative so they do not change with the label.
+ * One site_products row. For every label the row shows the variant whose verdict it stores (its link, prices,
+ * stock, codes and history), so the stored price is the one the reason talks about (Ruling R57). Title, brand
+ * and category always come from the representative so they do not change with the label.
  */
 function buildGroup(groupKey: string, vs: VariantResult[], shop: Shop, settings: SiteSettings): GroupRow {
   const rep = pickRepresentative(vs);
   const chosen = pickVerdictVariant(vs, rep);
-  const shown = chosen.verdict.label === 'good' || chosen.verdict.label === 'avoid' ? chosen : rep;
   const p = rep.product;
-  const s = shown.product;
+  const s = chosen.product;
   const title = p.title ?? vs.find((v) => v.product.title)?.product.title ?? '';
   return {
     group_key: groupKey,
@@ -150,9 +149,9 @@ function buildGroup(groupKey: string, vs: VariantResult[], shop: Shop, settings:
     rep_product_id: s.id,
     gtin: s.gtin,
     mpn: s.mpn,
-    price_cents: shown.latest?.price ?? null,
-    was_price_cents: shown.latest?.was ?? null,
-    in_stock: shown.latest?.inStock ?? null,
+    price_cents: chosen.latest?.price ?? null,
+    was_price_cents: chosen.latest?.was ?? null,
+    in_stock: chosen.latest?.inStock ?? null,
     bf_status: vs.some((v) => v.product.bf_status === 'marked') ? 'marked' : s.bf_status,
     verdict: chosen.verdict.label,
     reason: chosen.verdict.reason,
