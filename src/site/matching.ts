@@ -15,8 +15,11 @@ const IGNORE = new Set(
 // Model words must agree between two titles.
 const MODEL = new Set('pro max plus mini ultra air lite se fe neo slim xl xs'.split(' '));
 
+/** Titles are cut to this many characters before tokenising, so a huge shop title cannot blow up the work. */
+const MAX_TITLE_CHARS = 300;
+
 export function titleTokens(title: string): string[] {
-  return (title || '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').split(' ').filter((w) => w.length > 1 && !IGNORE.has(w));
+  return (title || '').slice(0, MAX_TITLE_CHARS).toLowerCase().replace(/[^a-z0-9]+/g, ' ').split(' ').filter((w) => w.length > 1 && !IGNORE.has(w));
 }
 
 const hasDigit = (w: string) => /[0-9]/.test(w);
@@ -25,7 +28,8 @@ export function sameTitle(a: string[], b: string[]): boolean {
   const da = a.filter(hasDigit);
   const db = b.filter(hasDigit);
   const [small, big] = da.length <= db.length ? [da, db] : [db, da];
-  if (!small.every((w) => big.includes(w))) return false;
+  const bigSet = new Set(big);
+  if (!small.every((w) => bigSet.has(w))) return false;
   const ma = a.filter((w) => MODEL.has(w)).sort().join(' ');
   const mb = b.filter((w) => MODEL.has(w)).sort().join(' ');
   if (ma !== mb) return false;
@@ -42,9 +46,15 @@ function gtinKey(gtin: string | null): string | null {
   return g === null ? null : g.padStart(14, '0');
 }
 
+/** Values shops put in the MPN field when there is no part number. */
+const PLACEHOLDER_MPNS = new Set(['none', 'na', 'default', 'notapplicable', 'tbc', 'tba', 'unknown']);
+
 function mpnKey(mpn: string | null): string | null {
   if (!mpn) return null;
   const n = mpn.toLowerCase().replace(/[^a-z0-9]/g, '');
+  if (PLACEHOLDER_MPNS.has(n)) return null;
+  // all zeros, or one character repeated ("0000000", "xxxxx")
+  if (/^(.)\1*$/.test(n)) return null;
   return n.length >= 5 ? n : null;
 }
 
@@ -91,7 +101,7 @@ function matchByMpn(items: MatchInput[], out: Map<number, Match>): void {
     members.forEach((m, i) => {
       for (const w of words[i]) {
         const s = shopsByWord.get(w)!;
-        if (s.size > 1 || !s.has(m.shopId)) {
+        if (s.size > 1) {
           out.set(m.id, { key: `mpn:${key}`, method: 'mpn' });
           return;
         }
@@ -107,6 +117,8 @@ const TITLE_MIN_COMMON = 50;
 const TITLE_PROBE_TOKENS = 2;
 /** Candidate groups compared per item. */
 const TITLE_MAX_CANDIDATES = 200;
+/** A group is indexed under at most this many of its rarest numeric tokens. */
+const TITLE_MAX_INDEX_KEYS = 8;
 
 /**
  * Greedy grouping against each group's first item. Numeric tokens shared by many items (storage sizes,
@@ -153,7 +165,7 @@ function matchByTitle(items: MatchInput[], out: Map<number, Match>): void {
     }
     const g: Group = { first: it, tokens, members: [it] };
     groups.push(g);
-    for (const n of keys) {
+    for (const n of keys.slice(0, TITLE_MAX_INDEX_KEYS)) {
       const list = byNumber.get(n);
       if (list) list.push(g);
       else byNumber.set(n, [g]);

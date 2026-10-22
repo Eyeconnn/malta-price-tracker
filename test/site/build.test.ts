@@ -2,11 +2,15 @@ import { readdir, readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import postgres from 'postgres';
-import { DEFAULT_SETTINGS } from '../../src/site/settings.js';
+import { DEFAULT_SETTINGS, loadSettings } from '../../src/site/settings.js';
 import type { Obs, Verdict } from '../../src/site/verdict.js';
 import {
   buildShopRatings,
   buildSiteProducts,
+  lastFullBuild,
+  markFullBuild,
+  pctColumn,
+  withBuildLock,
   pickRepresentative,
   pickVerdictVariant,
   toObs,
@@ -51,6 +55,21 @@ describe('toObs', () => {
       inStock: true,
       bf: false,
     });
+  });
+});
+
+describe('pctColumn', () => {
+  it('rounds to 2 decimals and nulls what numeric(5,2) cannot hold', () => {
+    expect(pctColumn(12.7)).toBe(12.7);
+    expect(pctColumn(-10.126)).toBe(-10.13);
+    expect(pctColumn(999.994)).toBe(999.99);
+    expect(pctColumn(999.996)).toBeNull();
+    expect(pctColumn(999.995)).toBeNull();
+    expect(pctColumn(-999.996)).toBeNull();
+    expect(pctColumn(1000)).toBeNull();
+    expect(pctColumn(-0.001)).toBe(0);
+    expect(pctColumn(null)).toBeNull();
+    expect(pctColumn(Number.NaN)).toBeNull();
   });
 });
 
@@ -179,7 +198,10 @@ describe.skipIf(!process.env.SITE_BUILD_TEST_DB)('site-build on PGlite', () => {
     });
     ids.mid = await product(a, { external_id: 'MID', title: 'Seen 5 days ago', last_seen: new Date(NOW.getTime() - 5 * DAY) });
     ids.old = await product(a, { external_id: 'OLD', title: 'Seen 10 days ago', last_seen: new Date(NOW.getTime() - 10 * DAY) });
-    ids.b1 = await product(b, { external_id: 'B1', title: 'Lenovo IdeaPad Slim 5 8GB', gtin: '4006381333931' });
+    ids.b1 = await product(b, { external_id: 'B1', title: 'Lenovo IdeaPad Slim 5 16GB', gtin: '5901234123457' });
+    // a none group with two variants shows its cheapest in-stock variant
+    ids.k1 = await product(a, { external_id: 'K1-L', parent_external_id: 'K1', title: 'Kettle', variant_title: 'Large', url: 'https://lenovoshop.test/k1?v=l' });
+    ids.k2 = await product(a, { external_id: 'K1-S', parent_external_id: 'K1', title: 'Kettle', variant_title: 'Small', url: 'https://lenovoshop.test/k1?v=s' });
     ids.c1 = await product(c, { external_id: 'C1', title: 'Hidden shop product', gtin: '4006381333931' });
 
     type O = { product_id: string; observed_at: Date; price_cents: number; was_price_cents: number | null; in_stock: boolean; bf_marked: boolean | null };
@@ -191,6 +213,8 @@ describe.skipIf(!process.env.SITE_BUILD_TEST_DB)('site-build on PGlite', () => {
     add(ids.v16, '2026-10-21', 70900, 73900, true);
     add(ids.v16, '2026-10-22', 79900, 88900, true);
     for (let i = 0; i < 17; i++) add(ids.v8, addDays('2026-10-06', i), 64900, null, null);
+    for (let i = 0; i < 17; i++) add(ids.k1, addDays('2026-10-06', i), 4500, null, false);
+    for (let i = 0; i < 17; i++) add(ids.k2, addDays('2026-10-06', i), 3500, null, false);
     add(ids.b1, '2026-10-22', 69900, null, false);
     add(ids.c1, '2026-10-22', 50000, null, false);
     await sql`insert into price_observations ${sql(rows as never)}`;
@@ -220,6 +244,7 @@ describe.skipIf(!process.env.SITE_BUILD_TEST_DB)('site-build on PGlite', () => {
     url: string | null;
     image_url: string | null;
     price_cents: number | null;
+    was_price_cents: number | null;
     in_stock: boolean | null;
     bf_status: string | null;
     verdict: string;
@@ -235,7 +260,7 @@ describe.skipIf(!process.env.SITE_BUILD_TEST_DB)('site-build on PGlite', () => {
 
   it('builds the Lenovo group as avoid and matches it to the other shop by GTIN', async () => {
     const res = await buildSiteProducts(sql, DEFAULT_SETTINGS, NOW);
-    expect(res).toEqual({ products: 2, judged: 1 });
+    expect(res).toEqual({ products: 3, judged: 1 });
 
     const rows = await rowsOf();
     const lenovo = find(rows, ids.a, 'P1')!;
@@ -245,16 +270,25 @@ describe.skipIf(!process.env.SITE_BUILD_TEST_DB)('site-build on PGlite', () => {
     expect(lenovo.facts?.wasRaisedFrom).toBe(73900);
     expect(lenovo.title).toBe('Lenovo IdeaPad Slim 5');
     expect(lenovo.category).toBe('laptops');
-    // representative: the cheaper in-stock 8GB variant
-    expect(lenovo.rep_product_id).toBe(ids.v8);
-    expect(lenovo.price_cents).toBe(64900);
+    // an avoid group shows the variant that produced the label: the 16GB, not the cheaper 8GB
+    expect(lenovo.rep_product_id).toBe(ids.v16);
+    expect(lenovo.price_cents).toBe(79900);
+    expect(lenovo.was_price_cents).toBe(88900);
     expect(lenovo.in_stock).toBe(true);
-    expect(lenovo.gtin).toBe('4006381333931');
-    expect(lenovo.url).toBe('https://lenovoshop.test/p1?v=8');
+    expect(lenovo.gtin).toBe('5901234123457');
+    expect(lenovo.url).toBe('https://lenovoshop.test/p1?v=16');
+    // the 16GB has no picture of its own: the representative's is used
     expect(lenovo.image_url).toBe('https://lenovoshop.test/p1.jpg');
     expect(lenovo.bf_status).toBe('marked');
     expect(lenovo.updated_at.getTime()).toBe(NOW.getTime());
     expect(lenovo.match_confirmed).toBe(true);
+
+    const kettle = find(rows, ids.a, 'K1')!;
+    expect(kettle.verdict).toBe('none');
+    expect(kettle.rep_product_id).toBe(ids.k2);
+    expect(kettle.price_cents).toBe(3500);
+    expect(kettle.url).toBe('https://lenovoshop.test/k1?v=s');
+    expect(kettle.variant_count).toBe(2);
 
     const other = find(rows, ids.b, 'B1')!;
     expect(other.verdict).toBe('insufficient');
@@ -264,17 +298,17 @@ describe.skipIf(!process.env.SITE_BUILD_TEST_DB)('site-build on PGlite', () => {
     expect(other.match_method).toBe('gtin');
 
     const canon = await sql`select match_key, title from canonical_products where id = ${lenovo.canonical_id}`;
-    expect(canon[0].match_key).toBe('gtin:04006381333931');
+    expect(canon[0].match_key).toBe('gtin:05901234123457');
 
     // stale and hidden rows are gone, the group seen 5 days ago stays untouched
     expect(find(rows, ids.a, 'OLD')).toBeUndefined();
     expect(find(rows, ids.c, 'C1')).toBeUndefined();
     expect(find(rows, ids.a, 'MID')?.title).toBe('Seen 5 days ago');
-    expect(rows).toHaveLength(3);
+    expect(rows).toHaveLength(4);
 
-    const verdicts = await sql`select product_id, label, price_cents, low_30d_cents, history_days, claimed_pct, real_pct, computed_at from verdicts`;
+    const verdicts = await sql`select product_id, label, price_cents, was_price_cents, low_30d_cents, history_days, claimed_pct, real_pct, computed_at from verdicts`;
     expect(verdicts).toHaveLength(1);
-    expect(verdicts[0]).toMatchObject({ product_id: ids.v8, label: 'avoid', price_cents: 64900, low_30d_cents: 70900, history_days: 17 });
+    expect(verdicts[0]).toMatchObject({ product_id: ids.v16, label: 'avoid', price_cents: 79900, was_price_cents: 88900, low_30d_cents: 70900, history_days: 17 });
     expect(Number(verdicts[0].real_pct)).toBe(12.7);
     expect(Number(verdicts[0].claimed_pct)).toBe(-10.1);
   }, 60_000);
@@ -295,9 +329,9 @@ describe.skipIf(!process.env.SITE_BUILD_TEST_DB)('site-build on PGlite', () => {
   }, 60_000);
 
   it('clears a match that no longer holds and keeps match_confirmed', async () => {
-    await sql`update products set gtin = '5901234123457' where id = ${ids.b1}`;
+    await sql`update products set gtin = '4006381333931' where id = ${ids.b1}`;
     const res = await buildSiteProducts(sql, DEFAULT_SETTINGS, new Date(NOW.getTime() + HOUR));
-    expect(res.products).toBe(2);
+    expect(res.products).toBe(3);
     const rows = await rowsOf();
     const lenovo = find(rows, ids.a, 'P1')!;
     expect(lenovo.canonical_id).toBeNull();
@@ -312,8 +346,30 @@ describe.skipIf(!process.env.SITE_BUILD_TEST_DB)('site-build on PGlite', () => {
   it('builds only the named shop with { shop }', async () => {
     await sql`update products set title = 'Renamed' where id = ${ids.b1}`;
     const res = await buildSiteProducts(sql, DEFAULT_SETTINGS, new Date(NOW.getTime() + 2 * HOUR), { shop: 'lenovoshop' });
-    expect(res.products).toBe(1);
+    expect(res.products).toBe(2);
     const rows = await rowsOf();
-    expect(find(rows, ids.b, 'B1')!.title).toBe('Lenovo IdeaPad Slim 5 8GB');
+    expect(find(rows, ids.b, 'B1')!.title).toBe('Lenovo IdeaPad Slim 5 16GB');
+  }, 60_000);
+
+  it('runs the build under the advisory lock and frees it afterwards', async () => {
+    let calls = 0;
+    expect(await withBuildLock(sql, async () => void calls++)).toBe(true);
+    expect(await withBuildLock(sql, async () => void calls++)).toBe(true);
+    expect(calls).toBe(2);
+    const [{ held }] = await sql`select count(*)::int as held from pg_locks where locktype = 'advisory'`;
+    expect(held).toBe(0);
+    await expect(withBuildLock(sql, async () => { throw new Error('boom'); })).rejects.toThrow('boom');
+  }, 60_000);
+
+  it('records the last full build in site_settings without changing the loaded settings', async () => {
+    expect(await lastFullBuild(sql)).toBeNull();
+    await markFullBuild(sql, NOW);
+    expect((await lastFullBuild(sql))?.toISOString()).toBe(NOW.toISOString());
+    const later = new Date(NOW.getTime() + DAY);
+    await markFullBuild(sql, later);
+    expect((await lastFullBuild(sql))?.toISOString()).toBe(later.toISOString());
+    const [row] = await sql`select value from site_settings where key = 'lastFullBuild'`;
+    expect(row.value).toEqual({ at: later.toISOString() });
+    expect(await loadSettings(sql)).toEqual(DEFAULT_SETTINGS);
   }, 60_000);
 });

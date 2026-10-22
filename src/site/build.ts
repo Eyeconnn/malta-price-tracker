@@ -121,35 +121,49 @@ export function pickVerdictVariant(vs: VariantResult[], rep: VariantResult): Var
   return worst.includes(rep) ? rep : cheapest(worst);
 }
 
+/**
+ * One site_products row. A good or avoid group shows the variant that produced the label (its link, prices and
+ * codes); a none or insufficient group shows the representative. Title, brand and category always come from
+ * the representative so they do not change with the label.
+ */
 function buildGroup(groupKey: string, vs: VariantResult[], shop: Shop, settings: SiteSettings): GroupRow {
   const rep = pickRepresentative(vs);
   const chosen = pickVerdictVariant(vs, rep);
+  const shown = chosen.verdict.label === 'good' || chosen.verdict.label === 'avoid' ? chosen : rep;
   const p = rep.product;
+  const s = shown.product;
   const title = p.title ?? vs.find((v) => v.product.title)?.product.title ?? '';
   return {
     group_key: groupKey,
     title,
     brand: p.brand ?? vs.find((v) => v.product.brand)?.product.brand ?? null,
-    url: p.url,
-    image_url: p.image_url,
+    url: s.url,
+    // a variant without its own picture falls back to the representative's
+    image_url: s.image_url ?? p.image_url,
     category: categorize({ categoryPath: p.category_path, tags: p.tags ?? [], title, shopCategory: shop.category }, settings.categoryOverrides),
     variant_count: vs.length,
-    rep_product_id: p.id,
-    gtin: p.gtin,
-    mpn: p.mpn,
-    price_cents: rep.latest?.price ?? null,
-    was_price_cents: rep.latest?.was ?? null,
-    in_stock: rep.latest?.inStock ?? null,
-    bf_status: vs.some((v) => v.product.bf_status === 'marked') ? 'marked' : p.bf_status,
+    rep_product_id: s.id,
+    gtin: s.gtin,
+    mpn: s.mpn,
+    price_cents: shown.latest?.price ?? null,
+    was_price_cents: shown.latest?.was ?? null,
+    in_stock: shown.latest?.inStock ?? null,
+    bf_status: vs.some((v) => v.product.bf_status === 'marked') ? 'marked' : s.bf_status,
     verdict: chosen.verdict.label,
     reason: chosen.verdict.reason,
     facts: chosen.verdict.facts,
   };
 }
 
-/** verdicts.claimed_pct / real_pct are numeric(5,2); a value outside that range (price glitches) is stored as null. */
-function pctColumn(v: number | null): number | null {
-  return v !== null && Number.isFinite(v) && Math.abs(v) < 1000 ? v : null;
+/**
+ * verdicts.claimed_pct / real_pct are numeric(5,2): rounded to 2 decimals; a value that would round to
+ * abs >= 1000 (price glitches) is stored as null instead of overflowing the insert.
+ */
+export function pctColumn(v: number | null): number | null {
+  // Postgres rounds half away from zero, so 999.995 and above would become 1000.00 and overflow.
+  if (v === null || !Number.isFinite(v) || Math.abs(v) >= 999.995) return null;
+  const r = (Math.sign(v) * Math.round(Math.abs(v) * 100)) / 100;
+  return r === 0 ? 0 : r;
 }
 
 /** postgres.js types a JS boolean array as a single boolean, so booleans travel as text[] and are cast per row. */
@@ -178,7 +192,8 @@ async function writeGroups(sql: postgres.Sql, shopId: number, groups: GroupRow[]
       in_stock = excluded.in_stock, bf_status = excluded.bf_status, verdict = excluded.verdict, reason = excluded.reason,
       facts = excluded.facts, updated_at = excluded.updated_at`;
 
-  // History of judged groups only, to keep storage small: one row per good/avoid group per run.
+  // History of judged groups only, to keep storage small: one row per good/avoid group per run, all from the
+  // variant that produced the label (rep_product_id and prices are that variant's for good/avoid groups).
   const judged = groups.filter((g) => g.verdict === 'good' || g.verdict === 'avoid');
   if (judged.length === 0) return;
   await sql`
@@ -392,4 +407,46 @@ export async function buildShopRatings(sql: postgres.Sql, settings: SiteSettings
       grade = excluded.grade, judged = excluded.judged, good = excluded.good, avoid = excluded.avoid,
       was_raised = excluded.was_raised, sentence = excluded.sentence, computed_at = excluded.computed_at`;
   return rated.length;
+}
+
+/** site_settings key holding { at: ISO time } of the last successful full build (internal; loadSettings ignores it). */
+export const LAST_FULL_BUILD_KEY = 'lastFullBuild';
+
+/** Records a successful full build (all shops, ratings included). Partial (--shop) or failed runs must not call this. */
+export async function markFullBuild(sql: postgres.Sql, at: Date): Promise<void> {
+  await sql`
+    insert into site_settings (key, value, updated_at)
+    values (${LAST_FULL_BUILD_KEY}, ${sql.json({ at: at.toISOString() })}, ${at})
+    on conflict (key) do update set value = excluded.value, updated_at = excluded.updated_at`;
+}
+
+/** Time of the last successful full build, or null when none is recorded. */
+export async function lastFullBuild(sql: postgres.Sql): Promise<Date | null> {
+  const rows = await sql<{ value: unknown }[]>`select value from site_settings where key = ${LAST_FULL_BUILD_KEY}`;
+  const at = (rows[0]?.value as { at?: unknown } | undefined)?.at;
+  if (typeof at !== 'string') return null;
+  const d = new Date(at);
+  return Number.isNaN(d.getTime()) ? null : d;
+}
+
+/** Fixed advisory lock id for site-build ("SBLD"). */
+export const SITE_BUILD_LOCK = 0x53424c44;
+
+/**
+ * Runs fn while holding the site-build advisory lock; returns false without running it when another build holds it.
+ * The lock is transaction scoped and held by an open transaction on one pooled connection, because DATABASE_URL
+ * may go through Neon's transaction-mode pooler, where a session lock would stay on a server connection the
+ * client no longer owns. The transaction does no writes; it ends (and frees the lock) when fn settles or the
+ * process dies. The idle-in-transaction timeout is lifted for it, since a build can take longer than Neon's 5 min.
+ */
+export async function withBuildLock(sql: postgres.Sql, fn: () => Promise<void>): Promise<boolean> {
+  let ran = false;
+  await sql.begin(async (tx) => {
+    await tx`set local idle_in_transaction_session_timeout = 0`;
+    const [{ ok }] = await tx<{ ok: boolean }[]>`select pg_try_advisory_xact_lock(${SITE_BUILD_LOCK}::bigint) as ok`;
+    if (!ok) return;
+    ran = true;
+    await fn();
+  });
+  return ran;
 }

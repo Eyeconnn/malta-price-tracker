@@ -95,6 +95,14 @@ describe('assignMatches', () => {
     expect(assignMatches([item(1, 10, 'A', { mpn: 'AB-1' }), item(2, 20, 'B', { mpn: 'ab1' })]).size).toBe(0);
   });
 
+  it('never matches placeholder MPNs such as N/A or 0000000', () => {
+    const titles = ['Razer DeathAdder Mouse', 'RAZER gaming pointer'];
+    for (const mpn of ['N/A', 'n.a.', 'NONE', 'Default', 'Not Applicable', 'TBC', 'tba', 'Unknown', '0000000', '000-00-00', 'XXXXX', '11111']) {
+      const m = assignMatches([item(1, 10, titles[0], { mpn }), item(2, 20, titles[1], { mpn })]);
+      expect(m.size, mpn).toBe(0);
+    }
+  });
+
   it('never matches two items from one shop', () => {
     const m = assignMatches([
       item(1, 10, 'Apple iPhone 17 256GB'),
@@ -132,6 +140,15 @@ describe('assignMatches', () => {
 
   it('leaves titles without numbers unmatched', () => {
     expect(assignMatches([item(1, 10, 'Gaming Mouse Pro'), item(2, 20, 'Gaming Mouse Pro')]).size).toBe(0);
+  });
+
+  it('handles a 2000-character title', () => {
+    const long = 'Apple iPhone 17 256GB ' + Array.from({ length: 500 }, (_, i) => `w${i}`).join(' ');
+    expect(long.length).toBeGreaterThan(2000);
+    const started = Date.now();
+    const m = assignMatches([item(1, 10, long), item(2, 20, 'Apple iPhone 17 256GB'), item(3, 30, long)]);
+    expect(m).toBeInstanceOf(Map);
+    expect(Date.now() - started).toBeLessThan(1000);
   });
 
   it('matches a realistic 100k item catalogue quickly', () => {
