@@ -69,6 +69,22 @@ describe.each([
     expect(ratio(color('--tag-gold-ink'), color('--tag-gold'))).toBeGreaterThanOrEqual(4.5);
     expect(ratio(color('--tag-red-ink'), color('--tag-red'))).toBeGreaterThanOrEqual(4.5);
   });
+
+  it('crossed-out was price is at least 4.5:1 on its tag fill', () => {
+    expect(ratio(color('--tag-gold-was'), color('--tag-gold'))).toBeGreaterThanOrEqual(4.5);
+    expect(ratio(color('--tag-red-was'), color('--tag-red'))).toBeGreaterThanOrEqual(4.5);
+  });
+});
+
+describe('price tag was price', () => {
+  // The was-price colour is the token itself: no opacity on the struck-through text.
+  it('uses the was tokens without opacity', () => {
+    const rules = [...css.matchAll(/([^{}]*\bs)\s*\{([^{}]*)\}/g)].filter((m) => m[1]!.includes('.price-tag'));
+    expect(rules.length).toBeGreaterThan(0);
+    for (const [, , body] of rules) expect(body).not.toMatch(/opacity/);
+    expect(css).toMatch(/\.price-tag-good \.price-tag-label s\s*\{[^}]*color:\s*var\(--tag-gold-was\)/);
+    expect(css).toMatch(/\.price-tag-avoid \.price-tag-label s\s*\{[^}]*color:\s*var\(--tag-red-was\)/);
+  });
 });
 
 describe('light theme accent buttons', () => {

@@ -150,6 +150,16 @@ describe('Headline', () => {
     expect(screen.getByRole('heading').textContent).toBe('Is that deal real?');
   });
 
+  it.each([['**'], ['*'], ['***'], ['  '], ['* *']])('treats %j as unusable and falls back', (bad) => {
+    render(<Headline phrases={phrases({ afternoon: [bad] })} now={AFTERNOON} />);
+    expect(screen.getByRole('heading').textContent).toBe('Is that deal real?');
+  });
+
+  it('only picks among lines with visible text', () => {
+    render(<Headline phrases={phrases({ afternoon: ['**', 'Only *this*.', '*'] })} now={AFTERNOON} random={() => 0} />);
+    expect(screen.getByRole('heading').textContent).toBe('Only this.');
+  });
+
   it('never shows "0 days" with the default phrases on the day', () => {
     for (const r of [0, 0.34, 0.67, 0.99]) {
       const { unmount } = render(<Headline phrases={DEFAULT_SETTINGS.phrases} now={new Date('2026-11-27T10:00:00Z')} random={() => r} />);
@@ -168,6 +178,28 @@ describe('parseHighlight', () => {
       { text: ' c d', em: false },
     ]);
   });
+
+  it.each([[''], ['**'], ['***'], ['*']])('gives no segments for %j', (line) => {
+    expect(parseHighlight(line)).toEqual([]);
+  });
+
+  it('pairs asterisks left to right in nested-looking markup', () => {
+    expect(parseHighlight('*a *b* c*')).toEqual([
+      { text: 'a ', em: true },
+      { text: 'b', em: false },
+      { text: ' c', em: true },
+    ]);
+  });
+
+  it('handles a 5,000-character line', () => {
+    const marked = '*a*'.repeat(1666) + 'xy'; // 5,000 chars
+    expect(marked).toHaveLength(5000);
+    const segs = parseHighlight(marked);
+    expect(segs).toHaveLength(1667);
+    expect(segs.filter((s) => s.em)).toHaveLength(1666);
+    const unclosed = '*' + 'a'.repeat(4999);
+    expect(parseHighlight(unclosed)).toEqual([{ text: 'a'.repeat(4999), em: false }]);
+  });
 });
 
 describe('PriceTag', () => {
@@ -185,6 +217,28 @@ describe('PriceTag', () => {
     expect(screen.queryByText('RAISED')).toBeNull();
     expect(screen.getByText('WAS UP')).toBeTruthy();
     expect(screen.getByRole('img', { name: 'WAS UP: from €709.00 to €799.00' })).toBeTruthy();
+  });
+
+  it.each([[0], [-100], [null], [Number.NaN]])('never shows a from price of %s; the avoid tag shows only the price now', (from) => {
+    const { container } = render(<PriceTag kind="avoid" from={from} to={79900} />);
+    expect(container.textContent).not.toContain('€0.00');
+    expect(container.textContent).not.toContain('-');
+    expect(container.querySelector('s')).toBeNull();
+    expect(screen.getByText('€799.00')).toBeTruthy();
+    expect(screen.getByText('RAISED')).toBeTruthy();
+    expect(screen.getByRole('img', { name: 'Raised, now €799.00' })).toBeTruthy();
+  });
+
+  it.each([[0], [-100], [null]])('never shows a price now of %s', (to) => {
+    const { container } = render(<PriceTag kind="avoid" from={70900} to={to} />);
+    expect(container.textContent).not.toMatch(/€/);
+    expect(screen.getByText('RAISED')).toBeTruthy();
+    expect(screen.getByRole('img', { name: 'Raised' })).toBeTruthy();
+  });
+
+  it('never puts €0.00 in a good tag label', () => {
+    render(<PriceTag kind="good" from={0} to={0} />);
+    expect(screen.getByRole('img', { name: 'Real deal' })).toBeTruthy();
   });
 
   it('shows a gold real-deal tag with three decorative sparkles', () => {

@@ -3,10 +3,10 @@ import { cn } from '@/lib/utils';
 
 export type PriceTagProps = {
   kind: 'good' | 'avoid';
-  /** cents: the earlier, lower price (avoid tags show it crossed out) */
-  from?: number;
+  /** cents: the earlier, lower price (avoid tags show it crossed out); shown only with a valid `to` */
+  from?: number | null;
   /** cents: the price now */
-  to?: number;
+  to?: number | null;
   /** replaces the words "REAL DEAL" (good) or "RAISED" (avoid) */
   label?: string;
   size?: 'sm' | 'md';
@@ -23,11 +23,16 @@ const SPARKLES = [
   { left: '12%', top: '86%', delay: '1.5s', small: true },
 ] as const;
 
+/** A price worth showing: a positive, finite number of cents. Zero, negative or missing never shows as "€0.00". */
+function priceText(cents: number | null | undefined): string | null {
+  return typeof cents === 'number' && Number.isFinite(cents) && cents > 0 ? formatEuro(cents) : null;
+}
+
 function spoken(kind: PriceTagProps['kind'], from: string | null, to: string | null, label: string | undefined): string {
   const range = from && to ? `from ${from} to ${to}` : to ? `now ${to}` : null;
   if (label) return range ? `${label}: ${range}` : label;
-  if (kind === 'avoid') return range ? `Raised ${range}` : 'Raised';
-  return from && to ? `Real deal: down ${range}` : to ? `Real deal: ${to}` : 'Real deal';
+  if (kind === 'avoid') return from && to ? `Raised ${range}` : to ? `Raised, ${range}` : 'Raised';
+  return from && to ? `Real deal: down ${range}` : to ? `Real deal: ${range}` : 'Real deal';
 }
 
 /**
@@ -36,8 +41,9 @@ function spoken(kind: PriceTagProps['kind'], from: string | null, to: string | n
  * Screen readers get one sentence with the facts; the drawing itself is hidden from them.
  */
 export function PriceTag({ kind, from, to, label, size = 'md', className }: PriceTagProps) {
-  const fromText = from === undefined ? null : formatEuro(from);
-  const toText = to === undefined ? null : formatEuro(to);
+  // Without a valid price now, an earlier price alone means nothing: show neither.
+  const toText = priceText(to);
+  const fromText = toText ? priceText(from) : null;
   const long = Math.max(fromText?.length ?? 0, toText?.length ?? 0) > 7;
   const w = size === 'sm' ? 50 : 66;
   const h = size === 'sm' ? 67 : 88;

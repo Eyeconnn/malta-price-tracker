@@ -40,6 +40,9 @@
   --tag-red: #f6d2cb;
   --tag-red-edge: #d0574a;
   --tag-red-ink: #8f1f12;
+  /* crossed-out was price on a tag: lighter than the ink, still AA on the tag fill */
+  --tag-gold-was: #6e5a26;
+  --tag-red-was: #9c3a2e;
   --tag-gold-string: #8a7a55;
   --tag-red-string: #8a5550;
   /* RATING letters A (best) to F (worst); text tokens, AA on bg and glass */
@@ -76,6 +79,8 @@
     --tag-red: #ef9d92;
     --tag-red-edge: #b5392b;
     --tag-red-ink: #5a0d05;
+    --tag-gold-was: #625226;
+    --tag-red-was: #6e2a22;
     --tag-gold-string: #a89a75;
     --tag-red-string: #a8756f;
     --grade-a: #3ecf8e;
@@ -279,8 +284,13 @@
     color: var(--tag-red-ink);
   }
   .price-tag-label s {
-    opacity: 0.7;
     font-weight: 600;
+  }
+  .price-tag-good .price-tag-label s {
+    color: var(--tag-gold-was);
+  }
+  .price-tag-avoid .price-tag-label s {
+    color: var(--tag-red-was);
   }
   .price-tag-label small {
     display: block;
@@ -436,7 +446,7 @@
     transition-duration: 0.01ms !important;
     scroll-behavior: auto !important;
   }
-  .price-tag,
+  .price-tag-good,
   .price-tag-sparkle,
   .headline-flip,
   .headline-em::after {

@@ -49,9 +49,13 @@ export type HeadlineProps = {
 export function Headline({ phrases, now, random = Math.random, className }: HeadlineProps) {
   const [pick] = useState(random);
   const days = daysToBlackFriday(now);
-  const usable = (phrases[slotFor(now)] ?? []).filter((l) => l.trim() !== '' && (days > 0 || !l.includes('{days}')));
-  const line = usable.length > 0 ? usable[Math.min(usable.length - 1, Math.floor(pick * usable.length))]! : FALLBACK_LINE;
-  const segments = parseHighlight(line.replaceAll('{days}', daysText(days)));
+  // Usable lines: no {days} once the day has come, and some visible text after parsing ("**" is not).
+  const usable = (phrases[slotFor(now)] ?? [])
+    .filter((l) => days > 0 || !l.includes('{days}'))
+    .map((l) => parseHighlight(l.replaceAll('{days}', daysText(days))))
+    .filter((segs) => segs.some((s) => s.text.trim() !== ''));
+  const segments =
+    usable.length > 0 ? usable[Math.min(usable.length - 1, Math.floor(pick * usable.length))]! : parseHighlight(FALLBACK_LINE);
 
   return (
     <h1 className={cn('headline text-balance text-3xl font-extrabold tracking-tight sm:text-4xl', className)}>
