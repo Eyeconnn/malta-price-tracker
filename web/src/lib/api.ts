@@ -78,10 +78,14 @@ export type DealsQuery = { type: 'good' | 'avoid'; category?: string | null; sho
 
 /** A non-2xx answer from the API (or a body that is not JSON). */
 export class ApiError extends Error {
-  /** field: the `error` of a 400 answer to a write (the field that was rejected) */
+  /**
+   * field: the `error` of a 400 answer to a write (the field that was rejected);
+   * retryAfter: seconds from a 429's retry-after header, null when absent or not a number
+   */
   constructor(
     readonly status: number,
     readonly field?: string,
+    readonly retryAfter: number | null = null,
   ) {
     super(`API answered ${status}`);
     this.name = 'ApiError';
@@ -106,7 +110,7 @@ async function get<T>(path: string, signal?: AbortSignal): Promise<T> {
   }
 }
 
-/** POST /api/reports; resolves on 201, otherwise throws ApiError (429: rate limited, 400: a bad field). */
+/** POST /api/reports; resolves on 201, otherwise throws ApiError (429: rate limited with retryAfter, 400: a bad field). */
 async function postReport(body: ReportBody): Promise<void> {
   const res = await fetch('/api/reports', {
     method: 'POST',
@@ -120,7 +124,8 @@ async function postReport(body: ReportBody): Promise<void> {
     } catch {
       // not JSON
     }
-    throw new ApiError(res.status, field);
+    const retry = res.headers.get('retry-after');
+    throw new ApiError(res.status, field, retry !== null && /^\d{1,9}$/.test(retry.trim()) ? Number(retry) : null);
   }
 }
 

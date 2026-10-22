@@ -2,9 +2,10 @@
 // The "Something wrong?" dialog (web/src/components/site/ReportButton.tsx) against a mocked POST /api/reports.
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { EMAIL_NOTE, RATE_LIMITED, ReportButton, SEND_FAILED } from '@/components/site/ReportButton';
+import { EMAIL_NOTE, RATE_LIMITED, rateLimitedText, ReportButton, SEND_FAILED } from '@/components/site/ReportButton';
 
-const json = (body: unknown, status: number) => new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } });
+const json = (body: unknown, status: number, headers: Record<string, string> = {}) =>
+  new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json', ...headers } });
 
 function mockPost(answer: () => Response | Promise<Response>) {
   const fn = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => answer());
@@ -52,6 +53,9 @@ describe('ReportButton', () => {
     const thanks = await within(dialog).findByRole('status');
     expect(thanks.textContent).toContain('Thank you, your report has been sent.');
     await waitFor(() => expect(document.activeElement).toBe(thanks));
+    // the intro is for the form only
+    expect(within(dialog).queryByText(/Tell us what looks wrong/)).toBeNull();
+    expect(within(dialog).getByText('Lenovo IdeaPad at Scan')).toBeTruthy();
     expect(fetch).toHaveBeenCalledTimes(1);
     const [url, init] = fetch.mock.calls[0]!;
     expect(url).toBe('/api/reports');
@@ -80,9 +84,27 @@ describe('ReportButton', () => {
     fireEvent.change(within(dialog).getByRole('textbox', { name: 'Details (optional)' }), { target: { value: 'kept' } });
     fireEvent.click(within(dialog).getByRole('button', { name: 'Send report' }));
     expect((await within(dialog).findByRole('alert')).textContent).toBe(RATE_LIMITED);
-    expect(RATE_LIMITED).toBe('You have sent several reports in the last hour. Please try again later.');
+    expect(RATE_LIMITED).toBe('Several reports have come from your network in the last hour. Please try again later.');
     expect((within(dialog).getByRole('textbox', { name: 'Details (optional)' }) as HTMLTextAreaElement).value).toBe('kept');
     expect(within(dialog).queryByRole('status')).toBeNull();
+  });
+
+  it('names a rough wait from retry-after when rate limited', async () => {
+    mockPost(() => json({ error: 'rate limited' }, 429, { 'retry-after': '1800' }));
+    const dialog = await open();
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Send report' }));
+    expect((await within(dialog).findByRole('alert')).textContent).toBe(
+      'Several reports have come from your network in the last hour. Please try again in about 30 minutes.',
+    );
+  });
+
+  it('rounds the wait up to whole minutes, and falls back to "later" without a usable retry-after', () => {
+    expect(rateLimitedText(30)).toBe('Several reports have come from your network in the last hour. Please try again in about 1 minute.');
+    expect(rateLimitedText(61)).toBe('Several reports have come from your network in the last hour. Please try again in about 2 minutes.');
+    expect(rateLimitedText(null)).toBe(RATE_LIMITED);
+    expect(rateLimitedText(Number.NaN)).toBe(RATE_LIMITED);
+    expect(rateLimitedText(0)).toBe(RATE_LIMITED);
+    expect(rateLimitedText(7200)).toBe(RATE_LIMITED);
   });
 
   it('asks to retry on any other failure, and a retry can succeed', async () => {

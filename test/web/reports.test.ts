@@ -10,7 +10,14 @@ import type { ResponseCache } from '../../web/worker/cache.js';
 import type { Data } from '../../web/worker/data.js';
 import type { Env } from '../../web/worker/env.js';
 import { type Bindings, createHandler } from '../../web/worker/index.js';
-import { createReportStore, type NewReport, type ReportStore, type WriteRunner } from '../../web/worker/reports.js';
+import { createReportStore, ipBucket, type NewReport, neonReportStore, type ReportStore, type WriteRunner } from '../../web/worker/reports.js';
+
+// neonReportStore's driver: records the transaction options, answers like an empty table
+const neonFake = vi.hoisted(() => {
+  const transaction = vi.fn(async (queries: unknown[], _opts?: unknown) => queries.map((_, i) => (i === 1 ? [{ n: 0, retry: null }] : [])));
+  return { transaction, query: vi.fn((text: string, params: unknown[]) => ({ text, params })) };
+});
+vi.mock('@neondatabase/serverless', () => ({ neon: () => neonFake }));
 
 const SITE = 'https://guide.example';
 const baseEnv: Env = {
@@ -210,7 +217,30 @@ describe('POST /api/reports', () => {
   it('removes control characters and lone surrogates from the message', async () => {
     const w = setup();
     expect((await w.send({ ...valid, message: 'a\u0000b\nc\ud800d' })).status).toBe(201);
-    expect(w.rows[0]!.message).toBe('ab\nc�d');
+    expect(w.rows[0]!.message).toBe('ab\nc\uFFFDd');
+  });
+
+  it('with SITE_ORIGIN unset or malformed, accepts only the request URL origin', async () => {
+    for (const siteOrigin of ['', 'not a url', undefined]) {
+      const w = setup({ env: { SITE_ORIGIN: siteOrigin as string } });
+      expect((await w.send(valid, { headers: { origin: 'https://evil.example' } })).status, String(siteOrigin)).toBe(403);
+      expect((await w.send(valid, { headers: { origin: 'null' } })).status, String(siteOrigin)).toBe(403);
+      expect((await w.send(valid)).status, String(siteOrigin)).toBe(201);
+    }
+  });
+
+  it('shares one bucket per IPv6 /64 and keeps IPv4 addresses apart', async () => {
+    const w = setup();
+    for (const ip of ['2001:db8:a:b::1', '2001:DB8:A:B:ffff:1:2:3', '2001:0db8:000a:000b::9', '2001:db8:a:b:1:2:3:4']) {
+      expect((await w.send(valid, { headers: { 'cf-connecting-ip': ip } })).status, ip).toBe(201);
+    }
+    expect((await w.send(valid, { headers: { 'cf-connecting-ip': '2001:db8:a:b::77' } })).status).toBe(201);
+    // the 6th from the same /64 is refused although the address is new
+    expect((await w.send(valid, { headers: { 'cf-connecting-ip': '2001:db8:a:b:dead:beef::1' } })).status).toBe(429);
+    // the next /64 is its own bucket
+    expect((await w.send(valid, { headers: { 'cf-connecting-ip': '2001:db8:a:c::1' } })).status).toBe(201);
+    expect(new Set(w.rows.map((r) => r.ipHash)).size).toBe(2);
+    expect(w.rows[0]!.ipHash).toBe(sha('salt2001:db8:a:b::/64'));
   });
 
   it('answers other methods with 405 and allow: POST', async () => {
@@ -223,8 +253,114 @@ describe('POST /api/reports', () => {
   });
 });
 
+describe('neonReportStore', () => {
+  it('runs one read-committed, read-write transaction (the recount must see the previous lock holder)', async () => {
+    const store = neonReportStore('postgres://reporter@example/db');
+    expect(await store.insertLimited({ targetType: 'shop', targetId: 1, reason: 'other', message: null, email: null, ipHash: 'h' }, 5)).toEqual({ ok: true });
+    expect(neonFake.transaction).toHaveBeenCalledTimes(1);
+    const [queries, opts] = neonFake.transaction.mock.calls[0]!;
+    expect(queries).toHaveLength(3);
+    expect(opts).toEqual({ isolationLevel: 'ReadCommitted' });
+  });
+});
+
+describe('ipBucket', () => {
+  it('keeps IPv4 as is and reduces IPv6 to its normalised /64', () => {
+    expect(ipBucket('203.0.113.7')).toBe('203.0.113.7');
+    expect(ipBucket('2001:DB8::1')).toBe('2001:db8:0:0::/64');
+    expect(ipBucket('2001:0db8:0000:0000:0000:0000:0000:0001')).toBe('2001:db8:0:0::/64');
+    expect(ipBucket('::1')).toBe('0:0:0:0::/64');
+    expect(ipBucket('fe80::1%eth0')).toBe('fe80:0:0:0::/64');
+    expect(ipBucket('2001:db8:1:2:3:4:5::')).toBe('2001:db8:1:2::/64');
+    expect(ipBucket('2001:db8:1:2:3:4:192.0.2.1')).toBe('2001:db8:1:2::/64');
+  });
+
+  it('treats IPv4-mapped IPv6 as the IPv4 address', () => {
+    expect(ipBucket('::ffff:203.0.113.7')).toBe('203.0.113.7');
+    expect(ipBucket('::FFFF:cb00:7107')).toBe('203.0.113.7');
+    expect(ipBucket('0:0:0:0:0:ffff:203.0.113.7')).toBe('203.0.113.7');
+  });
+
+  it('keeps anything unparseable as its own lowercase bucket', () => {
+    expect(ipBucket('1::2::3')).toBe('1::2::3');
+    expect(ipBucket('Not-An-IP')).toBe('not-an-ip');
+  });
+});
+
+describe('IP_SALT', () => {
+  it('fails closed with the generic 500 when IP_SALT is missing or empty, before any store call', async () => {
+    for (const salt of ['', undefined]) {
+      const { store, rows } = fakeStore();
+      const env = { ...baseEnv, IP_SALT: salt as string, ASSETS: { fetch: async () => new Response('') } } as Bindings;
+      const handler = createHandler({
+        loadSettings: async () => ({ public: true }),
+        api: { data: () => ({}) as Data, cache: () => null, reports: { store: () => store } },
+      });
+      const errors = vi.spyOn(console, 'error').mockImplementation(() => {});
+      const res = await handler.fetch(
+        new Request(`${SITE}/api/reports`, { method: 'POST', headers: { 'content-type': 'application/json', origin: SITE }, body: JSON.stringify(valid) }),
+        env,
+      );
+      errors.mockRestore();
+      expect(res.status, String(salt)).toBe(500);
+      expect(await res.json()).toEqual({ error: 'internal error' });
+      expect(store.insertLimited).not.toHaveBeenCalled();
+      expect(rows).toHaveLength(0);
+    }
+  });
+});
+
 describe('Turnstile', () => {
-  const ok = (success: boolean) => vi.fn(async () => new Response(JSON.stringify({ success }), { headers: { 'content-type': 'application/json' } }));
+  /** hostname null: the answer has no hostname */
+  const ok = (success: boolean, hostname: string | null = 'guide.example') =>
+    vi.fn(async () => new Response(JSON.stringify({ success, ...(hostname === null ? {} : { hostname }) }), { headers: { 'content-type': 'application/json' } }));
+  const turnstile = (verify: unknown, env: Partial<Env> = {}) => setup({ env: { TURNSTILE_SECRET: 'ts-secret', ...env }, verify: verify as typeof fetch });
+
+  it('passes a timeout signal to siteverify', async () => {
+    const verify = ok(true);
+    const w = turnstile(verify);
+    expect((await w.send({ ...valid, turnstileToken: 'tok' })).status).toBe(201);
+    const init = (verify.mock.calls[0] as unknown as [string, RequestInit])[1];
+    expect(init.signal).toBeInstanceOf(AbortSignal);
+  });
+
+  it('accepts the hostname of SITE_ORIGIN or of the request, nothing else', async () => {
+    const w1 = turnstile(ok(true, 'bf.example'), { SITE_ORIGIN: 'https://bf.example' });
+    expect((await w1.send({ ...valid, turnstileToken: 'tok' }, { headers: { origin: 'https://bf.example' } })).status).toBe(201);
+    const w2 = turnstile(ok(true, 'bf.someone.workers.dev'), { SITE_ORIGIN: 'https://bf.example' });
+    const own = { url: 'https://bf.someone.workers.dev/api/reports', headers: { origin: 'https://bf.someone.workers.dev' } };
+    expect((await w2.send({ ...valid, turnstileToken: 'tok' }, own)).status).toBe(201);
+    for (const hostname of ['evil.example', 'guide.example.evil.example', '', null]) {
+      const w = turnstile(ok(true, hostname));
+      const res = await w.send({ ...valid, turnstileToken: 'tok' });
+      expect(res.status, String(hostname)).toBe(400);
+      expect(await res.json()).toEqual({ error: 'turnstileToken' });
+      expect(w.rows).toHaveLength(0);
+    }
+  });
+
+  it('fails closed with 400 when siteverify rejects, times out, errs or answers non-JSON', async () => {
+    const answers = [
+      vi.fn(async () => {
+        throw new TypeError('network down');
+      }),
+      vi.fn(async () => {
+        throw new DOMException('timed out', 'TimeoutError');
+      }),
+      vi.fn(async () => new Response('<html>oops</html>', { headers: { 'content-type': 'text/html' } })),
+      vi.fn(async () => new Response(JSON.stringify({ success: true, hostname: 'guide.example' }), { status: 500 })),
+      vi.fn(async () => new Response('null')),
+    ];
+    const errors = vi.spyOn(console, 'error').mockImplementation(() => {});
+    for (const verify of answers) {
+      const w = turnstile(verify);
+      const res = await w.send({ ...valid, turnstileToken: 'tok' });
+      expect(res.status).toBe(400);
+      expect(await res.json()).toEqual({ error: 'turnstileToken' });
+      expect(w.rows).toHaveLength(0);
+    }
+    errors.mockRestore();
+  });
 
   it('is not asked when TURNSTILE_SECRET is unset', async () => {
     const verify = ok(false);
@@ -281,6 +417,22 @@ describe('through the worker handler', () => {
     expect(res.status).toBe(201);
     expect(res.headers.get('x-frame-options')).toBe('DENY');
     expect(rows).toHaveLength(1);
+  });
+
+  it('while private, a POST without auth gets 401 before any store call', async () => {
+    const { store, rows } = fakeStore();
+    const env: Bindings = { ...baseEnv, ASSETS: { fetch: async () => new Response('') } };
+    const handler = createHandler({
+      loadSettings: async () => ({ public: false }),
+      api: { data: () => ({}) as Data, cache: () => null, reports: { store: () => store } },
+    });
+    const res = await handler.fetch(
+      new Request(`${SITE}/api/reports`, { method: 'POST', headers: { 'content-type': 'application/json', origin: SITE }, body: JSON.stringify(valid) }),
+      env,
+    );
+    expect(res.status).toBe(401);
+    expect(store.insertLimited).not.toHaveBeenCalled();
+    expect(rows).toHaveLength(0);
   });
 });
 
@@ -360,6 +512,12 @@ describe('report store on PGlite as site_reporter', () => {
     const { rows } = await pg.query<{ n: number }>(`select count(*)::int as n from reports where ip_hash = 'h3' and created_at > now() - interval '1 hour'`);
     expect(rows[0]!.n).toBe(5);
     expect(await store.insertLimited(report('h4'), 5)).toEqual({ ok: true });
+  });
+
+  it('applies migration 006: an index on (ip_hash, created_at)', async () => {
+    const { rows } = await pg.query<{ indexdef: string }>(`select indexdef from pg_indexes where indexname = 'reports_ip_created_idx'`);
+    expect(rows).toHaveLength(1);
+    expect(rows[0]!.indexdef).toMatch(/\(ip_hash, created_at\)/);
   });
 
   it('the reporter role cannot read report contents', async () => {

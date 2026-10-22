@@ -32,7 +32,15 @@ const REASONS: Record<ReportTarget, { value: ReportReason; label: string }[]> = 
   ],
 };
 
-export const RATE_LIMITED = 'You have sent several reports in the last hour. Please try again later.';
+const RATE_LIMIT_SAYS = 'Several reports have come from your network in the last hour.';
+export const RATE_LIMITED = `${RATE_LIMIT_SAYS} Please try again later.`;
+
+/** The 429 message; with a plausible retry-after (1 s to 1 hour) it names the wait in whole minutes, rounded up. */
+export function rateLimitedText(retryAfterSec: number | null): string {
+  if (retryAfterSec === null || !Number.isFinite(retryAfterSec) || retryAfterSec <= 0 || retryAfterSec > 3600) return RATE_LIMITED;
+  const minutes = Math.ceil(retryAfterSec / 60);
+  return `${RATE_LIMIT_SAYS} Please try again in about ${minutes} ${minutes === 1 ? 'minute' : 'minutes'}.`;
+}
 export const SEND_FAILED = 'Your report could not be sent. Please try again.';
 export const EMAIL_NOTE = 'Only used to reply to you about this report.';
 const EMAIL_BAD = 'Enter an email address like name@example.com, or leave it empty.';
@@ -116,7 +124,7 @@ export function ReportButton({ targetType, targetId, title = 'Something wrong?',
       setStatus('editing');
       const apiErr = err instanceof ApiError ? err : null;
       if (apiErr?.status === 400 && (apiErr.field === 'email' || apiErr.field === 'message')) showFieldError(apiErr.field);
-      else setError(apiErr?.status === 429 ? RATE_LIMITED : SEND_FAILED);
+      else setError(apiErr?.status === 429 ? rateLimitedText(apiErr.retryAfter) : SEND_FAILED);
     }
   }
 
@@ -140,14 +148,9 @@ export function ReportButton({ targetType, targetId, title = 'Something wrong?',
         <DialogHeader>
           <DialogTitle>{title}</DialogTitle>
           <DialogDescription>
-            {about ? (
-              <>
-                <span className="block font-medium text-ink break-words">{about}</span>
-                Tell us what looks wrong and we will check it.
-              </>
-            ) : (
-              'Tell us what looks wrong and we will check it.'
-            )}
+            {about && <span className="block font-medium text-ink break-words">{about}</span>}
+            {/* the intro belongs to the form; after sending only the thank-you message speaks */}
+            {status !== 'sent' && 'Tell us what looks wrong and we will check it.'}
           </DialogDescription>
         </DialogHeader>
 
