@@ -3,6 +3,7 @@ node_modules/
 .env.*
 !.env.example
 out/
+dist/
 *.log
 .remember/
 

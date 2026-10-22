@@ -1,0 +1,180 @@
+@import "tailwindcss" source("..");
+@import "tw-animate-css";
+
+/*
+ * Theme: follows the device by default; data-theme="light" | "dark" on <html> overrides it.
+ * `dark:` utilities follow the same rule.
+ */
+@custom-variant dark {
+  &:where([data-theme="dark"], [data-theme="dark"] *) {
+    @slot;
+  }
+  @media (prefers-color-scheme: dark) {
+    &:where(:root:not([data-theme="light"]), :root:not([data-theme="light"]) *) {
+      @slot;
+    }
+  }
+}
+
+/* Design tokens from the approved mockups (light) */
+:root {
+  color-scheme: light;
+  --bg: #f3f2ee;
+  --ink: #1b1d22;
+  --muted: #6b6f78;
+  --glass: rgba(255, 255, 255, 0.72);
+  --line: rgba(20, 22, 28, 0.1);
+  --tex: rgba(20, 22, 28, 0.15);
+  --good: #13804f;
+  --bad: #c2321f;
+  --accent: #1475e6;
+  --tag-gold: #f4e6b8;
+  --tag-gold-edge: #c9a443;
+  --tag-gold-ink: #5b4510;
+  --tag-red: #f6d2cb;
+  --tag-red-edge: #d0574a;
+  --tag-red-ink: #8f1f12;
+  /* derived, builder's call */
+  --fill: rgba(20, 22, 28, 0.06);
+  --surface: #fbfaf7;
+  --glow: rgba(20, 117, 230, 0.16);
+  --shadow: 0 1px 2px rgba(20, 22, 28, 0.06), 0 10px 30px rgba(20, 22, 28, 0.08);
+  --radius: 0.625rem;
+}
+
+/* Dark tokens: device preference unless data-theme="light", or forced with data-theme="dark" */
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    color-scheme: dark;
+    --bg: #0e1015;
+    --ink: #eef0f4;
+    --muted: #9097a3;
+    --glass: rgba(255, 255, 255, 0.065);
+    --line: rgba(255, 255, 255, 0.11);
+    --tex: rgba(255, 255, 255, 0.1);
+    --good: #3ecf8e;
+    --bad: #ff6b5e;
+    --accent: #4da5fc;
+    --tag-gold: #efd98f;
+    --tag-gold-edge: #b8902a;
+    --tag-gold-ink: #3d2d05;
+    --tag-red: #ef9d92;
+    --tag-red-edge: #b5392b;
+    --tag-red-ink: #5a0d05;
+    --fill: rgba(255, 255, 255, 0.08);
+    --surface: #171a21;
+    --glow: rgba(77, 165, 252, 0.14);
+    --shadow: 0 1px 2px rgba(0, 0, 0, 0.4), 0 12px 32px rgba(0, 0, 0, 0.35);
+  }
+}
+
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --bg: #0e1015;
+  --ink: #eef0f4;
+  --muted: #9097a3;
+  --glass: rgba(255, 255, 255, 0.065);
+  --line: rgba(255, 255, 255, 0.11);
+  --tex: rgba(255, 255, 255, 0.1);
+  --good: #3ecf8e;
+  --bad: #ff6b5e;
+  --accent: #4da5fc;
+  --tag-gold: #efd98f;
+  --tag-gold-edge: #b8902a;
+  --tag-gold-ink: #3d2d05;
+  --tag-red: #ef9d92;
+  --tag-red-edge: #b5392b;
+  --tag-red-ink: #5a0d05;
+  --fill: rgba(255, 255, 255, 0.08);
+  --surface: #171a21;
+  --glow: rgba(77, 165, 252, 0.14);
+  --shadow: 0 1px 2px rgba(0, 0, 0, 0.4), 0 12px 32px rgba(0, 0, 0, 0.35);
+}
+
+/*
+ * Tailwind / shadcn colour names mapped onto the tokens. shadcn's own "muted" and "accent" are
+ * fill colours, so the design accent blue is exposed as `brand` (text-brand, bg-brand).
+ */
+@theme inline {
+  --color-background: var(--bg);
+  --color-foreground: var(--ink);
+  --color-card: var(--glass);
+  --color-card-foreground: var(--ink);
+  --color-popover: var(--surface);
+  --color-popover-foreground: var(--ink);
+  --color-primary: var(--ink);
+  --color-primary-foreground: var(--bg);
+  --color-secondary: var(--fill);
+  --color-secondary-foreground: var(--ink);
+  --color-muted: var(--fill);
+  --color-muted-foreground: var(--muted);
+  --color-accent: var(--fill);
+  --color-accent-foreground: var(--ink);
+  --color-destructive: var(--bad);
+  --color-border: var(--line);
+  --color-input: var(--line);
+  --color-ring: var(--accent);
+  --color-brand: var(--accent);
+  --color-good: var(--good);
+  --color-bad: var(--bad);
+  --color-ink: var(--ink);
+  --color-glass: var(--glass);
+  --color-line: var(--line);
+  --color-tag-gold: var(--tag-gold);
+  --color-tag-gold-edge: var(--tag-gold-edge);
+  --color-tag-gold-ink: var(--tag-gold-ink);
+  --color-tag-red: var(--tag-red);
+  --color-tag-red-edge: var(--tag-red-edge);
+  --color-tag-red-ink: var(--tag-red-ink);
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+}
+
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+  }
+  html {
+    -webkit-text-size-adjust: 100%;
+  }
+  body {
+    @apply bg-background text-foreground antialiased;
+    min-height: 100dvh;
+    font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  }
+  /* Dotted desk: fine dot grid plus one soft accent glow at the top, fixed behind the content */
+  body::before {
+    content: "";
+    position: fixed;
+    inset: 0;
+    z-index: -1;
+    pointer-events: none;
+    background:
+      radial-gradient(60% 420px at 50% -120px, var(--glow), transparent 70%) no-repeat,
+      radial-gradient(var(--tex) 1.1px, transparent 1.4px) 0 0 / 18px 18px;
+  }
+}
+
+/* Frosted glass card */
+@utility glass {
+  background: var(--glass);
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  -webkit-backdrop-filter: blur(14px);
+  backdrop-filter: blur(14px);
+  box-shadow: var(--shadow);
+}
+
+/* prefers-reduced-motion disables all animation */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
