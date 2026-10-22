@@ -52,6 +52,10 @@ function DealSection({ kind, cards, slug }: { kind: keyof typeof LISTS; cards: C
 /** Whole numbers stay whole, others get one decimal: 61 -> "61%", 12.74 -> "12.7%". */
 const percent = (n: number) => `${Number(n.toFixed(1))}%`;
 
+const isCount = (n: unknown): n is number => typeof n === 'number' && Number.isFinite(n);
+/** A count with thousands separators, or "Not shown" when the API did not send a finite number. */
+const countText = (n: unknown) => (isCount(n) ? count.format(n) : 'Not shown');
+
 function Stat({ label, value, tone }: { label: string; value: string; tone?: 'good' | 'bad' }) {
   return (
     <div className="glass flex flex-col gap-1 p-3">
@@ -71,10 +75,10 @@ function StatsBlock({ stats }: { stats: ShopStats }) {
         Shop statistics
       </h2>
       <dl className="m-0 grid grid-cols-2 gap-3 md:grid-cols-4">
-        <Stat label="Real deals" value={real === null || !Number.isFinite(real) ? 'Not enough judged yet' : percent(real)} tone={real === null ? undefined : 'good'} />
-        <Stat label="Raised before sale" value={count.format(stats.avoid)} tone={stats.avoid > 0 ? 'bad' : undefined} />
-        <Stat label="Was price raised" value={count.format(stats.wasRaised)} tone={stats.wasRaised > 0 ? 'bad' : undefined} />
-        <Stat label="Marked Black Friday" value={count.format(stats.bfMarked)} />
+        <Stat label="Real deals" value={real === null || !isCount(real) ? 'Not enough judged yet' : percent(real)} />
+        <Stat label="Raised before sale" value={countText(stats.avoid)} tone={isCount(stats.avoid) && stats.avoid > 0 ? 'bad' : undefined} />
+        <Stat label="Was price raised" value={countText(stats.wasRaised)} tone={isCount(stats.wasRaised) && stats.wasRaised > 0 ? 'bad' : undefined} />
+        <Stat label="Marked Black Friday" value={countText(stats.bfMarked)} />
       </dl>
     </section>
   );
@@ -148,7 +152,11 @@ function ChangeTable({ caption, rows, tone, none }: { caption: string; rows: Cha
                   </th>
                   <PriceCell cents={r.fromCents} at={r.fromAt} />
                   <PriceCell cents={r.toCents} at={r.at} />
-                  <td className={cn('px-2 py-2 text-right font-semibold tabular-nums', tone === 'bad' ? 'text-bad' : 'text-good')}>{signed(r.pct)}</td>
+                  {shown(r.fromCents) && shown(r.toCents) ? (
+                    <td className={cn('px-2 py-2 text-right font-semibold tabular-nums', tone === 'bad' ? 'text-bad' : 'text-good')}>{signed(r.pct)}</td>
+                  ) : (
+                    <td className="px-2 py-2 text-right text-xs text-muted-foreground">{NO_PRICE}</td>
+                  )}
                 </tr>
               ))}
             </tbody>
@@ -210,7 +218,16 @@ export function ShopPage() {
     slug ?? null,
     (signal) => api.shop(slug!, signal),
     (d) => {
-      if (!d || typeof d.shop?.name !== 'string' || !d.rating || !Array.isArray(d.avoid) || !Array.isArray(d.good) || !d.stats) {
+      if (
+        !d ||
+        typeof d.shop?.name !== 'string' ||
+        !d.rating ||
+        !Array.isArray(d.avoid) ||
+        !Array.isArray(d.good) ||
+        !Array.isArray(d.rises) ||
+        !Array.isArray(d.drops) ||
+        !d.stats
+      ) {
         throw new ApiError(200); // a 200 without the expected shape
       }
       return false;

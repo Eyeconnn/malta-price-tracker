@@ -204,6 +204,30 @@ describe('shop page', () => {
     expect(screen.getByTestId('where').textContent).toBe('/search?q=lenovo&shop=alpha');
   });
 
+  it('"See all" links keep the shop and the list type', async () => {
+    mockApi({ '/api/shops/alpha': () => json(shopResponse()) });
+    renderAt('/shops/alpha');
+    const avoidRegion = await screen.findByRole('region', { name: 'Deals to avoid here' });
+    expect(within(avoidRegion).getByRole('link', { name: 'See all deals to avoid here' }).getAttribute('href')).toBe('/deals?type=avoid&shop=alpha');
+    const goodRegion = screen.getByRole('region', { name: 'Good deals here' });
+    expect(within(goodRegion).getByRole('link', { name: 'See all good deals here' }).getAttribute('href')).toBe('/deals?type=good&shop=alpha');
+  });
+
+  it('a 200 without the rises list is an error with a retry, not a crash', async () => {
+    const { rises: _rises, ...partial } = shopResponse();
+    mockApi({ '/api/shops/alpha': () => json(partial) });
+    renderAt('/shops/alpha');
+    expect(await screen.findByRole('button', { name: 'Try again' })).toBeTruthy();
+    expect(screen.getAllByRole('heading', { level: 1 })).toHaveLength(1);
+  });
+
+  it('a 200 without the drops list is an error with a retry', async () => {
+    const { drops: _drops, ...partial } = shopResponse();
+    mockApi({ '/api/shops/alpha': () => json(partial) });
+    renderAt('/shops/alpha');
+    expect(await screen.findByRole('button', { name: 'Try again' })).toBeTruthy();
+  });
+
   it('Simple mode hides the stats and tables', async () => {
     mockApi({ '/api/shops/alpha': () => json(shopResponse()) });
     renderAt('/shops/alpha');
@@ -249,6 +273,38 @@ describe('shop page', () => {
       expect(row.textContent).toContain('+12.7%');
       const drops = screen.getByRole('table', { name: 'Top real drops' });
       expect(within(drops).getByText('-6%')).toBeTruthy();
+    });
+
+    it('shows "Not shown" instead of NaN for a stat that is not a finite number', async () => {
+      const stats = { products: 10, judged: 5, good: 3, avoid: Number.NaN, wasRaised: 1, bfMarked: 2, realDealPct: 60 };
+      // NaN becomes null in JSON, which the client must treat as not shown
+      mockApi({ '/api/shops/alpha': () => json(shopResponse({ stats })) });
+      renderAt('/shops/alpha');
+      const region = await screen.findByRole('region', { name: 'Shop statistics' });
+      expect(within(region).getByText('Raised before sale').nextSibling?.textContent).toBe('Not shown');
+      expect(region.textContent).not.toMatch(/NaN|null/);
+    });
+
+    it('the real-deals number has no colour judgement', async () => {
+      mockApi({ '/api/shops/alpha': () => json(shopResponse()) });
+      renderAt('/shops/alpha');
+      const region = await screen.findByRole('region', { name: 'Shop statistics' });
+      const value = within(region).getByText('Real deals').nextSibling as HTMLElement;
+      expect(value.className).not.toMatch(/text-good|text-bad/);
+    });
+
+    it('prints no percentage for a change row without both prices', async () => {
+      const bad = shopResponse({ rises: [change(21, { fromCents: 0, pct: 12.7 })], drops: [change(31, { toCents: 0, pct: -100 })] });
+      mockApi({ '/api/shops/alpha': () => json(bad) });
+      renderAt('/shops/alpha');
+      const rises = await screen.findByRole('table', { name: 'Top price rises' });
+      const drops = screen.getByRole('table', { name: 'Top real drops' });
+      expect(drops.textContent).not.toContain('-100%');
+      expect(rises.textContent).not.toContain('12.7%');
+      for (const t of [rises, drops]) {
+        const cells = within(t.querySelector('tbody tr') as HTMLElement).getAllByText('Price not shown by the shop');
+        expect(cells.length).toBeGreaterThan(0);
+      }
     });
 
     it('never shows €0.00 for a change without a valid price', async () => {
