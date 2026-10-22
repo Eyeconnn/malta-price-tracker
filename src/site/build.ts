@@ -108,16 +108,21 @@ function riseOf(v: VariantResult): number {
 
 /**
  * The variant whose verdict the group shows: the worst label among in-stock variants (all variants when
- * none is in stock). Among avoids the largest rise wins; otherwise the representative, else the cheapest.
+ * none is in stock). Among avoids the largest rise wins; otherwise judged variants first, then the representative,
+ * else the cheapest.
  */
 export function pickVerdictVariant(vs: VariantResult[], rep: VariantResult): VariantResult {
   const stocked = vs.filter(inStock);
   const pool = stocked.length > 0 ? stocked : vs;
   const top = Math.max(...pool.map((v) => RANK[v.verdict.label]));
-  const worst = pool.filter((v) => RANK[v.verdict.label] === top);
+  let worst = pool.filter((v) => RANK[v.verdict.label] === top);
   if (worst[0].verdict.label === 'avoid') {
     return worst.reduce((best, v) => (riseOf(v) > riseOf(best) ? v : best));
   }
+  // a none that was judged (marked or claiming a discount) is shown over one that was not, so the group
+  // counts as judged for the shop rating whenever one of its sold variants is
+  const judged = worst.filter((v) => v.verdict.facts.judged);
+  if (judged.length > 0) worst = judged;
   return worst.includes(rep) ? rep : cheapest(worst);
 }
 
@@ -234,7 +239,9 @@ async function buildShop(sql: postgres.Sql, shop: Shop, settings: SiteSettings, 
     const obsRows = await sql<ObsRow[]>`
       select product_id, observed_at, price_cents, was_price_cents, in_stock, bf_marked
       from price_observations
-      where product_id = any(${ids}::bigint[]) and observed_at > ${obsSince} and observed_at <= ${now}`;
+      where product_id = any(${ids}::bigint[]) and observed_at > ${obsSince} and observed_at <= ${now}
+        -- readings the scraper flagged as a 70% jump are unchecked glitches: never a verdict input (Ruling R55)
+        and (review_flag is null or review_flag <> 'jump_70pct')`;
     const obsByProduct = new Map<string, ObsRow[]>();
     for (const o of obsRows) {
       const list = obsByProduct.get(o.product_id);

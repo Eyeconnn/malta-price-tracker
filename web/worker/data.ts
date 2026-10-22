@@ -443,6 +443,8 @@ export function createData(db: SqlRunner, opts: DataOptions = {}): Data {
             from products p join price_observations po on po.product_id = p.id
             where p.shop_id = $1 and coalesce(p.parent_external_id, p.external_id) = $2
               and po.observed_at > now() - interval '${HISTORY_DAYS} days'
+              -- unchecked 70% jumps are left out, as the verdicts leave them out (Ruling R55)
+              and (po.review_flag is null or po.review_flag <> 'jump_70pct')
             order by po.observed_at desc, po.product_id desc
             limit $3
           ) h

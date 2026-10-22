@@ -69,7 +69,11 @@ export function HowWeCheckPage() {
             For each product we save the price, the &quot;was&quot; price (the old price shown crossed out), whether it is in stock and
             whether the shop marks it as Black Friday.
           </li>
-          <li>Prices are stored per day. Verdicts use the last price we saw on each day.</li>
+          <li>
+            Prices are stored per day. Verdicts use the last price we saw on each day, but the lowest recent price counts every price we
+            saw on those days.
+          </li>
+          <li>A price that moves by more than 70% from the one before is left out until we have checked it.</li>
           <li>We started on 20 October 2026. We have no earlier history, so we can only judge what happened since then.</li>
         </List>
       </Section>

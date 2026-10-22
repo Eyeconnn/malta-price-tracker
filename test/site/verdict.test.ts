@@ -139,7 +139,8 @@ describe('computeVerdict', () => {
     expect(v.facts.historyDays).toBe(17);
     expect(v.facts.priceChanges).toBe(0);
     expect(v.label).toBe('none');
-    expect(v.reason).toBe('Price has been €709.00 on every day we tracked since 6 Oct.');
+    // the 79900 reading on 21 Oct is a price the product showed, so "the same every day" would not be true
+    expect(v.reason).toBe('Price is €709.00. Not enough earlier prices to compare it with.');
   });
 
   it('flags a rise before the Black Friday marker, with a sentence that stays factual', () => {
@@ -260,6 +261,60 @@ describe('computeVerdict', () => {
     expect(v.reason).toBe(
       'Price €180.00 is 10.0% below its lowest price in the 30 days before 20 Nov (€200.00), but the was price went from €240.00 on 30 Oct to €280.00 on 31 Oct.',
     );
+  });
+
+  it('takes the baseline low from every reading of the baseline days, not only the last of each day', () => {
+    const history: Obs[] = [];
+    for (let i = 0; i < 20; i++) {
+      const day = addDays('2026-10-01', i);
+      history.push({ at: at(day, '07:00:00Z'), price: 70000, was: null, inStock: true, bf: false });
+      history.push({ at: at(day, '20:00:00Z'), price: 80000, was: null, inStock: true, bf: false });
+    }
+    history.push(obs('2026-10-21', 75000, null, true));
+    const v = computeVerdict(history, T, at('2026-10-21', '20:00:00Z'));
+    expect(v.facts.low30).toBe(70000);
+    expect(v.label).toBe('none');
+    expect(v.reason).toBe('Price €750.00 is 7.1% above its lowest price in the 20 days before 21 Oct (€700.00).');
+    // the day table shows each day's last price; no day ended at or below the low
+    expect(v.facts.daysWorthBuying).toBe(0);
+  });
+
+  it('says "1 day" for a one-day baseline', () => {
+    const history = [...days('2026-10-01', 13, null), obs('2026-10-14', 10000), obs('2026-10-15', 9000, null, true)];
+    const v = computeVerdict(history, T, at('2026-10-15', '20:00:00Z'));
+    expect(v.label).toBe('good');
+    expect(v.reason).toBe('€10.00 below its lowest price in the 1 day before 15 Oct (€100.00).');
+  });
+
+  it('only says the price stayed the same when it did on every priced day of a was-price rise', () => {
+    const history = [...days('2026-10-20', 13, 24900, 29900), ...days('2026-11-02', 3, 19900), ...days('2026-11-05', 6, 24900, 39900)];
+    const v = computeVerdict(history, T, at('2026-11-10', '20:00:00Z'));
+    expect(v.label).toBe('avoid');
+    expect(v.reason).toBe('Was price went from €299.00 on 1 Nov to €399.00 on 5 Nov.');
+  });
+
+  it('says the price was the same every day only when every reading since then had that price', () => {
+    const steady = computeVerdict(days('2026-10-01', 15, 10000, null, true), T, at('2026-10-15', '20:00:00Z'));
+    expect(steady.label).toBe('none');
+    expect(steady.reason).toBe('Price has been €100.00 on every day it showed a price since 1 Oct.');
+    const hidden = computeVerdict([...days('2026-10-01', 7, 10000, null, true), obs('2026-10-08', null), ...days('2026-10-09', 7, 10000, null, true)], T, at('2026-10-15', '20:00:00Z'));
+    expect(hidden.reason).toBe('Price has been €100.00 on every day it showed a price since 1 Oct.');
+    const moved = [...days('2026-10-01', 15, 10000, null, true), { at: at('2026-10-07', '06:00:00Z'), price: 9000, was: null, inStock: true, bf: true }];
+    const v = computeVerdict(moved, T, at('2026-10-15', '20:00:00Z'));
+    expect(v.label).toBe('none');
+    expect(v.reason).toBe('Price is €100.00. Not enough earlier prices to compare it with.');
+  });
+
+  it('records whether the product was judged (marked or claiming a discount, with enough history)', () => {
+    const base = days('2026-10-01', 20, 10000);
+    expect(computeVerdict([...base, obs('2026-10-21', 9800, null, true)], T, at('2026-10-21', '20:00:00Z')).facts.judged).toBe(true);
+    expect(computeVerdict([...base, obs('2026-10-21', 9800, 9900, false)], T, at('2026-10-21', '20:00:00Z')).facts.judged).toBe(true);
+    expect(computeVerdict([...base, obs('2026-10-21', 9000, null, true)], T, at('2026-10-21', '20:00:00Z')).facts.judged).toBe(true);
+    // not marked, no was price above the price: not judged
+    expect(computeVerdict([...base, obs('2026-10-21', 9800, 9800, false)], T, at('2026-10-21', '20:00:00Z')).facts.judged).toBe(false);
+    // too little history: not judged even when marked
+    expect(computeVerdict(days('2026-10-15', 5, 10000, null, true), T, at('2026-10-19', '20:00:00Z')).facts.judged).toBe(false);
+    expect(computeVerdict([...base, obs('2026-10-21', null, null, true)], T, at('2026-10-21', '20:00:00Z')).facts.judged).toBe(false);
   });
 
   it('returns no verdict facts that crash on an empty history', () => {

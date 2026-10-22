@@ -147,6 +147,8 @@ describe('how we check', () => {
     expect(t).toContain('within about 10 minutes');
     expect(t).toContain('Popular products are read several times a day');
     expect(t).toContain('Verdicts use the last price we saw on each day');
+    expect(t).toContain('the lowest recent price counts every price we saw on those days');
+    expect(t).toContain('A price that moves by more than 70% from the one before is left out until we have checked it');
     expect(t).toContain('confirm or reject a title match');
     expect(t).not.toContain('correct, hide or keep');
   });

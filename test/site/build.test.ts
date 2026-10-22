@@ -23,7 +23,18 @@ function verdict(label: Verdict['label'], extra: Partial<Verdict['facts']> = {})
   return {
     label,
     reason: label,
-    facts: { low30: null, usual: null, claimedPct: null, realPct: null, historyDays: 20, priceChanges: 0, wasChanges: 0, daysWorthBuying: 0, ...extra },
+    facts: {
+      low30: null,
+      usual: null,
+      claimedPct: null,
+      realPct: null,
+      historyDays: 20,
+      priceChanges: 0,
+      wasChanges: 0,
+      daysWorthBuying: 0,
+      ...extra,
+      judged: extra.judged ?? (label === 'good' || label === 'avoid'),
+    },
   };
 }
 
@@ -114,6 +125,13 @@ describe('pickVerdictVariant', () => {
     const wasOnly = verdict('avoid', { wasRaisedFrom: 1000 });
     const vs = [variant('1', 1100, true, small), variant('2', 1500, true, big), variant('3', 900, true, wasOnly, 1200)];
     expect(pickVerdictVariant(vs, vs[2]).product.id).toBe('2');
+  });
+
+  it('prefers a judged none over an unjudged none, so a group counts as judged when a sold variant is', () => {
+    const vs = [variant('1', 300, true, verdict('none', { judged: false })), variant('2', 500, true, verdict('none', { judged: true }))];
+    expect(pickVerdictVariant(vs, vs[0]).product.id).toBe('2');
+    const both = [variant('1', 300, true, verdict('none', { judged: true })), variant('2', 500, true, verdict('none', { judged: true }))];
+    expect(pickVerdictVariant(both, both[0]).product.id).toBe('1');
   });
 
   it('prefers the representative among variants with the same non-avoid label', () => {
@@ -384,5 +402,38 @@ describe.skipIf(!process.env.SITE_BUILD_TEST_DB)('site-build on PGlite', () => {
     const [row] = await sql`select value from site_settings where key = 'lastFullBuild'`;
     expect(row.value).toEqual({ at: later.toISOString() });
     expect(await loadSettings(sql)).toEqual(DEFAULT_SETTINGS);
+  }, 60_000);
+
+  it('ignores readings flagged jump_70pct, up or down (Ruling R55)', async () => {
+    const [{ id: shopId }] = await sql<{ id: number }[]>`
+      insert into shops (slug, name, base_url, category, adapter) values ('glitchshop', 'glitchshop', 'https://glitch.test', 'electronics', 'woo') returning id`;
+    const add = async (key: string, glitch: number) => {
+      const [{ id }] = await sql<{ id: string }[]>`
+        insert into products (shop_id, external_id, title, bf_status, last_seen) values (${shopId}, ${key}, ${'Glitch ' + key}, 'marked', ${new Date(NOW.getTime() - HOUR)}) returning id`;
+      const rows = Array.from({ length: 17 }, (_, i) => ({
+        product_id: id,
+        observed_at: new Date(`${addDays('2026-10-06', i)}T12:00:00Z`),
+        price_cents: 10000,
+        was_price_cents: null,
+        in_stock: true,
+        bf_marked: true,
+        review_flag: null as string | null,
+      }));
+      // the last reading of 22 Oct is a glitch the scraper flagged
+      rows.push({ ...rows[0], observed_at: new Date('2026-10-22T18:00:00Z'), price_cents: glitch, review_flag: 'jump_70pct' });
+      await sql`insert into price_observations ${sql(rows as never)}`;
+    };
+    await add('UP', 30000);
+    await add('DOWN', 2000);
+    await buildSiteProducts(sql, DEFAULT_SETTINGS, NOW, { shop: 'glitchshop' });
+    const rows = await sql<Row[]>`select * from site_products where shop_id = ${shopId} order by group_key`;
+    expect(rows.map((r) => [r.group_key, r.verdict, r.price_cents])).toEqual([
+      ['DOWN', 'none', 10000],
+      ['UP', 'none', 10000],
+    ]);
+    for (const r of rows) {
+      expect(r.reason).toBe('Price has been €100.00 on every day it showed a price since 6 Oct.');
+      expect(r.facts?.low30).toBe(10000);
+    }
   }, 60_000);
 });

@@ -301,3 +301,16 @@ describe('data.ts search and price order (fix round 1)', () => {
     ]);
   });
 });
+
+describe('data.ts flagged readings (Ruling R55)', () => {
+  it('product history leaves out readings flagged jump_70pct', async () => {
+    await pg.exec(`
+      insert into price_observations (product_id, observed_at, price_cents, was_price_cents, in_stock, bf_marked, review_flag) values
+        (10, now() - interval '12 hours', 290000, null, true, true, 'jump_70pct'),
+        (10, now() - interval '6 hours', 71000, null, true, true, null);
+    `);
+    const d = await data.product(1);
+    const prices = d?.history.filter((h) => h.productId === 10).map((h) => h.price);
+    expect(prices).toEqual([80000, 70000, 71000]);
+  });
+});

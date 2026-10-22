@@ -6,7 +6,10 @@ import type { Thresholds } from './settings.js';
 export type Obs = { at: Date; price: number | null; was: number | null; inStock: boolean | null; bf: boolean | null };
 
 export type VerdictFacts = {
-  /** lowest positive price over up to baselineDays of history before the current price and was price started */
+  /**
+   * lowest positive price over up to baselineDays of history before the current price and was price started,
+   * from every reading of those days (not only the last of each day)
+   */
   low30: number | null;
   /** median price over the same days */
   usual: number | null;
@@ -18,7 +21,13 @@ export type VerdictFacts = {
   historyDays: number;
   priceChanges: number;
   wasChanges: number;
+  /** days whose (last) price was at or below low30, as the product page's day table shows them */
   daysWorthBuying: number;
+  /**
+   * judged (spec 6.7, 9a): enough history, a shown price, and marked Black Friday or showing a was price above
+   * the price. Every good and avoid is judged; a none may be. Shop ratings count judged products.
+   */
+  judged: boolean;
 };
 
 export type Verdict = { label: 'good' | 'avoid' | 'none' | 'insufficient'; reason: string; facts: VerdictFacts };
@@ -51,24 +60,33 @@ export function formatEuro(cents: number): string {
   return `€${euroFmt.format(cents / 100)}`;
 }
 
-type Day = { day: string; idx: number; price: number | null; was: number | null; bf: boolean };
+/** One Malta day: the values of its last observation, and every positive price seen that day. */
+type Day = { day: string; idx: number; price: number | null; was: number | null; bf: boolean; readings: number[] };
 
 /** Days since the epoch for a YYYY-MM-DD day, for calendar-day arithmetic. */
 function dayIndex(day: string): number {
   return Math.round(Date.parse(`${day}T00:00:00Z`) / DAY_MS);
 }
 
-/** One entry per Malta day: the last observation of that day. Sorted oldest first. */
+const positive = (n: number | null): n is number => n !== null && Number.isFinite(n) && n > 0;
+
+/** One entry per Malta day: the last observation of that day, plus all of its positive prices. Sorted oldest first. */
 function collapseToDays(obs: Obs[]): Day[] {
   const sorted = [...obs].sort((a, b) => a.at.getTime() - b.at.getTime());
-  const byDay = new Map<string, Obs>();
-  for (const o of sorted) byDay.set(maltaDay(o.at), o);
+  const byDay = new Map<string, { last: Obs; readings: number[] }>();
+  for (const o of sorted) {
+    const key = maltaDay(o.at);
+    const entry = byDay.get(key) ?? { last: o, readings: [] };
+    entry.last = o;
+    if (positive(o.price)) entry.readings.push(o.price);
+    byDay.set(key, entry);
+  }
   return [...byDay.entries()]
-    .map(([day, o]) => ({ day, idx: dayIndex(day), price: o.price, was: o.was, bf: o.bf === true }))
+    .map(([day, { last: o, readings }]) => ({ day, idx: dayIndex(day), price: o.price, was: o.was, bf: o.bf === true, readings }))
     .sort((a, b) => a.idx - b.idx);
 }
 
-const positive = (n: number | null): n is number => n !== null && Number.isFinite(n) && n > 0;
+const dayCount = (n: number) => `${n} ${n === 1 ? 'day' : 'days'}`;
 
 function pct(from: number, to: number): number {
   const r = Math.round(((to - from) / from) * 1000) / 10;
@@ -142,6 +160,11 @@ function netRise(
   return { base, from, to, toValue: latestValue };
 }
 
+/** True when every positive reading on the days from day index `from` to `to` (inclusive) was `price`. */
+function steadyPrice(days: Day[], from: number, to: number, price: number): boolean {
+  return days.filter((d) => d.idx >= from && d.idx <= to).every((d) => d.readings.every((p) => p === price));
+}
+
 function wasRiseText(r: Rise): string {
   return `was price went from ${formatEuro(r.base)} on ${formatDay(r.from.day)} to ${formatEuro(r.toValue)} on ${formatDay(r.to.day)}`;
 }
@@ -168,9 +191,9 @@ export function computeVerdict(obs: Obs[], t: Thresholds, now: Date): Verdict {
     let window = priced.filter((d) => d.idx < start.idx && d.idx >= start.idx - t.baselineDays);
     if (window.length === 0) window = priced.filter((d) => d.idx >= start.idx && d.idx > lastPriced.idx - t.baselineDays);
     else baselineFirst = window[0];
-    const prices = window.map((d) => d.price as number);
-    low30 = Math.min(...prices);
-    usual = median(prices);
+    // every reading of the baseline days counts for the low (a price charged in the morning is still charged)
+    low30 = Math.min(...window.flatMap((d) => d.readings));
+    usual = median(window.map((d) => d.price as number));
   }
 
   const latestPrice = latest && positive(latest.price) ? latest.price : null;
@@ -187,6 +210,7 @@ export function computeVerdict(obs: Obs[], t: Thresholds, now: Date): Verdict {
     priceChanges: priceChanges.length,
     wasChanges: wasChanges.length,
     daysWorthBuying: low30 === null ? 0 : priced.filter((d) => (d.price as number) <= low30).length,
+    judged: false,
   };
 
   if (!latest || latestPrice === null) {
@@ -195,13 +219,14 @@ export function computeVerdict(obs: Obs[], t: Thresholds, now: Date): Verdict {
   if (days.length < t.minHistoryDays) {
     return {
       label: 'insufficient',
-      reason: `Not enough history yet: ${days.length} ${days.length === 1 ? 'day' : 'days'} tracked, ${t.minHistoryDays} needed.`,
+      reason: `Not enough history yet: ${dayCount(days.length)} tracked, ${t.minHistoryDays} needed.`,
       facts,
     };
   }
 
   const judged = latest.bf || claimedPct !== null;
   if (!judged) return { label: 'none', reason: 'Not marked Black Friday and no discount claimed.', facts };
+  facts.judged = true;
 
   // Net rises: the latest value against the last value on or before the start of the raise window.
   const today = dayIndex(maltaDay(now));
@@ -231,7 +256,9 @@ export function computeVerdict(obs: Obs[], t: Thresholds, now: Date): Verdict {
     const to = wasRise.to;
     let context = '';
     if (to.bf) context = ' while marked Black Friday';
-    else if (positive(to.price) && to.price === wasRise.from.price) context = ` while the price stayed at ${formatEuro(to.price)}`;
+    else if (positive(to.price) && to.price === wasRise.from.price && steadyPrice(days, wasRise.from.idx + 1, to.idx, to.price)) {
+      context = ` while the price stayed at ${formatEuro(to.price)}`;
+    }
     const text = wasRiseText(wasRise);
     return { label: 'avoid', reason: `${text.charAt(0).toUpperCase()}${text.slice(1)}${context}.`, facts };
   }
@@ -258,10 +285,13 @@ export function computeVerdict(obs: Obs[], t: Thresholds, now: Date): Verdict {
 
   const start = runStart as Day;
   if (!baselineFirst || low30 === null) {
-    return { label: 'none', reason: `Price has been ${formatEuro(latestPrice)} on every day we tracked since ${formatDay(start.day)}.`, facts };
+    const reason = steadyPrice(days, start.idx, latest.idx, latestPrice)
+      ? `Price has been ${formatEuro(latestPrice)} on every day it showed a price since ${formatDay(start.day)}.`
+      : `Price is ${formatEuro(latestPrice)}. Not enough earlier prices to compare it with.`;
+    return { label: 'none', reason, facts };
   }
 
-  const span = `in the ${start.idx - baselineFirst.idx} days before ${formatDay(start.day)} (${formatEuro(low30)})`;
+  const span = `in the ${dayCount(start.idx - baselineFirst.idx)} before ${formatDay(start.day)} (${formatEuro(low30)})`;
   const rel =
     latestPrice === low30
       ? 'equals its lowest price'

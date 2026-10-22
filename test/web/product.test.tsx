@@ -108,6 +108,7 @@ function lenovo(extra: Partial<ProductResponse> = {}): ProductResponse {
         priceChanges: 1,
         wasChanges: 1,
         daysWorthBuying: 29,
+        judged: true,
       },
     },
     others: [scan, other(10, 'Intercomp', 74500, true)],
