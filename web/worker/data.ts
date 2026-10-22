@@ -105,6 +105,7 @@ export type DealsQuery = {
   limit: number;
   offset: number;
 };
+/** slug '' counts the rows without a category */
 export type CategoryCount = { slug: string; count: number; good: number; avoid: number };
 
 export interface Data {
@@ -495,12 +496,12 @@ export function createData(db: SqlRunner, opts: DataOptions = {}): Data {
 
     async categories() {
       const rows = await db.query(
-        `select sp.category, count(*)::int as count,
+        `select coalesce(sp.category, '') as category, count(*)::int as count,
           count(*) filter (where sp.verdict = 'good' and sp.price_cents > 0)::int as good,
           count(*) filter (where sp.verdict = 'avoid')::int as avoid
         from site_products sp join shops s on s.id = sp.shop_id
-        where ${VISIBLE} and sp.category is not null
-        group by sp.category`,
+        where ${VISIBLE}
+        group by 1`,
         [],
       );
       return rows.map((r) => ({ slug: String(r.category), count: num(r.count), good: num(r.good), avoid: num(r.avoid) }));

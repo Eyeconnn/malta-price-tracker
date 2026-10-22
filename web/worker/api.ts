@@ -149,11 +149,14 @@ async function shopPage(data: Data, slug: string): Promise<Response> {
 
 async function categories(data: Data): Promise<Response> {
   const counts = new Map((await data.categories()).map((c) => [c.slug, c]));
+  const none = counts.get('');
   return json({
     categories: SITE_CATEGORIES.map((c) => {
       const n = counts.get(c.slug);
       return { slug: c.slug, name: c.name, count: n?.count ?? 0, good: n?.good ?? 0, avoid: n?.avoid ?? 0 };
     }),
+    // rows without a category, so totals over the list can cover every deal
+    uncategorised: { count: none?.count ?? 0, good: none?.good ?? 0, avoid: none?.avoid ?? 0 },
   });
 }
 

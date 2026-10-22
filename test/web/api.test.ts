@@ -81,7 +81,10 @@ function fakeData(overrides: Partial<Data> = {}): Data {
     shop: vi.fn(async () => null),
     shopChanges: vi.fn(async () => ({ rises: [], drops: [] })),
     product: vi.fn(async () => null),
-    categories: vi.fn(async () => [{ slug: 'laptops', count: 5, good: 1, avoid: 2 }]),
+    categories: vi.fn(async () => [
+      { slug: 'laptops', count: 5, good: 1, avoid: 2 },
+      { slug: '', count: 4, good: 3, avoid: 1 },
+    ]),
     ...overrides,
   };
 }
@@ -439,6 +442,19 @@ describe('GET /api/categories', () => {
     expect(body.categories.map((c) => c.slug)).toEqual(SITE_CATEGORIES.map((c) => c.slug));
     expect(body.categories[0]).toEqual({ slug: 'laptops', name: 'Laptops', count: 5, good: 1, avoid: 2 });
     expect(body.categories[1]).toEqual({ slug: 'phones', name: 'Phones & tablets', count: 0, good: 0, avoid: 0 });
+  });
+
+  it('adds the rows without a category as `uncategorised`, so totals can cover every deal', async () => {
+    const w = setup();
+    const body = (await (await w.fetch('/api/categories')).json()) as { categories: { slug: string }[]; uncategorised: unknown };
+    expect(body.uncategorised).toEqual({ count: 4, good: 3, avoid: 1 });
+    expect(body.categories.some((c) => c.slug === '')).toBe(false);
+  });
+
+  it('has an all-zero `uncategorised` when every row has a category', async () => {
+    const w = setup(fakeData({ categories: vi.fn(async () => [{ slug: 'laptops', count: 5, good: 1, avoid: 2 }]) }));
+    const body = (await (await w.fetch('/api/categories')).json()) as { uncategorised: unknown };
+    expect(body.uncategorised).toEqual({ count: 0, good: 0, avoid: 0 });
   });
 });
 

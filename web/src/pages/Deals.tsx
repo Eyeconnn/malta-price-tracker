@@ -150,6 +150,9 @@ type Loaded = { fk: string; pages: Card[][]; total: number; minHistoryDays: numb
 function useDealPages(filters: Filters) {
   const fk = filterKey(filters);
   const [paging, setPaging] = useState({ fk, page: 1 });
+  // Any change of filters (a click, Back, a link) starts again at page 1 for the new key: the page
+  // last loaded for an earlier key must not come back with it.
+  if (paging.fk !== fk) setPaging({ fk, page: 1 });
   const page = paging.fk === fk ? paging.page : 1;
   const res = useApi<DealsResponse>(
     JSON.stringify([fk, page]),
@@ -207,6 +210,7 @@ export function DealsPage() {
   const categoryId = useId();
   const shopId = useId();
   const headingId = useId();
+  const noteId = useId();
 
   /** Changing a filter writes it to the URL (a new history entry, or a replaced one for the typed price). */
   const change = useCallback(
@@ -245,10 +249,14 @@ export function DealsPage() {
     },
   );
   const categoryList = categories.status === 'ready' ? categories.data.categories : null;
+  // switch totals: every category plus the rows without one, so no deal is silently left out
+  const none = categories.status === 'ready' ? categories.data.uncategorised : null;
   const counts = categoryList && {
-    good: categoryList.reduce((n, c) => n + c.good, 0),
-    avoid: categoryList.reduce((n, c) => n + c.avoid, 0),
+    good: categoryList.reduce((n, c) => n + c.good, none?.good ?? 0),
+    avoid: categoryList.reduce((n, c) => n + c.avoid, none?.avoid ?? 0),
   };
+  // the counts are global (all shops, all prices), so they are labelled as such
+  const showCounts = advanced && counts !== null;
   const shopList = shops.status === 'ready' ? shops.data.shops : [];
 
   const pages = useDealPages(filters);
@@ -264,6 +272,9 @@ export function DealsPage() {
     focusFrom.current = null;
     listRef.current?.querySelectorAll('li')[want.index]?.querySelector<HTMLElement>('h3 a')?.focus();
   }, [items.length, pages.fk]);
+  useEffect(() => {
+    focusFrom.current = null; // a pending request belongs to the filters it was made for
+  }, [pages.fk]);
   const moreRef = useRef<HTMLButtonElement>(null);
 
   const onMore = () => {
@@ -291,6 +302,7 @@ export function DealsPage() {
       <ToggleGroup
         type="single"
         aria-label="Deal type"
+        aria-describedby={showCounts ? noteId : undefined}
         value={type}
         onValueChange={(v) => {
           if (v === 'good' || v === 'avoid') change({ type: v });
@@ -323,9 +335,15 @@ export function DealsPage() {
         </ToggleGroupItem>
       </ToggleGroup>
 
+      {showCounts && (
+        <p id={noteId} className="-mt-2 text-xs text-muted-foreground">
+          Counts cover all shops and prices.
+        </p>
+      )}
+
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
         <Field label="Category" htmlFor={categoryId}>
-          <select id={categoryId} className={FIELD} value={category ?? ''} onChange={(e) => change({ category: e.target.value || null })}>
+          <select id={categoryId} aria-describedby={showCounts ? noteId : undefined} className={FIELD} value={category ?? ''} onChange={(e) => change({ category: e.target.value || null })}>
             <option value="">All categories</option>
             {(categoryList ?? SITE_CATEGORIES.map((c) => ({ ...c, count: 0, good: 0, avoid: 0 }))).map((c) => (
               <option key={c.slug} value={c.slug}>

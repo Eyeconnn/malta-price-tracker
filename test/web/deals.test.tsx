@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 // Deals page against a mocked read API (fetch stub).
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
-import { MemoryRouter, useLocation } from 'react-router';
+import { MemoryRouter, useLocation, useNavigate } from 'react-router';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { App } from '@/App';
 import { ModeProvider } from '@/components/site/ModeProvider';
@@ -49,6 +49,7 @@ const CATEGORIES = {
     { slug: 'toys', name: 'Toys', count: 20, good: 12, avoid: 8 },
     { slug: 'other', name: 'Other', count: 0, good: 0, avoid: 0 },
   ],
+  uncategorised: { count: 5, good: 3, avoid: 2 },
 };
 const SHOPS = {
   shops: [
@@ -99,8 +100,18 @@ function renderAt(path: string, mode: 'simple' | 'advanced' = 'simple') {
       <MemoryRouter initialEntries={[path]}>
         <App />
         <Where />
+        <Back />
       </MemoryRouter>
     </ModeProvider>,
+  );
+}
+
+function Back() {
+  const navigate = useNavigate();
+  return (
+    <button type="button" onClick={() => navigate(-1)}>
+      Browser back
+    </button>
   );
 }
 
@@ -291,9 +302,9 @@ describe('deals page: Simple and Advanced', () => {
     mockApi({ '/api/deals': deals(30) });
     renderAt('/deals', 'advanced');
     await waitFor(() => expect(articles()).toHaveLength(24));
-    // 30 + 12 + 0 good, 10 + 8 + 0 avoid
-    await waitFor(() => expect(screen.getByRole('radio', { name: 'Good deals 42' })).toBeTruthy());
-    expect(screen.getByRole('radio', { name: 'Deals to avoid 18' })).toBeTruthy();
+    // 30 + 12 + 0 good, 10 + 8 + 0 avoid, plus 3 good and 2 avoid without a category
+    await waitFor(() => expect(screen.getByRole('radio', { name: 'Good deals 45' })).toBeTruthy());
+    expect(screen.getByRole('radio', { name: 'Deals to avoid 20' })).toBeTruthy();
     expect(screen.getByRole('option', { name: 'Laptops (30)' })).toBeTruthy();
     expect(screen.getByRole('option', { name: 'Toys (12)' })).toBeTruthy();
     expect(screen.getByLabelText('Shop')).toBeTruthy();
@@ -302,6 +313,30 @@ describe('deals page: Simple and Advanced', () => {
     // the category counts follow the side
     fireEvent.click(screen.getByRole('radio', { name: /Deals to avoid/ }));
     await waitFor(() => expect(screen.getByRole('option', { name: 'Laptops (10)' })).toBeTruthy());
+  });
+
+  it('Advanced labels the counts as covering all shops and prices, and ties the label to the switch and the category', async () => {
+    mockApi({ '/api/deals': deals(30) });
+    renderAt('/deals?shop=beta&min=10', 'advanced');
+    await waitFor(() => expect(screen.getByRole('radio', { name: 'Good deals 45' })).toBeTruthy());
+    const label = screen.getByText('Counts cover all shops and prices.');
+    expect(label.id).not.toBe('');
+    expect(screen.getByRole('radiogroup', { name: 'Deal type' }).getAttribute('aria-describedby')).toBe(label.id);
+    expect(screen.getByLabelText('Category').getAttribute('aria-describedby')).toBe(label.id);
+  });
+
+  it('Simple has no counts and so no label for them', async () => {
+    mockApi({ '/api/deals': deals(5) });
+    renderAt('/deals');
+    await waitFor(() => expect(articles()).toHaveLength(5));
+    expect(screen.queryByText('Counts cover all shops and prices.')).toBeNull();
+  });
+
+  it('without counts (categories down) there is no label either', async () => {
+    mockApi({ '/api/deals': deals(3), '/api/categories': () => json({ error: 'x' }, 500) });
+    renderAt('/deals', 'advanced');
+    await waitFor(() => expect(articles()).toHaveLength(3));
+    expect(screen.queryByText('Counts cover all shops and prices.')).toBeNull();
   });
 
   it('the list still loads when the categories and shops cannot', async () => {
@@ -403,6 +438,48 @@ describe('deals page: Load more', () => {
     await waitFor(() => expect(articles()).toHaveLength(24));
     expect(screen.queryByText('Product 1')).toBeNull();
     expect(screen.getByText('Product 101')).toBeTruthy();
+  });
+
+  it('switching Good -> Avoid -> Good starts at page 1 again, not at the page last loaded for Good', async () => {
+    const fn = mockApi({ '/api/deals': deals(60) });
+    renderAt('/deals');
+    await waitFor(() => expect(articles()).toHaveLength(24));
+    fireEvent.click(screen.getByRole('button', { name: 'Load more' }));
+    await waitFor(() => expect(articles()).toHaveLength(48));
+    fireEvent.click(screen.getByRole('radio', { name: 'Deals to avoid' }));
+    await waitFor(() => expect(screen.getByText('Product 101')).toBeTruthy());
+    const before = dealCalls(fn).length;
+    fireEvent.click(screen.getByRole('radio', { name: 'Good deals' }));
+    await waitFor(() => expect(screen.getByText('Product 1')).toBeTruthy());
+    const back = dealCalls(fn).slice(before);
+    expect(back.map((u) => u.search)).toEqual(['?type=good']);
+    expect(articles()).toHaveLength(24);
+    expect(screen.queryByText('Product 25')).toBeNull();
+    // Load more continues from page 2, once
+    fireEvent.click(screen.getByRole('button', { name: 'Load more' }));
+    await waitFor(() => expect(articles()).toHaveLength(48));
+    expect(dealCalls(fn).slice(before).map((u) => u.searchParams.get('page'))).toEqual([null, '2']);
+    expect(screen.getAllByText('Product 25')).toHaveLength(1);
+  });
+
+  it('browser Back to the earlier filters also starts at page 1', async () => {
+    const fn = mockApi({ '/api/deals': deals(60) });
+    renderAt('/deals');
+    await waitFor(() => expect(articles()).toHaveLength(24));
+    fireEvent.click(screen.getByRole('button', { name: 'Load more' }));
+    await waitFor(() => expect(articles()).toHaveLength(48));
+    fireEvent.click(screen.getByRole('radio', { name: 'Deals to avoid' }));
+    await waitFor(() => expect(screen.getByText('Product 101')).toBeTruthy());
+    const before = dealCalls(fn).length;
+    fireEvent.click(screen.getByRole('button', { name: 'Browser back' }));
+    await waitFor(() => expect(where()).toBe('/deals'));
+    await waitFor(() => expect(screen.getByText('Product 1')).toBeTruthy());
+    expect(dealCalls(fn).slice(before).map((u) => u.search)).toEqual(['?type=good']);
+    expect(articles()).toHaveLength(24);
+    expect(screen.queryByText('Product 25')).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: 'Load more' }));
+    await waitFor(() => expect(articles()).toHaveLength(48));
+    expect(screen.getAllByText('Product 25')).toHaveLength(1);
   });
 
   it('a late answer for an old filter never replaces the current list', async () => {

@@ -61,7 +61,11 @@ export type ProductResponse = {
   /** the cheapest exact match at another shop, at least cheaperPct cheaper; null when none */
   cheaper: OtherShop | null;
 };
-export type CategoriesResponse = { categories: (CategoryCount & { name: string })[] };
+export type CategoriesResponse = {
+  categories: (CategoryCount & { name: string })[];
+  /** rows without a category (not in `categories`) */
+  uncategorised: { count: number; good: number; avoid: number };
+};
 
 /** min/max: price range in whole euros (inclusive); page: 1-based, 24 deals per page */
 export type DealsQuery = { type: 'good' | 'avoid'; category?: string | null; shop?: string | null; min?: number | null; max?: number | null; page?: number };

@@ -267,6 +267,11 @@ describe('data.ts on PGlite', () => {
     expect(c.find((x) => x.slug === 'laptops')).toEqual({ slug: 'laptops', count: 6, good: 2, avoid: 0 });
     expect(c.find((x) => x.slug === 'phones')).toEqual({ slug: 'phones', count: 2, good: 0, avoid: 2 });
   });
+
+  it('categories report rows without a category under the empty slug', async () => {
+    const c = await data.categories();
+    expect(c.find((x) => x.slug === '')).toEqual({ slug: '', count: 1, good: 0, avoid: 1 });
+  });
 });
 
 describe('data.ts search and price order (fix round 1)', () => {
