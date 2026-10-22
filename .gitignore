@@ -9,3 +9,6 @@ out/
 # Cloudflare Worker local secrets and state
 .dev.vars
 .wrangler/
+
+# brainstorming mockups
+.superpowers/
