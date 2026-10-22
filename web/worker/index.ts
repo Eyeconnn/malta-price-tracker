@@ -1,7 +1,11 @@
 // Black Friday Guide: one Worker serves the built web app (static assets) and the JSON API.
 // run_worker_first is on, so access control runs before any asset (private mode protects the HTML too).
+import { type ApiDeps, handleApi } from './api.js';
 import { checkAccess } from './auth.js';
+import { defaultCache } from './cache.js';
+import { neonData } from './data.js';
 import type { Env } from './env.js';
+import { json } from './http.js';
 import { injectNonce, newNonce, withSecurityHeaders } from './security.js';
 import { type AccessSettings, loadSiteSettings } from './settings.js';
 
@@ -10,17 +14,10 @@ export interface Bindings extends Env {
   ASSETS: { fetch(req: Request): Promise<Response> };
 }
 
-export function json(data: unknown, status = 200, headers: Record<string, string> = {}): Response {
-  return new Response(JSON.stringify(data), {
-    status,
-    headers: { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store', ...headers },
-  });
-}
+export { json };
 
-async function routeApi(_req: Request, _env: Bindings, _url: URL): Promise<Response> {
-  // API routes arrive in later tasks.
-  return json({ error: 'not found' }, 404);
-}
+/** Production API dependencies: Neon with the read-only role, the Workers cache. */
+const DEFAULT_API: ApiDeps = { data: (env) => neonData(env.DATABASE_URL), cache: defaultCache };
 
 /** Static asset (SPA fallback to index.html). HTML gets a fresh nonce on its script tags. */
 async function serveAsset(req: Request, env: Bindings): Promise<{ res: Response; nonce?: string }> {
@@ -37,6 +34,8 @@ async function serveAsset(req: Request, env: Bindings): Promise<{ res: Response;
 
 export interface HandlerDeps {
   loadSettings: (env: Bindings) => Promise<AccessSettings>;
+  /** read API data and cache; defaults to DEFAULT_API */
+  api?: ApiDeps;
 }
 
 /** The fetch handler; settings loading is injected so tests run without a database. */
@@ -56,7 +55,7 @@ export function createHandler(deps: HandlerDeps) {
       if (denied) return finish(denied);
 
       try {
-        if (url.pathname === '/api' || url.pathname.startsWith('/api/')) return finish(await routeApi(req, env, url));
+        if (url.pathname === '/api' || url.pathname.startsWith('/api/')) return finish(await handleApi(req, env, url, deps.api ?? DEFAULT_API));
         const { res, nonce } = await serveAsset(req, env);
         return finish(res, nonce);
       } catch (e) {

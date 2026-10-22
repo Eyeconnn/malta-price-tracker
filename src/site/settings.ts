@@ -71,7 +71,11 @@ function isObject(v: unknown): v is Record<string, unknown> {
 
 /** Reads site_settings and deep-merges it over DEFAULT_SETTINGS. Missing or malformed keys fall back to defaults. */
 export async function loadSettings(sql: postgres.Sql): Promise<SiteSettings> {
-  const rows = await sql<{ key: string; value: unknown }[]>`select key, value from site_settings`;
+  return settingsFromRows(await sql<{ key: string; value: unknown }[]>`select key, value from site_settings`);
+}
+
+/** Deep-merges site_settings rows over DEFAULT_SETTINGS (shared with the Worker, which reads the rows with its own driver). */
+export function settingsFromRows(rows: readonly { key: string; value: unknown }[]): SiteSettings {
   const stored = new Map(rows.map((r) => [r.key, r.value]));
 
   const thresholds: Thresholds = { ...DEFAULT_SETTINGS.thresholds };
