@@ -255,14 +255,23 @@ describe('product page, Simple', () => {
     expect(screen.queryByRole('radiogroup', { name: 'Variant' })).toBeNull();
   });
 
-  it('has a "Something wrong?" button that opens a placeholder dialog', async () => {
+  it('has a "Something wrong?" button that opens the report form for this product', async () => {
     await openLenovo();
     const button = screen.getByRole('button', { name: 'Something wrong?' });
     // the report target (Ruling R20): the verdict's variant, products.id
-    expect(button.getAttribute('data-product-id')).toBe(String(REP));
+    expect(button.getAttribute('data-report-target')).toBe(`product:${REP}`);
     fireEvent.click(button);
     const dialog = await screen.findByRole('dialog');
     expect(within(dialog).getByRole('heading', { name: 'Something wrong?' })).toBeTruthy();
+    expect(within(dialog).getByRole('radiogroup', { name: 'What is wrong?' })).toBeTruthy();
+    expect(within(dialog).getByRole('button', { name: 'Send report' })).toBeTruthy();
+  });
+
+  it('has no report button when the product has no variant to report (productId null)', async () => {
+    const data = lenovo();
+    data.product = { ...data.product, productId: null };
+    await openLenovo(data);
+    expect(screen.queryByRole('button', { name: 'Something wrong?' })).toBeNull();
   });
 
   it('says a recent price change for a product that is not an avoid', async () => {
@@ -386,6 +395,19 @@ describe('product page, Advanced', () => {
     expect(within(intercomp).getByText('possibly the same product')).toBeTruthy();
     const scanRow = within(table).getByRole('row', { name: /Scan/ });
     expect(within(scanRow).queryByText('possibly the same product')).toBeNull();
+  });
+
+  it('lets each comparison row be reported as a wrong match (target: that row, site_products.id)', async () => {
+    await openLenovo();
+    const table = screen.getByRole('table', { name: 'Other shops' });
+    const button = within(table).getByRole('button', { name: 'Report a wrong match with Intercomp' });
+    expect(button.textContent).toBe('Report');
+    expect(button.getAttribute('data-report-target')).toBe('match:10');
+    expect(within(table).getByRole('button', { name: 'Report a wrong match with Scan' }).getAttribute('data-report-target')).toBe('match:9');
+    fireEvent.click(button);
+    const dialog = await screen.findByRole('dialog');
+    expect(within(dialog).getByRole('heading', { name: 'Wrong match?' })).toBeTruthy();
+    expect((within(dialog).getAllByRole('radio')[0] as HTMLInputElement).value).toBe('wrong-match');
   });
 
   it('shows the verdict variant by default and never mixes variants; another variant can be picked', async () => {

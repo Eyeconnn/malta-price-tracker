@@ -1,4 +1,3 @@
-import { Flag } from 'lucide-react';
 import { lazy, type ReactNode, Suspense, useId, useMemo, useState } from 'react';
 import { Link, useParams } from 'react-router';
 import { CheaperBox } from '@/components/site/CheaperBox';
@@ -8,9 +7,9 @@ import { Notice } from '@/components/site/DealList';
 import { GlassCard } from '@/components/site/GlassCard';
 import { useMode } from '@/components/site/ModeProvider';
 import { PriceTag } from '@/components/site/PriceTag';
+import { ReportButton } from '@/components/site/ReportButton';
 import { ShopBadge } from '@/components/site/ShopBadge';
 import { Button } from '@/components/ui/button';
-import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
 import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group';
 import { ApiError, api, type Card, type Label, type OtherShop, type ProductResponse, type Variant, useApi } from '@/lib/api';
 import { formatDay, formatEuro, signedPct } from '@/lib/format';
@@ -218,6 +217,17 @@ function Comparison({ others }: { others: OtherShop[] }) {
                 ) : (
                   <span className="text-xs text-muted-foreground">Same product</span>
                 )}
+                {/* a match report targets the other row, site_products.id (Ruling R20) */}
+                <ReportButton
+                  targetType="match"
+                  targetId={o.id}
+                  title="Wrong match?"
+                  label="Report"
+                  ariaLabel={`Report a wrong match with ${o.shop}`}
+                  about={`${o.title} at ${o.shop}`}
+                  compact
+                  className="-ml-2 flex"
+                />
               </td>
             </tr>
           ))}
@@ -344,29 +354,6 @@ function History({ rows, judged, low30 }: { rows: DayRow[]; judged: boolean; low
   );
 }
 
-/**
- * "Something wrong?": a placeholder dialog until the report form lands (Task 15). `productId` is the
- * report target, product.productId (products.id of the verdict's variant, Ruling R20).
- */
-function SomethingWrong({ productId }: { productId: number | null }) {
-  return (
-    <Dialog>
-      <DialogTrigger asChild>
-        <Button variant="outline" className="min-h-11 w-fit" data-product-id={productId ?? undefined}>
-          <Flag aria-hidden="true" />
-          Something wrong?
-        </Button>
-      </DialogTrigger>
-      <DialogContent>
-        <DialogHeader>
-          <DialogTitle>Something wrong?</DialogTitle>
-          <DialogDescription>Reporting a problem with a product is coming soon. Nothing has been sent.</DialogDescription>
-        </DialogHeader>
-      </DialogContent>
-    </Dialog>
-  );
-}
-
 function ProductContent({ data }: { data: ProductResponse }) {
   const { mode } = useMode();
   const advanced = mode === 'advanced';
@@ -469,7 +456,10 @@ function ProductContent({ data }: { data: ProductResponse }) {
         </>
       )}
 
-      <SomethingWrong productId={product.productId} />
+      {/* the report target is the verdict's variant, products.id (Ruling R20); without one there is nothing to report */}
+      {product.productId !== null && (
+        <ReportButton targetType="product" targetId={product.productId} about={`${product.title} at ${product.shop}`} />
+      )}
     </div>
   );
 }

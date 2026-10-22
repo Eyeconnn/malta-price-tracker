@@ -174,6 +174,17 @@ describe('shop page', () => {
     expect(screen.getByText('Only 3 deals judged so far.')).toBeTruthy();
   });
 
+  it('has a "Something wrong?" report button for the shop rating (target: shops.id)', async () => {
+    mockApi({ '/api/shops/alpha': () => json(shopResponse()) });
+    renderAt('/shops/alpha');
+    const button = await screen.findByRole('button', { name: 'Something wrong?' });
+    expect(button.getAttribute('data-report-target')).toBe('shop:1');
+    fireEvent.click(button);
+    const dialog = await screen.findByRole('dialog');
+    expect(within(dialog).getByText('Alpha Shop')).toBeTruthy();
+    expect(within(dialog).getByRole('button', { name: 'Send report' })).toBeTruthy();
+  });
+
   it('uses factual empty states', async () => {
     mockApi({ '/api/shops/alpha': () => json(shopResponse({ avoid: [], good: [] })) });
     renderAt('/shops/alpha');

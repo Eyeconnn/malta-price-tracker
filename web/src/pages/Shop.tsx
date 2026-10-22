@@ -5,6 +5,7 @@ import { DealList, DealListSkeleton, Notice } from '@/components/site/DealList';
 import { GlassCard } from '@/components/site/GlassCard';
 import { useMode } from '@/components/site/ModeProvider';
 import { RatingScale } from '@/components/site/RatingScale';
+import { ReportButton } from '@/components/site/ReportButton';
 import { LiveSearch } from '@/components/site/SearchBox';
 import { ShopBadge } from '@/components/site/ShopBadge';
 import { Button } from '@/components/ui/button';
@@ -179,6 +180,7 @@ function ShopContent({ data, slug }: { data: ShopResponse; slug: string }) {
             <h1 className="min-w-0 text-2xl font-bold tracking-tight break-words">{shop.name}</h1>
           </div>
           <RatingScale grade={rating.grade} sentence={rating.sentence} />
+          <ReportButton targetType="shop" targetId={shop.id} about={shop.name} />
         </div>
         <div className="w-full md:max-w-sm">
           <LiveSearch shop={slug} placeholder={`Search ${shop.name}`} className="max-w-none" />

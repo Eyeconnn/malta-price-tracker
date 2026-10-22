@@ -1,4 +1,4 @@
-// The one typed client for the public read API (web/worker/api.ts), and useApi for components.
+// The one typed client for the public API (web/worker/api.ts, reports.ts), and useApi for components.
 // Response types are built from the Worker's own types, so a change there breaks the build here.
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { PhraseSlot } from '../../../src/site/settings.js';
@@ -20,6 +20,7 @@ import type {
   ShopSummary,
   Variant,
 } from '../../worker/data.js';
+import type { ReportBody, ReportReason, ReportTarget } from '../../worker/reports.js';
 
 export type {
   Card,
@@ -37,6 +38,7 @@ export type {
   ShopSummary,
   Variant,
 };
+export type { ReportBody, ReportReason, ReportTarget };
 
 /** minHistoryDays: days of prices needed before a deal is judged (stored threshold) */
 export type HomeResponse = { phrases: Record<PhraseSlot, string[]>; good: Card[]; avoid: Card[]; minHistoryDays: number };
@@ -76,7 +78,11 @@ export type DealsQuery = { type: 'good' | 'avoid'; category?: string | null; sho
 
 /** A non-2xx answer from the API (or a body that is not JSON). */
 export class ApiError extends Error {
-  constructor(readonly status: number) {
+  /** field: the `error` of a 400 answer to a write (the field that was rejected) */
+  constructor(
+    readonly status: number,
+    readonly field?: string,
+  ) {
     super(`API answered ${status}`);
     this.name = 'ApiError';
   }
@@ -100,6 +106,24 @@ async function get<T>(path: string, signal?: AbortSignal): Promise<T> {
   }
 }
 
+/** POST /api/reports; resolves on 201, otherwise throws ApiError (429: rate limited, 400: a bad field). */
+async function postReport(body: ReportBody): Promise<void> {
+  const res = await fetch('/api/reports', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', accept: 'application/json' },
+    body: JSON.stringify(body),
+  });
+  if (res.status !== 201) {
+    let field: string | undefined;
+    try {
+      field = ((await res.json()) as { error?: string }).error;
+    } catch {
+      // not JSON
+    }
+    throw new ApiError(res.status, field);
+  }
+}
+
 export const api = {
   home: (signal?: AbortSignal) => get<HomeResponse>('/api/home', signal),
   /** results are empty for a query under 2 characters (the server checks too) */
@@ -110,6 +134,7 @@ export const api = {
   shop: (slug: string, signal?: AbortSignal) => get<ShopResponse>(`/api/shops/${encodeURIComponent(slug)}`, signal),
   product: (id: number, signal?: AbortSignal) => get<ProductResponse>(`/api/products/${encodeURIComponent(String(id))}`, signal),
   categories: (signal?: AbortSignal) => get<CategoriesResponse>('/api/categories', signal),
+  report: postReport,
 };
 
 export type ApiState<T> =

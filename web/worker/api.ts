@@ -1,5 +1,6 @@
-// Read API router. Access control already ran (index.ts); this validates parameters, calls Data and caches.
+// API router. Access control already ran (index.ts); this validates parameters, calls Data and caches.
 // Every read except search is cached for 10 minutes (cache.ts); errors propagate to the handler's generic 500.
+// The one write, POST /api/reports, is handed to reports.ts before any read routing and is never cached.
 import { SITE_CATEGORIES } from '../../src/site/categories.js';
 import { computeRating } from '../../src/site/rating.js';
 import { DEFAULT_SETTINGS } from '../../src/site/settings.js';
@@ -7,10 +8,13 @@ import { type ResponseCache, cached } from './cache.js';
 import type { Card, Data, GroupItem, GroupResult, SearchHit, SearchPattern } from './data.js';
 import type { Env } from './env.js';
 import { json } from './http.js';
+import { DEFAULT_REPORTS, handleReport, type ReportDeps } from './reports.js';
 
 export interface ApiDeps {
   data: (env: Env) => Data;
   cache: () => ResponseCache | null;
+  /** report store (site_reporter role) and Turnstile fetch; defaults to Neon and the global fetch */
+  reports?: ReportDeps;
 }
 
 const PAGE_SIZE = 24;
@@ -165,6 +169,7 @@ async function categories(data: Data): Promise<Response> {
 /** Handles /api and /api/*; unknown paths give JSON 404. */
 export async function handleApi(req: Request, env: Env, url: URL, deps: ApiDeps): Promise<Response> {
   const p = url.pathname;
+  if (p === '/api/reports') return handleReport(req, env, url, deps.reports ?? DEFAULT_REPORTS);
   const productMatch = /^\/api\/products\/([^/]*)$/.exec(p);
   const shopMatch = /^\/api\/shops\/([^/]*)$/.exec(p);
   const known = ['/api/home', '/api/search', '/api/deals', '/api/shops', '/api/categories'].includes(p) || productMatch || shopMatch;
