@@ -8,11 +8,12 @@ import { cn } from '@/lib/utils';
 /**
  * "Cheaper at <shop>, €X": the server's `cheaper` match (exact match, in stock, at least cheaperPct
  * cheaper), linking to that shop's product page. `ownCents` is this product's price, for "€Y less".
- * Renders nothing without a positive price at the other shop.
+ * Renders nothing for a title-only match (the server never sends one; checked again here) or
+ * without a positive price at the other shop.
  */
 export function CheaperBox({ cheaper, ownCents, className }: { cheaper: OtherShop; ownCents: number | null; className?: string }) {
   const price = cheaper.priceCents;
-  if (price === null || !(price > 0)) return null;
+  if (cheaper.possible || price === null || !(price > 0)) return null;
   const less = ownCents !== null && ownCents > price ? ownCents - price : null;
   return (
     <Link

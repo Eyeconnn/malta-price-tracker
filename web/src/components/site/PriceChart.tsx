@@ -44,10 +44,11 @@ const euroTick = (cents: number) => `€${Math.round(cents / 100).toLocaleString
 export default function PriceChart({ rows, animate }: PriceChartProps) {
   const data = rows.map((r) => ({ x: rowIndex(r), price: r.price, was: r.was }));
   if (data.length === 0) return null;
+  const shaded = bands(rows);
   const first = data[0]!.x;
   const last = data.at(-1)!.x;
   return (
-    <div data-animate={String(animate)}>
+    <div data-animate={String(animate)} data-bands={shaded.length}>
       <ComposedChart
         responsive
         data={data}
@@ -55,7 +56,7 @@ export default function PriceChart({ rows, animate }: PriceChartProps) {
         margin={{ top: 8, right: 8, bottom: 0, left: 0 }}
         style={{ width: '100%', height: 220 }}
       >
-        {bands(rows).map((b) => (
+        {shaded.map((b) => (
           <ReferenceArea
             key={b.x1}
             x1={b.x1}

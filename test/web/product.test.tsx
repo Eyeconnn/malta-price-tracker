@@ -113,6 +113,7 @@ function lenovo(extra: Partial<ProductResponse> = {}): ProductResponse {
     others: [scan, other(10, 'Intercomp', 74500, true)],
     cheaper: scan,
     minHistoryDays: 14,
+    raiseWindowDays: 14,
     ...extra,
   };
 }
@@ -186,6 +187,7 @@ describe('day rows', () => {
   it('never compares against or from a missing price', () => {
     const rows = dayRows([obs(REP, '2026-10-20', 70900, null, false), obs(REP, '2026-10-21', null, null, false), obs(REP, '2026-10-22', 79900, null, false)], REP, 70900);
     expect(rows.map((r) => r.change)).toEqual([null, null, null]);
+    expect(rows.map((r) => r.prevHidden)).toEqual([false, false, true]);
     expect(rows[1]!.worth).toBeNull();
   });
 
@@ -232,6 +234,11 @@ describe('product page, Simple', () => {
     expect(screen.queryByText(/Cheaper at/)).toBeNull();
   });
 
+  it('never shows a CheaperBox for a title-only match, even if the API sent one', async () => {
+    await openLenovo(lenovo({ cheaper: other(10, 'Intercomp', 50000, true) }));
+    expect(screen.queryByText(/Cheaper at/)).toBeNull();
+  });
+
   it('lists only exactly matched other shops, never a title-only match', async () => {
     await openLenovo();
     const list = screen.getByRole('region', { name: 'Other shops' });
@@ -250,7 +257,10 @@ describe('product page, Simple', () => {
 
   it('has a "Something wrong?" button that opens a placeholder dialog', async () => {
     await openLenovo();
-    fireEvent.click(screen.getByRole('button', { name: 'Something wrong?' }));
+    const button = screen.getByRole('button', { name: 'Something wrong?' });
+    // the report target (Ruling R20): the verdict's variant, products.id
+    expect(button.getAttribute('data-product-id')).toBe(String(REP));
+    fireEvent.click(button);
     const dialog = await screen.findByRole('dialog');
     expect(within(dialog).getByRole('heading', { name: 'Something wrong?' })).toBeTruthy();
   });
@@ -260,6 +270,20 @@ describe('product page, Simple', () => {
     data.verdict = { ...data.verdict, label: 'none', reason: 'Not marked Black Friday and no discount claimed.' };
     await openLenovo(data);
     expect(screen.getByText('Price changed from €709.00 to €799.00 on 22 Oct, while marked Black Friday')).toBeTruthy();
+  });
+
+  it('names a recent change only within the stored raiseWindowDays of the latest day', async () => {
+    const later = [...history, obs(REP, '2026-10-23', 79900, 88900, true)];
+    const none = (raiseWindowDays: number) => {
+      const data = lenovo({ cheaper: null, history: later, raiseWindowDays });
+      data.verdict = { ...data.verdict, label: 'none', reason: 'Not marked Black Friday and no discount claimed.' };
+      return data;
+    };
+    await openLenovo(none(2));
+    expect(screen.getByText(/Price changed from €709.00 to €799.00 on 22 Oct/)).toBeTruthy();
+    cleanup();
+    await openLenovo(none(1));
+    expect(screen.queryByText(/Price changed/)).toBeNull();
   });
 
   it('says plainly that there is not enough history yet, with the stored minimum', async () => {
@@ -357,7 +381,7 @@ describe('product page, Advanced', () => {
 
   it('lists title-only matches labelled "possibly the same product" in the comparison table', async () => {
     await openLenovo();
-    const table = screen.getByRole('table', { name: 'Same product at other shops' });
+    const table = screen.getByRole('table', { name: 'Other shops' });
     const intercomp = within(table).getByRole('row', { name: /Intercomp/ });
     expect(within(intercomp).getByText('possibly the same product')).toBeTruthy();
     const scanRow = within(table).getByRole('row', { name: /Scan/ });
@@ -385,8 +409,42 @@ describe('product page, Advanced', () => {
     const hidden = within(table).getByRole('row', { name: /21 Oct/ });
     expect(within(hidden).getByText('Price not shown by the shop')).toBeTruthy();
     expect(hidden.textContent).not.toMatch(/%/);
-    expect(within(table).getByRole('row', { name: /22 Oct/ }).textContent).not.toMatch(/%/);
+    const next = within(table).getByRole('row', { name: /22 Oct/ });
+    expect(next.textContent).not.toMatch(/%/);
+    expect(within(next).getByText('Previous day not shown by the shop')).toBeTruthy();
+    // only the first tracked day has no earlier price
+    expect(within(table).getAllByText('No earlier price')).toHaveLength(1);
+    expect(within(within(table).getByRole('row', { name: /23 Sep/ })).getByText('No earlier price')).toBeTruthy();
     expect(container.textContent).not.toMatch(/€0\.00/);
+  });
+});
+
+describe('product page, Advanced, unjudged verdicts (Ruling R44)', () => {
+  beforeAll(async () => {
+    await import('@/components/site/PriceChart');
+  }, 30_000);
+  beforeEach(() => localStorage.setItem('mode', 'advanced'));
+
+  it.each(['insufficient', 'none'] as const)('verdict %s: shows no worth-buying answers, bands or count', async (label) => {
+    const data = lenovo({ cheaper: null });
+    data.verdict = { ...data.verdict, label, reason: 'Not enough history yet: 30 days tracked, 40 needed.' };
+    await openLenovo(data);
+    const table = await screen.findByRole('table', { name: /Price by day/ });
+    expect(within(table).queryByText('Yes')).toBeNull();
+    expect(within(table).queryByText('No')).toBeNull();
+    expect(within(table).queryByRole('columnheader', { name: 'Worth buying' })).toBeNull();
+    const chart = await screen.findByTestId('price-chart');
+    await waitFor(() => expect(chart.querySelector('[data-animate]')).not.toBeNull());
+    expect(chart.querySelector('[data-bands]')?.getAttribute('data-bands')).toBe('0');
+    expect(screen.queryByText('Worth buying')).toBeNull();
+    const panel = screen.getByRole('region', { name: 'Numbers' });
+    expect(within(panel).queryByText('Days worth buying')).toBeNull();
+  });
+
+  it('a judged verdict shows its bands', async () => {
+    await openLenovo();
+    const chart = await screen.findByTestId('price-chart');
+    await waitFor(() => expect(chart.querySelector('[data-bands]')?.getAttribute('data-bands')).toBe('2'));
   });
 });
 

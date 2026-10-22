@@ -62,6 +62,8 @@ export type ProductResponse = {
   cheaper: OtherShop | null;
   /** days of prices needed before a deal is judged (stored threshold) */
   minHistoryDays: number;
+  /** days back a price change counts as recent (stored threshold, as the verdict's raise window) */
+  raiseWindowDays: number;
 };
 export type CategoriesResponse = {
   categories: (CategoryCount & { name: string })[];

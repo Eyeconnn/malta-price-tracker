@@ -2,7 +2,7 @@ import { Flag } from 'lucide-react';
 import { lazy, type ReactNode, Suspense, useId, useMemo, useState } from 'react';
 import { Link, useParams } from 'react-router';
 import { CheaperBox } from '@/components/site/CheaperBox';
-import { DayTable, signedPct } from '@/components/site/DayTable';
+import { DayTable } from '@/components/site/DayTable';
 import { AlarmBanner, avoidFact, avoidKind, BlackFridayMark, NO_PRICE, PriceLine, tagProps } from '@/components/site/DealCard';
 import { Notice } from '@/components/site/DealList';
 import { GlassCard } from '@/components/site/GlassCard';
@@ -13,7 +13,7 @@ import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
 import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group';
 import { ApiError, api, type Card, type Label, type OtherShop, type ProductResponse, type Variant, useApi } from '@/lib/api';
-import { formatDay, formatEuro } from '@/lib/format';
+import { formatDay, formatEuro, signedPct } from '@/lib/format';
 import { type DayRow, dayRows, lastDays, recentChange } from '@/lib/history';
 import { useMediaQuery } from '@/lib/useMediaQuery';
 import { cn } from '@/lib/utils';
@@ -22,8 +22,6 @@ import type { VerdictFacts } from '../../../src/site/verdict.js';
 // Recharts is only downloaded when an Advanced product page shows the chart.
 const PriceChart = lazy(() => import('@/components/site/PriceChart'));
 
-/** A recent price change is named in Simple mode when it is this many days old or newer (as the shop page's changes). */
-const RECENT_DAYS = 14;
 const RANGES = { '7': 7, '30': 30 } as const;
 type Range = keyof typeof RANGES;
 
@@ -108,8 +106,8 @@ function ThreeNumbers({ facts }: { facts: VerdictFacts }) {
   );
 }
 
-/** Advanced: every stored fact behind the verdict. */
-function NumbersPanel({ facts }: { facts: VerdictFacts }) {
+/** Advanced: every stored fact behind the verdict. "Days worth buying" only for a judged (good / avoid) verdict (R44). */
+function NumbersPanel({ facts, judged }: { facts: VerdictFacts; judged: boolean }) {
   const at = (v: { price: number; at: string } | undefined) =>
     v && positive(v.price) && typeof v.at === 'string' && DAY.test(v.at) ? `${formatEuro(v.price)} on ${formatDay(v.at)}` : null;
   const rows: [string, string | null, string?][] = [
@@ -127,7 +125,7 @@ function NumbersPanel({ facts }: { facts: VerdictFacts }) {
     ['Days tracked', finite(facts.historyDays) ? String(facts.historyDays) : null],
     ['Price changes', finite(facts.priceChanges) ? String(facts.priceChanges) : null],
     ['Was price changes', finite(facts.wasChanges) ? String(facts.wasChanges) : null],
-    ['Days worth buying', finite(facts.daysWorthBuying) && finite(facts.historyDays) ? `${facts.daysWorthBuying} of ${facts.historyDays}` : null],
+    ['Days worth buying', judged && finite(facts.daysWorthBuying) && finite(facts.historyDays) ? `${facts.daysWorthBuying} of ${facts.historyDays}` : null],
   ];
   return (
     <Section title="Numbers">
@@ -183,7 +181,7 @@ function Comparison({ others }: { others: OtherShop[] }) {
   return (
     <div className="glass overflow-x-auto p-4">
       <table className="w-full border-collapse text-left text-sm">
-        <caption className="pb-2 text-left text-lg font-semibold">Same product at other shops</caption>
+        <caption className="pb-2 text-left text-lg font-semibold">Other shops</caption>
         <thead>
           <tr className="text-xs text-muted-foreground">
             <th scope="col" className="px-2 py-1 font-medium">
@@ -346,12 +344,15 @@ function History({ rows, judged, low30 }: { rows: DayRow[]; judged: boolean; low
   );
 }
 
-/** "Something wrong?": a placeholder dialog until the report form lands (Task 15, target product.productId). */
-function SomethingWrong() {
+/**
+ * "Something wrong?": a placeholder dialog until the report form lands (Task 15). `productId` is the
+ * report target, product.productId (products.id of the verdict's variant, Ruling R20).
+ */
+function SomethingWrong({ productId }: { productId: number | null }) {
   return (
     <Dialog>
       <DialogTrigger asChild>
-        <Button variant="outline" className="min-h-11 w-fit">
+        <Button variant="outline" className="min-h-11 w-fit" data-product-id={productId ?? undefined}>
           <Flag aria-hidden="true" />
           Something wrong?
         </Button>
@@ -379,21 +380,26 @@ function ProductContent({ data }: { data: ProductResponse }) {
   const verdictId = product.productId;
   const [variant, setVariant] = useState<number | null>(() => defaultVariant(data));
 
+  // Only a good / avoid verdict, on the variant it is about, answers "worth buying" (Ruling R44).
+  const verdictJudged = verdict.label === 'good' || verdict.label === 'avoid';
+  const judged = verdictJudged && variant !== null && variant === verdictId;
+
   const verdictRows = useMemo(
-    () => (verdictId === null ? [] : dayRows(data.history, verdictId, facts?.low30 ?? null)),
-    [data.history, verdictId, facts],
+    () => (verdictId === null ? [] : dayRows(data.history, verdictId, verdictJudged ? (facts?.low30 ?? null) : null)),
+    [data.history, verdictId, facts, verdictJudged],
   );
-  const judged = variant !== null && variant === verdictId;
   const rows = useMemo(
-    () => (variant === null ? [] : judged ? verdictRows : dayRows(data.history, variant, null)),
-    [data.history, variant, judged, verdictRows],
+    () => (variant === null ? [] : variant === verdictId ? verdictRows : dayRows(data.history, variant, null)),
+    [data.history, variant, verdictId, verdictRows],
   );
 
   // The insufficient case with a price is "not enough history"; without a price the reason says so.
   const tooNew = verdict.label === 'insufficient' && card.priceCents !== null;
   const trackedDays = finite(facts?.historyDays) ? facts.historyDays : verdictRows.length;
   const fact = avoid ? avoidFact(card) : null;
-  const change = avoid && avoidKind(card) === 'price' ? null : recentChange(verdictRows, RECENT_DAYS);
+  // a change is recent within the stored raise window (R43), as the verdict's own price-rise check
+  const change =
+    (avoid && avoidKind(card) === 'price') || !finite(data.raiseWindowDays) ? null : recentChange(verdictRows, data.raiseWindowDays);
 
   return (
     <div className="flex flex-col gap-4">
@@ -457,13 +463,13 @@ function ProductContent({ data }: { data: ProductResponse }) {
           )}
           <History rows={rows} judged={judged} low30={judged ? (facts?.low30 ?? null) : null} />
           <div className="grid items-start gap-4 lg:grid-cols-2">
-            {facts && <NumbersPanel facts={facts} />}
+            {facts && <NumbersPanel facts={facts} judged={verdictJudged} />}
             <Comparison others={data.others} />
           </div>
         </>
       )}
 
-      <SomethingWrong />
+      <SomethingWrong productId={product.productId} />
     </div>
   );
 }

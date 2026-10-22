@@ -1,5 +1,5 @@
 import { NO_PRICE } from '@/components/site/DealCard';
-import { formatDay, formatEuro } from '@/lib/format';
+import { formatDay, formatEuro, signedPct } from '@/lib/format';
 import type { DayRow } from '@/lib/history';
 import { cn } from '@/lib/utils';
 
@@ -8,16 +8,14 @@ function signedEuro(cents: number): string {
   return `${cents > 0 ? '+' : '-'}${formatEuro(Math.abs(cents))}`;
 }
 
-/** "+12.7%" / "-2.7%"; whole numbers stay whole. */
-export function signedPct(pct: number): string {
-  const abs = Number(Math.abs(pct).toFixed(1));
-  return `${pct > 0 ? '+' : pct < 0 ? '-' : ''}${abs}%`;
-}
-
 function ChangeCell({ row }: { row: DayRow }) {
   const c = row.change;
   if (row.price === null) return <td className="px-2 py-2" />;
-  if (!c) return <td className="px-2 py-2 text-right text-xs text-muted-foreground">No earlier price</td>;
+  if (!c) {
+    return (
+      <td className="px-2 py-2 text-right text-xs text-muted-foreground">{row.prevHidden ? 'Previous day not shown by the shop' : 'No earlier price'}</td>
+    );
+  }
   if (c.cents === 0) return <td className="px-2 py-2 text-right text-muted-foreground">No change</td>;
   return (
     <td className={cn('px-2 py-2 text-right font-semibold whitespace-nowrap tabular-nums', c.cents > 0 ? 'text-bad' : 'text-good')}>
@@ -26,8 +24,8 @@ function ChangeCell({ row }: { row: DayRow }) {
   );
 }
 
-function WorthCell({ worth, judged }: { worth: boolean | null; judged: boolean }) {
-  if (worth === null) return <td className="px-2 py-2 text-xs text-muted-foreground">{judged ? '' : 'Not judged'}</td>;
+function WorthCell({ worth }: { worth: boolean | null }) {
+  if (worth === null) return <td className="px-2 py-2" />;
   return (
     <td className="px-2 py-2">
       <span className={cn('inline-block rounded-md border px-2 py-0.5 text-xs font-semibold', worth ? 'border-good text-good' : 'border-bad text-bad')}>
@@ -41,7 +39,10 @@ export type DayTableProps = {
   id: string;
   /** oldest first, as dayRows returns them; shown newest first */
   rows: DayRow[];
-  /** whether `worth` comes from this variant's verdict (false: another variant, "Not judged") */
+  /**
+   * whether `worth` answers come from a good / avoid verdict about this variant; false (another
+   * variant, or an insufficient / none verdict) leaves the Worth buying column out (Ruling R44)
+   */
   judged: boolean;
   /** facts.low30, named in the note under the table */
   low30: number | null;
@@ -77,9 +78,11 @@ export function DayTable({ id, rows, judged, low30, className }: DayTableProps) 
             <th scope="col" className="px-2 py-1 font-medium">
               Black Friday
             </th>
-            <th scope="col" className="px-2 py-1 font-medium">
-              Worth buying
-            </th>
+            {judged && (
+              <th scope="col" className="px-2 py-1 font-medium">
+                Worth buying
+              </th>
+            )}
           </tr>
         </thead>
         <tbody>
@@ -96,7 +99,7 @@ export function DayTable({ id, rows, judged, low30, className }: DayTableProps) 
               <td className="px-2 py-2 text-right text-muted-foreground tabular-nums">{r.was === null ? 'None' : formatEuro(r.was)}</td>
               <ChangeCell row={r} />
               <td className="px-2 py-2">{r.bf ? <span className="font-semibold">Marked</span> : <span className="text-muted-foreground">Not marked</span>}</td>
-              <WorthCell worth={r.worth} judged={judged} />
+              {judged && <WorthCell worth={r.worth} />}
             </tr>
           ))}
         </tbody>
@@ -104,7 +107,7 @@ export function DayTable({ id, rows, judged, low30, className }: DayTableProps) 
       <p className="mt-2 text-xs text-muted-foreground">
         {judged && low30 !== null
           ? `Worth buying: the price that day was at or below ${formatEuro(low30)}, the lowest price this verdict uses. Change is against the previous day we tracked.`
-          : 'Worth buying is shown only for the variant the verdict is about. Change is against the previous day we tracked.'}
+          : 'Days worth buying are shown only for a judged deal, on the variant the verdict is about. Change is against the previous day we tracked.'}
       </p>
     </div>
   );

@@ -11,6 +11,8 @@ export type DayRow = {
   bf: boolean;
   /** against the previous tracked day; null when either day has no price */
   change: { cents: number; pct: number } | null;
+  /** an earlier tracked day exists but the shop showed no price on the previous one */
+  prevHidden: boolean;
   /**
    * The server's "days worth buying" rule (src/site/verdict.ts): the price was at or below the
    * verdict's lowest 30-day price (facts.low30). null without a price or without low30.
@@ -44,13 +46,15 @@ export function dayRows(history: readonly HistoryObs[], productId: number, low30
   const rows: DayRow[] = [];
   for (const [day, h] of days) {
     const price = positive(h.price) ? h.price : null;
-    const prev = rows.at(-1)?.price ?? null;
+    const before = rows.at(-1);
+    const prev = before?.price ?? null;
     rows.push({
       day,
       price,
       was: positive(h.was) ? h.was : null,
       bf: h.bf === true,
       change: price !== null && prev !== null ? { cents: price - prev, pct: pct(prev, price) } : null,
+      prevHidden: before !== undefined && prev === null,
       worth: price !== null && positive(low30) ? price <= low30 : null,
     });
   }
