@@ -137,10 +137,18 @@ export function HowWeCheckPage() {
 
       <Section title="Shop ratings">
         <List>
-          <li>A rating goes from A (best) to F. It is based on the products we judged at that shop: those marked Black Friday or showing a was price higher than the price.</li>
+          <li>
+            A rating goes from A (best) to F. It is based on the products we judged at that shop: those marked Black Friday or showing a
+            was price higher than the price, with at least {days(t.minHistoryDays)} of history, whether or not they got a Good Deal or
+            Deal to Avoid tag.
+          </li>
           <li>
             Each Deal to Avoid counts as one. If its was price was raised as well, that adds another half. We divide the total by the
-            number of judged products (Good Deals plus Deals to Avoid).
+            number of judged products.
+          </li>
+          <li>
+            The sentence under the letter gives the counts, for example &quot;3 of 40 judged products were Deals to Avoid (1 with a raised
+            was price)&quot;.
           </li>
           <li>
             The share decides the letter:{' '}

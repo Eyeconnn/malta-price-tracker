@@ -141,6 +141,9 @@ describe('how we check', () => {
     expect(t).not.toContain('Every sentence we write');
     expect(t).toContain('based on the products we judged at that shop');
     expect(t).not.toContain('only at the Black Friday deals');
+    expect(t).toContain('whether or not they got a Good Deal or Deal to Avoid tag');
+    expect(t).not.toContain('Good Deals plus Deals to Avoid');
+    expect(t).toContain('judged products were Deals to Avoid (1 with a raised was price)');
     expect(t).toContain('must not be known to be out of stock');
     expect(t).not.toContain('must have it in stock');
     expect(t).toContain('Verdicts and shop ratings use a change after the next nightly update');

@@ -4,7 +4,7 @@
 import type postgres from 'postgres';
 import { categorize } from './categories.js';
 import { assignMatches, type MatchInput } from './matching.js';
-import { computeRating } from './rating.js';
+import { computeRating, JUDGED_SQL } from './rating.js';
 import type { SiteSettings } from './settings.js';
 import { computeVerdict, type Obs, type Verdict } from './verdict.js';
 
@@ -386,16 +386,20 @@ export async function buildSiteProducts(
   return { products, judged };
 }
 
-/** One shop_ratings row per active, visible shop from its site_products; hidden or inactive shops lose theirs. */
+/** Days a site_products row stays on the public site after its last build (Ruling R21); ratings count the same rows. */
+export const FRESH_DAYS = 2;
+
+/** One shop_ratings row per active, visible shop from its fresh site_products; hidden or inactive shops lose theirs. */
 export async function buildShopRatings(sql: postgres.Sql, settings: SiteSettings, now: Date): Promise<number> {
+  const freshSince = new Date(now.getTime() - FRESH_DAYS * DAY_MS);
   const counts = await sql<{ shop_id: number; judged: number; good: number; avoid: number; was_raised: number }[]>`
     select s.id as shop_id,
-      count(sp.id) filter (where sp.verdict in ('good', 'avoid'))::int as judged,
+      count(sp.id) filter (where ${sql.unsafe(JUDGED_SQL)})::int as judged,
       count(sp.id) filter (where sp.verdict = 'good')::int as good,
       count(sp.id) filter (where sp.verdict = 'avoid')::int as avoid,
       count(sp.id) filter (where sp.verdict in ('good', 'avoid') and sp.facts -> 'wasRaisedFrom' is not null)::int as was_raised
     from shops s
-    left join site_products sp on sp.shop_id = s.id
+    left join site_products sp on sp.shop_id = s.id and sp.updated_at > ${freshSince}
     where s.active and not s.site_hidden
     group by s.id
     order by s.id`;

@@ -2,7 +2,7 @@
 // Every query shows only visible shops (active, not site_hidden) and site_products rows refreshed in the last
 // 2 days (Rulings R21, R28). The SQL runs through a small runner so tests can use PGlite instead of Neon.
 import { neon } from '@neondatabase/serverless';
-import type { Grade } from '../../src/site/rating.js';
+import { type Grade, JUDGED_SQL } from '../../src/site/rating.js';
 import { type SiteSettings, settingsFromRows } from '../../src/site/settings.js';
 import type { Obs, VerdictFacts } from '../../src/site/verdict.js';
 
@@ -324,7 +324,7 @@ export function createData(db: SqlRunner, opts: DataOptions = {}): Data {
         left join shop_ratings r on r.shop_id = s.id
         cross join lateral (
           select count(*)::int as products,
-            count(*) filter (where sp.verdict in ('good', 'avoid'))::int as judged,
+            count(*) filter (where ${JUDGED_SQL})::int as judged,
             count(*) filter (where sp.verdict = 'good' and sp.price_cents > 0)::int as good,
             count(*) filter (where sp.verdict = 'avoid')::int as avoid,
             count(*) filter (where sp.verdict in ('good', 'avoid') and sp.facts -> 'wasRaisedFrom' is not null)::int as was_raised,

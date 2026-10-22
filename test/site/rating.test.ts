@@ -45,12 +45,26 @@ describe('computeRating', () => {
     expect(computeRating({ judged: 0, good: 0, avoid: 0, wasRaised: 0 }, { ...T, minJudgedForRating: 0 }).grade).toBeNull();
   });
 
-  it('gives the exact sentence for each grade', () => {
-    expect(grade(0).sentence).toBe('Honest pricing. Its deals are real discounts.');
-    expect(grade(5).sentence).toBe('Mostly honest. A few deals need a closer look.');
-    expect(grade(10).sentence).toBe('Mixed. Check each deal before you buy.');
-    expect(grade(20).sentence).toBe('Be careful here. Some Black Friday prices were raised before the sale.');
-    expect(grade(30).sentence).toBe('Many deals here were raised before the sale.');
-    expect(grade(50).sentence).toBe('Avoid its deals. Most were raised before the sale.');
+  it('states the counts behind the letter, never a judgement about the shop (Ruling R54)', () => {
+    expect(grade(0).sentence).toBe('0 of 100 judged products were Deals to Avoid (0 with a raised was price).');
+    expect(grade(23, 9, 120).sentence).toBe('23 of 120 judged products were Deals to Avoid (9 with a raised was price).');
+    expect(grade(1, 1, 40).sentence).toBe('1 of 40 judged products was a Deal to Avoid (1 with a raised was price).');
+    expect(computeRating({ judged: 1, good: 0, avoid: 1, wasRaised: 0 }, { ...T, minJudgedForRating: 1 }).sentence).toBe(
+      '1 of 1 judged product was a Deal to Avoid (0 with a raised was price).',
+    );
+    expect(grade(1500, 0, 2500).sentence).toBe('1,500 of 2,500 judged products were Deals to Avoid (0 with a raised was price).');
+    // the letters and bands stay as they were
+    expect(grade(4).grade).toBe('A');
+    expect(grade(45).grade).toBe('F');
+  });
+
+  it('is not rated when the counts are not numbers (M5)', () => {
+    for (const judged of [Number.NaN, Number.POSITIVE_INFINITY * 0, undefined as unknown as number]) {
+      const r = computeRating({ judged, good: 0, avoid: 0, wasRaised: 0 }, T);
+      expect(r.grade).toBeNull();
+      expect(r.sentence).toBe('Not rated yet: not enough Black Friday deals checked.');
+    }
+    expect(computeRating({ judged: 30, good: 30, avoid: 0, wasRaised: 0 }, { ...T, minJudgedForRating: Number.NaN }).grade).toBeNull();
+    expect(computeRating({ judged: 30, good: 30, avoid: Number.NaN, wasRaised: 0 }, T).grade).toBeNull();
   });
 });

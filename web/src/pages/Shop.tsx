@@ -77,7 +77,7 @@ function StatsBlock({ stats }: { stats: ShopStats }) {
       </h2>
       <dl className="m-0 grid grid-cols-2 gap-3 md:grid-cols-4">
         <Stat label="Real deals" value={real === null || !isCount(real) ? 'Not enough judged yet' : percent(real)} />
-        <Stat label="Raised before sale" value={countText(stats.avoid)} tone={isCount(stats.avoid) && stats.avoid > 0 ? 'bad' : undefined} />
+        <Stat label="Deals to avoid" value={countText(stats.avoid)} tone={isCount(stats.avoid) && stats.avoid > 0 ? 'bad' : undefined} />
         <Stat label="Was price raised" value={countText(stats.wasRaised)} tone={isCount(stats.wasRaised) && stats.wasRaised > 0 ? 'bad' : undefined} />
         <Stat label="Marked Black Friday" value={countText(stats.bfMarked)} />
       </dl>

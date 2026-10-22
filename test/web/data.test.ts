@@ -314,3 +314,18 @@ describe('data.ts flagged readings (Ruling R55)', () => {
     expect(prices).toEqual([80000, 70000, 71000]);
   });
 });
+
+describe('data.ts shop stats count judged products like the rating (Ruling R53)', () => {
+  it('a none with judged facts counts as judged; a none without does not', async () => {
+    const before = (await data.shop('beta'))!.stats;
+    await pg.exec(`
+      insert into site_products (id, shop_id, group_key, title, price_cents, verdict, facts, updated_at) values
+        (60, 2, 'NJ', 'Judged none', 1000, 'none', '{"judged": true}', now()),
+        (61, 2, 'NU', 'Unjudged none', 1000, 'none', '{"judged": false}', now()),
+        (62, 2, 'NS', 'Stale judged none', 1000, 'none', '{"judged": true}', now() - interval '3 days');
+    `);
+    const after = (await data.shop('beta'))!.stats;
+    expect(after.judged).toBe(before.judged + 1);
+    expect(after.realDealPct).toBe(Math.round((1000 * after.good) / after.judged) / 10);
+  });
+});

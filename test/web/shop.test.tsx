@@ -57,7 +57,7 @@ const change = (id: number, extra: Partial<Change> = {}): Change => ({
 function shopResponse(extra: Partial<ShopResponse> = {}): ShopResponse {
   return {
     shop: { id: 1, slug: 'alpha', name: 'Alpha Shop', url: 'https://alpha.example', category: null },
-    rating: { grade: 'D', sentence: '23 of 120 judged deals were raised before the sale.', judged: 120 },
+    rating: { grade: 'D', sentence: '23 of 120 judged products were Deals to Avoid (9 with a raised was price).', judged: 120 },
     avoid: [avoid(11), avoid(12)],
     good: [card(1), card(2)],
     rises: [change(21), change(22, { title: 'Tefal iron', fromCents: 7495, toCents: 8995, pct: 20 })],
@@ -243,7 +243,7 @@ describe('shop page', () => {
     mockApi({ '/api/shops/alpha': () => json(shopResponse()) });
     renderAt('/shops/alpha');
     await screen.findByRole('region', { name: 'Good deals here' });
-    expect(screen.queryByText('Raised before sale')).toBeNull();
+    expect(screen.queryByText('Deals to avoid')).toBeNull();
     expect(screen.queryByRole('table')).toBeNull();
   });
 
@@ -256,7 +256,7 @@ describe('shop page', () => {
       const stats = await screen.findByRole('region', { name: 'Shop statistics' });
       const s = within(stats);
       expect(s.getByText('Real deals').nextSibling?.textContent).toBe('61%');
-      expect(s.getByText('Raised before sale').nextSibling?.textContent).toBe('23');
+      expect(s.getByText('Deals to avoid').nextSibling?.textContent).toBe('23');
       expect(s.getByText('Was price raised').nextSibling?.textContent).toBe('9');
       expect(s.getByText('Marked Black Friday').nextSibling?.textContent).toBe('1,287');
     });
@@ -292,7 +292,7 @@ describe('shop page', () => {
       mockApi({ '/api/shops/alpha': () => json(shopResponse({ stats })) });
       renderAt('/shops/alpha');
       const region = await screen.findByRole('region', { name: 'Shop statistics' });
-      expect(within(region).getByText('Raised before sale').nextSibling?.textContent).toBe('Not shown');
+      expect(within(region).getByText('Deals to avoid').nextSibling?.textContent).toBe('Not shown');
       expect(region.textContent).not.toMatch(/NaN|null/);
     });
 

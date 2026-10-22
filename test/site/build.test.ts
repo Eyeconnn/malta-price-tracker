@@ -343,8 +343,9 @@ describe.skipIf(!process.env.SITE_BUILD_TEST_DB)('site-build on PGlite', () => {
 
     const graded = await buildShopRatings(sql, { ...DEFAULT_SETTINGS, thresholds: { ...DEFAULT_SETTINGS.thresholds, minJudgedForRating: 1 } }, NOW);
     expect(graded).toBe(2);
-    const [a] = await sql`select grade from shop_ratings where shop_id = ${Number(ids.a)}`;
+    const [a] = await sql`select grade, sentence from shop_ratings where shop_id = ${Number(ids.a)}`;
     expect(a.grade).toBe('F');
+    expect(a.sentence).toBe('1 of 1 judged product was a Deal to Avoid (1 with a raised was price).');
   }, 60_000);
 
   it('keeps a match confirmation while the row stays in the same canonical group (R50)', async () => {
@@ -435,5 +436,29 @@ describe.skipIf(!process.env.SITE_BUILD_TEST_DB)('site-build on PGlite', () => {
       expect(r.reason).toBe('Price has been €100.00 on every day it showed a price since 6 Oct.');
       expect(r.facts?.low30).toBe(10000);
     }
+  }, 60_000);
+
+  it('rates on every judged product (good, avoid and judged none) refreshed in the last 2 days (R53, R21)', async () => {
+    const [{ id: shopId }] = await sql<{ id: number }[]>`
+      insert into shops (slug, name, base_url, category, adapter) values ('ratingshop', 'ratingshop', 'https://rating.test', 'electronics', 'woo') returning id`;
+    const fresh = NOW;
+    const stale = new Date(NOW.getTime() - 3 * DAY);
+    const facts = (extra: Record<string, unknown>) => JSON.stringify({ low30: 100, usual: 100, claimedPct: null, realPct: 0, historyDays: 20, priceChanges: 0, wasChanges: 0, daysWorthBuying: 0, ...extra });
+    const rows: [string, string, string | null, Date][] = [
+      ['G', 'good', facts({ judged: true }), fresh],
+      ['A', 'avoid', facts({ judged: true, wasRaisedFrom: 90 }), fresh],
+      ['NJ', 'none', facts({ judged: true }), fresh],
+      ['NU', 'none', facts({ judged: false }), fresh],
+      ['NN', 'none', null, fresh],
+      ['I', 'insufficient', facts({ judged: false }), fresh],
+      ['AS', 'avoid', facts({ judged: true }), stale],
+      ['NS', 'none', facts({ judged: true }), stale],
+    ];
+    for (const [key, verdict, f, at] of rows) {
+      await sql`insert into site_products (shop_id, group_key, title, verdict, facts, updated_at) values (${shopId}, ${key}, ${key}, ${verdict}, ${f}::text::jsonb, ${at})`;
+    }
+    await buildShopRatings(sql, { ...DEFAULT_SETTINGS, thresholds: { ...DEFAULT_SETTINGS.thresholds, minJudgedForRating: 3 } }, NOW);
+    const [r] = await sql`select grade, judged, good, avoid, was_raised, sentence from shop_ratings where shop_id = ${shopId}`;
+    expect(r).toEqual({ grade: 'F', judged: 3, good: 1, avoid: 1, was_raised: 1, sentence: '1 of 3 judged products was a Deal to Avoid (1 with a raised was price).' });
   }, 60_000);
 });
