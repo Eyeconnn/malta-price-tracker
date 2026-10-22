@@ -157,6 +157,29 @@ has a full run in progress, and never goes below the robots.txt crawl delay.
 
 To switch on: set the repository variable `SCRAPE_DUE_ENABLED` to `true`.
 
+## Clean product names (pilot)
+
+`pnpm normalise-names` sends batches of one site category's product groups to Claude Code (`claude -p`, on the
+owner's own Claude login, never an API key and never `--bare`) and gets back a clean name, a variant label and the
+category's attributes (`config/attribute-schemas.json`). Every answer is checked in code (`src/names/check.ts`: the
+brand and every number and model token must survive); a failed check is stored as rejected and the site keeps the
+shop's title. Claude runs with tools off, no MCP servers, no user or project settings (so no hooks or plugins), no
+session saved, in an empty temp folder; shop text is passed as data.
+
+```bash
+pnpm normalise-names --model haiku --pilot --dry-run             # 500 groups spread over categories and shops, no writes
+pnpm normalise-names --model sonnet --pilot --limit 200 --dry-run
+pnpm normalise-names --model haiku --category toys --max-batches 5
+```
+
+Options: `--model` (required), `--pilot` with `--limit` (default 500) and `--seed`, `--category <slug>` (repeatable),
+`--batch-size` (default 40), `--parallel` (default 2, max 6), `--max-batches`, `--timeout` (seconds per call,
+default 300), `--dry-run`, `--save-raw` (keeps each batch's raw JSON). Each run writes `out/names/<run>-<model>.html`
+and `.csv` (names before and after, attributes, rejects, tokens and the cost Claude Code reports, which on a plan is
+what the run would have cost at API prices). Reads use `DASHBOARD_DATABASE_URL`; without `--dry-run` the results go
+to `product_names` and `name_runs` (migration 007) through `DATABASE_URL`. A group is only sent again when its title
+or variant titles change. Ctrl+C stops after the running batches.
+
 ## Public site (web/)
 
 The public Black Friday Guide: a React app plus a Cloudflare Worker (`web/worker`, Worker name `bf-guide`) that serves the app and a JSON API. Shoppers check whether a Black Friday "was" price is real against the EU rule (lowest price of the previous 30 days). Verdicts, shop ratings and cross-shop matches are built from this repo's price history by the nightly `site-build` job; the Worker only reads them. The "How we check" page explains the rules to visitors and shows the live thresholds from `GET /api/thresholds`.
