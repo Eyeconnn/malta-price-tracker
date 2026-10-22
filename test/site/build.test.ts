@@ -13,6 +13,8 @@ import {
   withBuildLock,
   pickRepresentative,
   pickVerdictVariant,
+  lastScrapeActivity,
+  shouldSkipBuild,
   toObs,
   type VariantResult,
 } from '../../src/site/build.js';
@@ -137,6 +139,26 @@ describe('pickVerdictVariant', () => {
   it('prefers the representative among variants with the same non-avoid label', () => {
     const vs = [variant('1', 500, true, verdict('good')), variant('2', 300, true, verdict('good'))];
     expect(pickVerdictVariant(vs, vs[1]).product.id).toBe('2');
+  });
+});
+
+describe('shouldSkipBuild (--skip-if-built-hours, final review I5)', () => {
+  const at = (h: number) => new Date(Date.UTC(2026, 10, 2, 0) + h * 3_600_000);
+  const base = { now: at(5), hours: 20 };
+
+  it('skips only when a full build ran within the hours and no scrape finished or started after it', () => {
+    expect(shouldSkipBuild({ ...base, lastBuild: at(2), lastScrape: at(1) })).toBe(true);
+    expect(shouldSkipBuild({ ...base, lastBuild: at(2), lastScrape: at(2) })).toBe(true);
+    expect(shouldSkipBuild({ ...base, lastBuild: at(2), lastScrape: null })).toBe(true);
+  });
+
+  it('builds when a scrape finished after the last build (cloud scrapes still running at build time)', () => {
+    expect(shouldSkipBuild({ ...base, lastBuild: at(2), lastScrape: at(3) })).toBe(false);
+  });
+
+  it('builds when there is no full build, or it is older than the hours', () => {
+    expect(shouldSkipBuild({ ...base, lastBuild: null, lastScrape: at(1) })).toBe(false);
+    expect(shouldSkipBuild({ ...base, lastBuild: at(-15), lastScrape: at(-16) })).toBe(false);
   });
 });
 
@@ -403,6 +425,17 @@ describe.skipIf(!process.env.SITE_BUILD_TEST_DB)('site-build on PGlite', () => {
     const [row] = await sql`select value from site_settings where key = 'lastFullBuild'`;
     expect(row.value).toEqual({ at: later.toISOString() });
     expect(await loadSettings(sql)).toEqual(DEFAULT_SETTINGS);
+  }, 60_000);
+
+  it('lastScrapeActivity is the newest finish, or the start of a run still going', async () => {
+    expect(await lastScrapeActivity(sql)).toBeNull();
+    const shopId = Number(ids.a);
+    await sql`insert into scrape_runs (shop_id, started_at, finished_at, status) values
+      (${shopId}, ${new Date(NOW.getTime() - 5 * HOUR)}, ${new Date(NOW.getTime() - 4 * HOUR)}, 'ok'),
+      (${shopId}, ${new Date(NOW.getTime() - 3 * HOUR)}, ${new Date(NOW.getTime() - 2 * HOUR)}, 'ok')`;
+    expect((await lastScrapeActivity(sql))?.toISOString()).toBe(new Date(NOW.getTime() - 2 * HOUR).toISOString());
+    await sql`insert into scrape_runs (shop_id, started_at) values (${shopId}, ${new Date(NOW.getTime() - HOUR)})`;
+    expect((await lastScrapeActivity(sql))?.toISOString()).toBe(new Date(NOW.getTime() - HOUR).toISOString());
   }, 60_000);
 
   it('ignores readings flagged jump_70pct, up or down (Ruling R55)', async () => {

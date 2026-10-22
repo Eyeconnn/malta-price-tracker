@@ -1,6 +1,7 @@
 # Nightly site build: turns the scraped prices into the public site's tables (site_products, shop_ratings).
 # Started by scripts/run-local.ps1 after the local scrape. The cron is a backup that does nothing when a
-# build already ran in the last 20 hours.
+# build already ran in the last 20 hours and no scrape finished or started since then (so a build that ran
+# before the cloud scrapes finished is redone with their prices).
 name: site-build
 
 on:

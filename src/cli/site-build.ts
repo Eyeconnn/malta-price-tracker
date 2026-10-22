@@ -1,11 +1,20 @@
 // pnpm site-build [--shop slug] [--skip-if-built-hours 20]
 // Builds the public site's tables (site_products, verdicts history, canonical ids, shop_ratings) from the scraped prices.
-// --skip-if-built-hours N: do nothing when a full build (no --shop) finished within the last N hours (backup cron).
+// --skip-if-built-hours N: do nothing when a full build (no --shop) ran within the last N hours and no scrape
+// finished or started since it began (backup cron); a build that ran before the cloud scrapes finished is redone.
 // Only one build runs at a time (advisory lock); a second one logs and exits 0.
 import { parseArgs } from 'node:util';
 import type postgres from 'postgres';
 import { closeDb, db } from '../db.js';
-import { buildShopRatings, buildSiteProducts, lastFullBuild, markFullBuild, withBuildLock } from '../site/build.js';
+import {
+  buildShopRatings,
+  buildSiteProducts,
+  lastFullBuild,
+  lastScrapeActivity,
+  markFullBuild,
+  shouldSkipBuild,
+  withBuildLock,
+} from '../site/build.js';
 import { loadSettings } from '../site/settings.js';
 
 const { values } = parseArgs({
@@ -29,9 +38,9 @@ async function build(sql: postgres.Sql, started: number) {
   if (skipHours !== undefined) {
     const hours = Number(skipHours);
     if (!Number.isFinite(hours) || hours <= 0) throw new Error(`--skip-if-built-hours needs a positive number, got ${skipHours}`);
-    const last = await lastFullBuild(sql);
-    if (last && now.getTime() - last.getTime() < hours * 3_600_000) {
-      console.log(`site-build: last full build ${last.toISOString()} is within ${hours} hours, skipping`);
+    const [last, lastScrape] = await Promise.all([lastFullBuild(sql), lastScrapeActivity(sql)]);
+    if (shouldSkipBuild({ lastBuild: last, lastScrape, now, hours })) {
+      console.log(`site-build: last full build ${last?.toISOString()} is within ${hours} hours and no scrape since (last ${lastScrape?.toISOString() ?? 'none'}), skipping`);
       return;
     }
   }

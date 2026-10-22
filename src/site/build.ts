@@ -442,6 +442,26 @@ export async function lastFullBuild(sql: postgres.Sql): Promise<Date | null> {
   return Number.isNaN(d.getTime()) ? null : d;
 }
 
+/**
+ * Time of the newest scrape activity: the latest finished_at, or the started_at of a run still going (a run in
+ * progress counts from its start). Null when no scrape ever ran.
+ */
+export async function lastScrapeActivity(sql: postgres.Sql): Promise<Date | null> {
+  const [{ at }] = await sql<{ at: Date | null }[]>`select max(coalesce(finished_at, started_at)) as at from scrape_runs`;
+  return at ? new Date(at) : null;
+}
+
+/**
+ * --skip-if-built-hours (the backup cron): skip only when a full build ran within `hours` and no scrape finished
+ * (or started) after that build began, so a build that ran while cloud scrapes were still going is redone once
+ * they finish. lastBuild is the build's start time (markFullBuild), the time its data was read up to.
+ */
+export function shouldSkipBuild(o: { lastBuild: Date | null; lastScrape: Date | null; now: Date; hours: number }): boolean {
+  if (o.lastBuild === null) return false;
+  if (o.now.getTime() - o.lastBuild.getTime() >= o.hours * 3_600_000) return false;
+  return o.lastScrape === null || o.lastScrape.getTime() <= o.lastBuild.getTime();
+}
+
 /** Fixed advisory lock id for site-build ("SBLD"). */
 export const SITE_BUILD_LOCK = 0x53424c44;
 
