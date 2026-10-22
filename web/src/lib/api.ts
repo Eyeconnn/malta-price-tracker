@@ -1,7 +1,7 @@
 // The one typed client for the public API (web/worker/api.ts, reports.ts), and useApi for components.
 // Response types are built from the Worker's own types, so a change there breaks the build here.
 import { useCallback, useEffect, useRef, useState } from 'react';
-import type { PhraseSlot } from '../../../src/site/settings.js';
+import type { PhraseSlot, Thresholds } from '../../../src/site/settings.js';
 import type { VerdictFacts } from '../../../src/site/verdict.js';
 import type {
   Card,
@@ -67,6 +67,8 @@ export type ProductResponse = {
   /** days back a price change counts as recent (stored threshold, as the verdict's raise window) */
   raiseWindowDays: number;
 };
+/** The stored verdict and rating thresholds (stored settings merged over the defaults) */
+export type ThresholdsResponse = { thresholds: Thresholds };
 export type CategoriesResponse = {
   categories: (CategoryCount & { name: string })[];
   /** rows without a category (not in `categories`) */
@@ -139,6 +141,7 @@ export const api = {
   shop: (slug: string, signal?: AbortSignal) => get<ShopResponse>(`/api/shops/${encodeURIComponent(slug)}`, signal),
   product: (id: number, signal?: AbortSignal) => get<ProductResponse>(`/api/products/${encodeURIComponent(String(id))}`, signal),
   categories: (signal?: AbortSignal) => get<CategoriesResponse>('/api/categories', signal),
+  thresholds: (signal?: AbortSignal) => get<ThresholdsResponse>('/api/thresholds', signal),
   report: postReport,
 };
 

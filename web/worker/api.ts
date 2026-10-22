@@ -177,7 +177,7 @@ export async function handleApi(req: Request, env: Env, url: URL, deps: ApiDeps)
   if (p === '/api/admin' || p.startsWith('/api/admin/')) return handleAdmin(req, env, url, deps.admin ?? DEFAULT_ADMIN);
   const productMatch = /^\/api\/products\/([^/]*)$/.exec(p);
   const shopMatch = /^\/api\/shops\/([^/]*)$/.exec(p);
-  const known = ['/api/home', '/api/search', '/api/deals', '/api/shops', '/api/categories'].includes(p) || productMatch || shopMatch;
+  const known = ['/api/home', '/api/search', '/api/deals', '/api/shops', '/api/categories', '/api/thresholds'].includes(p) || productMatch || shopMatch;
   if (!known) return notFound();
   if (req.method === 'HEAD') {
     // same status and headers as GET, no body
@@ -229,6 +229,9 @@ export async function handleApi(req: Request, env: Env, url: URL, deps: ApiDeps)
   if (p === '/api/shops') return cached(cache, key(p), async () => json({ shops: await data().shops() }));
 
   if (p === '/api/categories') return cached(cache, key(p), () => categories(data()));
+
+  // the live verdict and rating thresholds, for the How we check page
+  if (p === '/api/thresholds') return cached(cache, key(p), async () => json({ thresholds: (await data().settings()).thresholds }));
 
   if (shopMatch) {
     const slug = shopMatch[1];

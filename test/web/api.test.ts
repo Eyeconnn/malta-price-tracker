@@ -347,6 +347,33 @@ describe('GET /api/home', () => {
   });
 });
 
+describe('GET /api/thresholds', () => {
+  it('returns the stored thresholds, public for 10 minutes', async () => {
+    const settings = { ...DEFAULT_SETTINGS, thresholds: { ...DEFAULT_SETTINGS.thresholds, raisePct: 4, minJudgedForRating: 30 } };
+    const w = setup(fakeData({ settings: vi.fn(async () => settings) }));
+    const res = await w.fetch('/api/thresholds');
+    expect(res.status).toBe(200);
+    expect(res.headers.get('cache-control')).toBe('public, max-age=600');
+    expect(await res.json()).toEqual({ thresholds: settings.thresholds });
+  });
+
+  it('gives the defaults when nothing is stored, and carries nothing but the thresholds', async () => {
+    const w = setup();
+    expect(await (await w.fetch('/api/thresholds')).json()).toEqual({ thresholds: DEFAULT_SETTINGS.thresholds });
+  });
+
+  it('is served from the cache on a repeat and answers HEAD without a body', async () => {
+    const cache = memoryCache();
+    const w = setup(fakeData(), cache);
+    await w.fetch('/api/thresholds');
+    await w.fetch('/api/thresholds');
+    expect(w.data.settings).toHaveBeenCalledTimes(1);
+    const head = await w.fetch('/api/thresholds', { method: 'HEAD' });
+    expect(head.status).toBe(200);
+    expect(await head.text()).toBe('');
+  });
+});
+
 describe('GET /api/products/:id', () => {
   it('returns 404 JSON for an unknown or non-numeric id', async () => {
     const w = setup();

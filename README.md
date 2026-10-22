@@ -3,8 +3,8 @@
 Logs daily prices from Maltese web shops so that every Black Friday "was" price on 27 November 2026
 can be tested against the EU rule that a discount is measured from the lowest price of the previous 30 days.
 
-This repo is only the collection side: scrapers, database, scheduling, alerts. The website, cross-shop
-matching, promo discovery and the verdict engine come later.
+This repo holds the collection side (scrapers, database, scheduling, alerts) and the public website in `web/`
+(see "Public site" below).
 
 ## Stack
 
@@ -156,6 +156,70 @@ changes in the last 7 days, then tier, within each shop's `max_requests_per_hour
 has a full run in progress, and never goes below the robots.txt crawl delay.
 
 To switch on: set the repository variable `SCRAPE_DUE_ENABLED` to `true`.
+
+## Public site (web/)
+
+The public Black Friday Guide: a React app plus a Cloudflare Worker (`web/worker`, Worker name `bf-guide`) that serves the app and a JSON API. Shoppers check whether a Black Friday "was" price is real against the EU rule (lowest price of the previous 30 days). Verdicts, shop ratings and cross-shop matches are built from this repo's price history by the nightly `site-build` job; the Worker only reads them. The "How we check" page explains the rules to visitors and shows the live thresholds from `GET /api/thresholds`.
+
+### Develop
+
+```bash
+pnpm web:worker     # the Worker and API on http://127.0.0.1:8788 (wrangler dev, reads web/.dev.vars)
+pnpm web:dev        # the Vite dev server on http://127.0.0.1:5173; it proxies /api to port 8788
+pnpm web:build      # builds the app into dist/web (the Worker serves it as static assets)
+pnpm test test/web  # web and Worker tests
+pnpm typecheck      # checks the repo and web/
+```
+
+`web/.dev.vars` is git-ignored and holds one line per Worker secret (names below): `DATABASE_URL`, `REPORTER_DATABASE_URL`, `ADMIN_DATABASE_URL`, `SITE_PASSWORD`, `ADMIN_PASSWORD`, `SITE_ORIGIN`, `IP_SALT`. Never commit it or paste its values anywhere.
+
+### Deploy
+
+```bash
+pnpm web:deploy     # vite build, then wrangler deploy --cwd web
+```
+
+The site works on the `*.workers.dev` address and on a custom domain; `SITE_ORIGIN` says which.
+
+### Worker secrets
+
+Set each one with `pnpm exec wrangler secret put NAME --cwd web` (wrangler asks for the value), and again whenever it changes. Deploying does not change secrets.
+
+| Secret | What it is for |
+| --- | --- |
+| `DATABASE_URL` | The read-only database URL (role `dashboard_ro`, the value of `DASHBOARD_DATABASE_URL` in `.env`). Every public read and the access settings use it. |
+| `REPORTER_DATABASE_URL` | Role `site_reporter`: inserts "Something wrong?" reports and reads (ip_hash, created_at) for the rate limit. Nothing else. |
+| `ADMIN_DATABASE_URL` | Role `site_admin`: used only by `/api/admin/*` (settings, report triage, shop hiding, match confirmation). |
+| `SITE_PASSWORD` | The shared password (HTTP Basic, any user name) that protects the whole site while it is private. |
+| `ADMIN_PASSWORD` | The separate password for `/admin` and `/api/admin/*`. It stays in force when the site is public. |
+| `IP_SALT` | Required. Random text used to hash client IPs for the report rate limit. Without it, report submissions fail closed (generic 500). |
+| `SITE_ORIGIN` | The site's address, such as the `workers.dev` URL or the custom domain. Used to accept same-site report posts. |
+| `TURNSTILE_SECRET` | Optional. Set it only together with a Turnstile widget in the client; when set, reports must carry a valid token. |
+
+### Database
+
+`pnpm migrate` applies `db/migrations/*.sql` once each (it includes `006_reports_ip_index.sql`). The two write roles are created, or given new passwords, with `pnpm exec tsx scripts/create-site-roles.ts`, which writes `REPORTER_DATABASE_URL` and `ADMIN_DATABASE_URL` to `.env` (it needs the owner connection in `DATABASE_URL`).
+
+### Nightly site-build
+
+`pnpm site-build` turns the scraped prices into `site_products`, verdicts and `shop_ratings`. The `site-build` workflow runs it after `pnpm migrate`. `scripts/run-local.ps1` starts the workflow with `gh workflow run site-build` after the scrapes, and the workflow's own cron at 04:55 UTC is a backup that skips when a build ran in the last 20 hours (`--skip-if-built-hours 20`). Threshold and category changes made in admin reach verdicts and ratings at the next build.
+
+### Admin
+
+Open `/admin` and sign in with `ADMIN_PASSWORD` (any user name). Admin pages are never indexed.
+
+| Page | What it does |
+| --- | --- |
+| Settings | The public switch, and the category overrides (shop category text to site category; applied at the next site-build). |
+| Phrases | The home page headlines for each time slot (morning, afternoon, evening, late, Black Friday week). |
+| Thresholds | The verdict and rating thresholds: history days, baseline days, raise window, raise %, good drop %, cheaper %, and judged products needed for a rating. |
+| Reports | The "Something wrong?" reports: read them, set a status, add a note. |
+| Shops | Show or hide a shop on the public site. |
+| Matches | Confirm products linked across shops by title only; "Cheaper at" uses them only once confirmed. |
+
+### The public switch
+
+The site is private until the switch on the admin Settings page is turned on. While it is private, every request needs `SITE_PASSWORD` and every response carries `noindex`. After a change, the Worker that saved it follows at once and other Cloudflare servers within 60 seconds. Cached API responses (everything except search and admin) refresh within 10 minutes.
 
 ## Shops
 
