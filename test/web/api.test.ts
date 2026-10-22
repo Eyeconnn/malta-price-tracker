@@ -337,6 +337,12 @@ describe('GET /api/home', () => {
     expect(((await (await w.fetch('/api/home')).json()) as { minHistoryDays: number }).minHistoryDays).toBe(21);
     expect(((await (await w.fetch('/api/deals?type=good')).json()) as { minHistoryDays: number }).minHistoryDays).toBe(21);
   });
+
+  it('the product page carries minHistoryDays from the stored thresholds', async () => {
+    const settings = { ...DEFAULT_SETTINGS, thresholds: { ...DEFAULT_SETTINGS.thresholds, minHistoryDays: 21 } };
+    const w = setup(fakeData({ settings: vi.fn(async () => settings), product: vi.fn(async () => detail(79900, [])) }));
+    expect(((await (await w.fetch('/api/products/7')).json()) as { minHistoryDays: number }).minHistoryDays).toBe(21);
+  });
 });
 
 describe('GET /api/products/:id', () => {

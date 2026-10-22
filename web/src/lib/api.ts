@@ -60,6 +60,8 @@ export type ProductResponse = {
   others: OtherShop[];
   /** the cheapest exact match at another shop, at least cheaperPct cheaper; null when none */
   cheaper: OtherShop | null;
+  /** days of prices needed before a deal is judged (stored threshold) */
+  minHistoryDays: number;
 };
 export type CategoriesResponse = {
   categories: (CategoryCount & { name: string })[];

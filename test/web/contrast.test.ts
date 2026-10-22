@@ -85,6 +85,13 @@ describe.each([
     expect(ratio(color('--tag-red-ink'), color('--tag-red'))).toBeGreaterThanOrEqual(4.5);
   });
 
+  // Product page: the "not enough history" panel and the "possibly the same product" chip use ink
+  // text on the fill colour, over the page or over glass. (Muted text on fill is below 4.5:1.)
+  it('ink text on fill is at least 4.5:1 over bg and glass', () => {
+    const fill = parse(tokens.get('--fill')!);
+    for (const under of [bg, glass]) expect(ratio(color('--ink'), over(fill, under))).toBeGreaterThanOrEqual(4.5);
+  });
+
   it('crossed-out was price is at least 4.5:1 on its tag fill', () => {
     expect(ratio(color('--tag-gold-was'), color('--tag-gold'))).toBeGreaterThanOrEqual(4.5);
     expect(ratio(color('--tag-red-was'), color('--tag-red'))).toBeGreaterThanOrEqual(4.5);

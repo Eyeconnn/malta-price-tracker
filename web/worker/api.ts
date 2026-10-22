@@ -132,6 +132,7 @@ async function product(data: Data, id: number): Promise<Response> {
     verdict: { label: verdict, reason, facts },
     others: detail.others,
     cheaper: cheaperAt(detail.product, detail.others, settings.thresholds.cheaperPct),
+    minHistoryDays: settings.thresholds.minHistoryDays,
   });
 }
 
