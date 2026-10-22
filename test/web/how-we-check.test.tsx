@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 // How we check page: plain-words explanation with the live thresholds from GET /api/thresholds.
-import { cleanup, render, screen, waitFor } from '@testing-library/react';
+import { act, cleanup, render, screen, waitFor } from '@testing-library/react';
 import { MemoryRouter } from 'react-router';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { App } from '@/App';
@@ -20,7 +20,6 @@ function renderPage() {
 }
 
 const bodyText = () => document.body.textContent ?? '';
-const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 beforeEach(() => {
   localStorage.clear();
@@ -83,11 +82,15 @@ describe('how we check', () => {
   });
 
   it('shows the default thresholds when the call fails', async () => {
-    const fetchMock = vi.fn(async () => json({ error: 'internal error' }, 500));
+    const answer = Promise.resolve(json({ error: 'internal error' }, 500));
+    const fetchMock = vi.fn(() => answer);
     vi.stubGlobal('fetch', fetchMock);
     renderPage();
     await waitFor(() => expect(fetchMock).toHaveBeenCalled());
-    await sleep(20);
+    // the failed answer has been handled once the pending updates have run
+    await act(async () => {
+      expect((await answer).ok).toBe(false);
+    });
     expect(bodyText()).toContain('more than 3%');
     expect(screen.getAllByRole('heading', { level: 1 })).toHaveLength(1);
   });
@@ -113,12 +116,39 @@ describe('how we check', () => {
   });
 
   it('falls back to the defaults when the answer has the wrong shape', async () => {
-    const fetchMock = vi.fn(async () => json({ thresholds: { raisePct: 'x' } }));
+    const answer = json({ thresholds: { raisePct: 9, goodDropPct: 'x' } });
+    const fetchMock = vi.fn(async () => answer);
     vi.stubGlobal('fetch', fetchMock);
     renderPage();
-    await waitFor(() => expect(fetchMock).toHaveBeenCalled());
-    await sleep(20);
+    // the body is read by the client, then rejected for its shape
+    await waitFor(() => expect(answer.bodyUsed).toBe(true));
+    await act(async () => {});
     expect(bodyText()).toContain('more than 3%');
+    expect(bodyText()).not.toContain('more than 9%');
+  });
+
+  it('says Deal to Avoid tests win over a low price', () => {
+    vi.stubGlobal('fetch', vi.fn(() => new Promise<Response>(() => {})));
+    renderPage();
+    expect(bodyText()).toContain('A product that meets any Deal to Avoid test is never a Good Deal, even if its price is low.');
+  });
+
+  it('keeps the wording scoped to what the code does', () => {
+    vi.stubGlobal('fetch', vi.fn(() => new Promise<Response>(() => {})));
+    renderPage();
+    const t = bodyText();
+    expect(t).toContain('The sentences we write for a Good Deal or a Deal to Avoid state prices and dates');
+    expect(t).not.toContain('Every sentence we write');
+    expect(t).toContain('based on the products we judged at that shop');
+    expect(t).not.toContain('only at the Black Friday deals');
+    expect(t).toContain('must not be known to be out of stock');
+    expect(t).not.toContain('must have it in stock');
+    expect(t).toContain('Verdicts and shop ratings use a change after the next nightly update');
+    expect(t).toContain('within about 10 minutes');
+    expect(t).toContain('Popular products are read several times a day');
+    expect(t).toContain('Verdicts use the last price we saw on each day');
+    expect(t).toContain('confirm or reject a title match');
+    expect(t).not.toContain('correct, hide or keep');
   });
 
   it('uses no em dash and no loaded words', () => {

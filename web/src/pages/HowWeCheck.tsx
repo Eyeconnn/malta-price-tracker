@@ -9,7 +9,7 @@ import { DEFAULT_SETTINGS, type Thresholds } from '../../../src/site/settings.js
 const KEYS = Object.keys(DEFAULT_SETTINGS.thresholds) as (keyof Thresholds)[];
 
 /** Throws unless the answer holds a finite number for every threshold, so a bad answer counts as a failed call. */
-function checkShape(data: { thresholds?: Partial<Record<keyof Thresholds, unknown>> }): boolean {
+function assertThresholds(data: { thresholds?: Partial<Record<keyof Thresholds, unknown>> }): boolean {
   for (const k of KEYS) {
     const v = data.thresholds?.[k];
     if (typeof v !== 'number' || !Number.isFinite(v)) throw new Error(`bad threshold ${k}`);
@@ -46,7 +46,7 @@ function List({ children }: { children: ReactNode }) {
 }
 
 export function HowWeCheckPage() {
-  const state = useApi('thresholds', (signal) => api.thresholds(signal), checkShape);
+  const state = useApi('thresholds', (signal) => api.thresholds(signal), assertThresholds);
   const t: Thresholds = state.status === 'ready' ? state.data.thresholds : DEFAULT_SETTINGS.thresholds;
 
   return (
@@ -61,13 +61,15 @@ export function HowWeCheckPage() {
 
       <Section title="What we record">
         <List>
-          <li>Every night we read the product pages of about 50 Maltese web shops.</li>
+          <li>
+            Every night we read the product pages of about 50 Maltese web shops. Popular products are read several times a day.
+          </li>
           <li>We only read public pages that anyone can open.</li>
           <li>
             For each product we save the price, the &quot;was&quot; price (the old price shown crossed out), whether it is in stock and
             whether the shop marks it as Black Friday.
           </li>
-          <li>Prices are stored per day. For the checks, a day counts as the last price we saw that day.</li>
+          <li>Prices are stored per day. Verdicts use the last price we saw on each day.</li>
           <li>We started on 20 October 2026. We have no earlier history, so we can only judge what happened since then.</li>
         </List>
       </Section>
@@ -91,7 +93,7 @@ export function HowWeCheckPage() {
         </p>
         <p>
           <strong>Lowest recent price.</strong> We look at up to <strong>{days(t.baselineDays)}</strong> before the current price (and
-          was price) appeared, and take the lowest price in that time.
+          was price) appeared, and take the lowest price in that time. If we have no earlier prices, we use the prices since the current price appeared.
         </p>
         <h3 className="font-semibold">Good Deal</h3>
         <List>
@@ -116,15 +118,22 @@ export function HowWeCheckPage() {
           <li>The was price is higher than every price the shop charged in the last {days(t.baselineDays)}.</li>
         </List>
         <p>
-          A judged product that is neither gets no Good Deal or Deal to Avoid tag. Every sentence we write states dates and prices, for
-          example &quot;€709 on 20 Oct, €799 on 22 Oct&quot;. We do not say why a shop did it.
+          A product that meets any Deal to Avoid test is never a Good Deal, even if its price is low. A judged product that is neither
+          gets no Good Deal or Deal to Avoid tag.
         </p>
-        <p>The numbers above can change. They are the ones we use right now.</p>
+        <p>
+          The sentences we write for a Good Deal or a Deal to Avoid state prices and dates, for example &quot;€709 on 20 Oct, €799 on
+          22 Oct&quot;. We do not say why a shop did it.
+        </p>
+        <p>
+          The numbers on this page are the current settings. They can change. Verdicts and shop ratings use a change after the next
+          nightly update. &quot;Cheaper at&quot; uses it within about 10 minutes.
+        </p>
       </Section>
 
       <Section title="Shop ratings">
         <List>
-          <li>A rating goes from A (best) to F. It looks only at the Black Friday deals we judged at that shop.</li>
+          <li>A rating goes from A (best) to F. It is based on the products we judged at that shop: those marked Black Friday or showing a was price higher than the price.</li>
           <li>
             Each Deal to Avoid counts as one. If its was price was raised as well, that adds another half. We divide the total by the
             number of judged products (Good Deals plus Deals to Avoid).
@@ -161,7 +170,7 @@ export function HowWeCheckPage() {
         </List>
         <p>
           &quot;Cheaper at&quot; is shown only for the same product by barcode or part number, or a title match we have checked by hand.
-          The other shop must have it in stock, and its price must be <strong>at least {t.cheaperPct}%</strong> lower. A &quot;possibly
+          The other shop must not be known to be out of stock, and its price must be <strong>at least {t.cheaperPct}%</strong> lower. A &quot;possibly
           the same product&quot; is never used for it.
         </p>
       </Section>
@@ -173,7 +182,7 @@ export function HowWeCheckPage() {
           </li>
           <li>Choose what is wrong and add a short note. An email address is optional, for a reply.</li>
           <li>
-            We read every report. We can correct, hide or keep the verdict. It stays visible while we look at it.
+            We read every report. Depending on what we find, we fix the data, hide a shop, or confirm or reject a title match. The verdict stays visible while we look at it.
           </li>
         </List>
       </Section>
