@@ -19,3 +19,7 @@ foreach ($w in 'scrape-shopify', 'scrape-woo', 'scrape-magento', 'scrape-html') 
 }
 
 pnpm scrape --runner local *>> $log
+
+# Build the public site's tables. The cloud scrapes started above are usually finished by now; the
+# workflow's own cron at 04:55 UTC is a backup that skips when a build ran in the last 20 hours.
+gh workflow run site-build --repo Eyeconnn/malta-price-tracker *>> $log

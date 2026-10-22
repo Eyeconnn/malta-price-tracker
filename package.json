@@ -15,6 +15,7 @@
     "scrape-due": "tsx src/cli/scrape-due.ts",
     "summary": "tsx src/cli/summary.ts",
     "snapshot": "tsx src/cli/snapshot.ts",
+    "site-build": "tsx src/cli/site-build.ts",
     "probe": "tsx src/cli/probe.ts",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
