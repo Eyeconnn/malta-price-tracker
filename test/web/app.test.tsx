@@ -29,7 +29,7 @@ describe('App routes', () => {
     // Home's h1 is the welcome headline; with the API down it is the fallback line
     ['/', 'Is that deal real?'],
     ['/search', 'Search'],
-    ['/deals', 'Deals'],
+    ['/deals', 'Black Friday deals'],
     ['/shops', 'Shops'],
     ['/shops/digital-zone', 'Shop'],
     ['/p/42', 'Product'],

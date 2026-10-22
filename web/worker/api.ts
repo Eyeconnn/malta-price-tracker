@@ -15,6 +15,7 @@ export interface ApiDeps {
 
 const PAGE_SIZE = 24;
 const MAX_PAGE = 10_000;
+const MAX_EUROS = 100_000;
 const HOME_CARDS = 6;
 const SHOP_CARDS = 5;
 const SEARCH_MIN = 2;
@@ -93,11 +94,20 @@ export function cheaperAt<T extends { possible: boolean; priceCents: number | nu
   return best;
 }
 
+/** Optional price bound in whole euros: null when absent, undefined when not an integer 0..100000. */
+function euroParam(url: URL, name: string): number | null | undefined {
+  const v = url.searchParams.get(name);
+  if (v === null) return null;
+  if (!/^\d{1,6}$/.test(v)) return undefined;
+  const n = Number(v);
+  return n <= MAX_EUROS ? n : undefined;
+}
+
 async function home(data: Data): Promise<Response> {
   const [settings, good, avoid] = await Promise.all([
     data.settings(),
-    data.deals({ verdict: 'good', category: null, shop: null, limit: HOME_CARDS, offset: 0 }),
-    data.deals({ verdict: 'avoid', category: null, shop: null, limit: HOME_CARDS, offset: 0 }),
+    data.deals({ verdict: 'good', category: null, shop: null, minCents: null, maxCents: null, limit: HOME_CARDS, offset: 0 }),
+    data.deals({ verdict: 'avoid', category: null, shop: null, minCents: null, maxCents: null, limit: HOME_CARDS, offset: 0 }),
   ]);
   return json({ phrases: settings.phrases, good: good.items, avoid: avoid.items, minHistoryDays: settings.thresholds.minHistoryDays });
 }
@@ -129,8 +139,8 @@ async function shopPage(data: Data, slug: string): Promise<Response> {
   const found = await data.shop(slug);
   if (!found) return json({ error: 'unknown shop' }, 404);
   const [avoid, good, changes] = await Promise.all([
-    data.deals({ verdict: 'avoid', category: null, shop: slug, limit: SHOP_CARDS, offset: 0 }),
-    data.deals({ verdict: 'good', category: null, shop: slug, limit: SHOP_CARDS, offset: 0 }),
+    data.deals({ verdict: 'avoid', category: null, shop: slug, minCents: null, maxCents: null, limit: SHOP_CARDS, offset: 0 }),
+    data.deals({ verdict: 'good', category: null, shop: slug, minCents: null, maxCents: null, limit: SHOP_CARDS, offset: 0 }),
     data.shopChanges(found.shop.id),
   ]);
   const rating = found.rating ?? { ...computeRating({ judged: 0, good: 0, avoid: 0, wasRaised: 0 }, DEFAULT_SETTINGS.thresholds), judged: 0 };
@@ -183,10 +193,18 @@ export async function handleApi(req: Request, env: Env, url: URL, deps: ApiDeps)
     if (category !== null && !CATEGORY_SLUGS.has(category)) return badRequest('bad category');
     const shop = slugParam(url, 'shop');
     if (shop === undefined) return badRequest('bad shop');
-    return cached(cache, key(p, { type, category, shop, page: String(page) }), async () => {
+    const min = euroParam(url, 'min');
+    const max = euroParam(url, 'max');
+    if (min === undefined) return badRequest('bad min');
+    if (max === undefined) return badRequest('bad max');
+    if (min !== null && max !== null && min > max) return badRequest('bad range');
+    const minCents = min === null ? null : min * 100;
+    const maxCents = max === null ? null : max * 100;
+    const range = { min: min === null ? null : String(min), max: max === null ? null : String(max) };
+    return cached(cache, key(p, { type, category, shop, ...range, page: String(page) }), async () => {
       const d = data();
       const [deals, settings] = await Promise.all([
-        d.deals({ verdict: type, category, shop, limit: PAGE_SIZE, offset: (page - 1) * PAGE_SIZE }),
+        d.deals({ verdict: type, category, shop, minCents, maxCents, limit: PAGE_SIZE, offset: (page - 1) * PAGE_SIZE }),
         d.settings(),
       ]);
       return json({ ...deals, minHistoryDays: settings.thresholds.minHistoryDays });

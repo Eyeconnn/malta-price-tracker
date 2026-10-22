@@ -265,16 +265,47 @@ describe('GET /api/deals', () => {
     const w = setup();
     const res = await w.fetch('/api/deals?type=avoid&category=laptops&shop=scan&page=3');
     expect(res.status).toBe(200);
-    expect(w.data.deals).toHaveBeenCalledWith({ verdict: 'avoid', category: 'laptops', shop: 'scan', limit: 24, offset: 48 });
+    expect(w.data.deals).toHaveBeenCalledWith({ verdict: 'avoid', category: 'laptops', shop: 'scan', minCents: null, maxCents: null, limit: 24, offset: 48 });
     const body = (await res.json()) as { items: Card[]; total: number };
     expect(body.items).toHaveLength(24);
     expect(body.total).toBe(100);
   });
 
+  it('returns 400 for a price range that is not whole euros 0..100000, or has min above max', async () => {
+    const w = setup();
+    const bad = ['min=-1', 'min=1.5', 'min=abc', 'min=', 'min=1e3', 'min=100001', 'max=100001', 'max=-5', 'max=2.0', 'max=', 'min=500&max=499', 'min=99999999999'];
+    for (const q of bad) expect((await w.fetch('/api/deals?' + q)).status, q).toBe(400);
+    expect(w.data.deals).not.toHaveBeenCalled();
+  });
+
+  it('passes a price range in cents, accepts the limits and min equal to max', async () => {
+    const w = setup();
+    expect((await w.fetch('/api/deals?min=100&max=500')).status).toBe(200);
+    expect(w.data.deals).toHaveBeenLastCalledWith({ verdict: 'good', category: null, shop: null, minCents: 10000, maxCents: 50000, limit: 24, offset: 0 });
+    expect((await w.fetch('/api/deals?min=0&max=100000')).status).toBe(200);
+    expect(w.data.deals).toHaveBeenLastCalledWith(expect.objectContaining({ minCents: 0, maxCents: 10_000_000 }));
+    expect((await w.fetch('/api/deals?min=250&max=250')).status).toBe(200);
+    expect((await w.fetch('/api/deals?min=300')).status).toBe(200);
+    expect(w.data.deals).toHaveBeenLastCalledWith(expect.objectContaining({ minCents: 30000, maxCents: null }));
+    expect((await w.fetch('/api/deals?max=300')).status).toBe(200);
+    expect(w.data.deals).toHaveBeenLastCalledWith(expect.objectContaining({ minCents: null, maxCents: 30000 }));
+  });
+
+  it('keys the cache on the validated range, so the same range is one entry and another range is not', async () => {
+    const cache = memoryCache();
+    const w = setup(fakeData(), cache);
+    await w.fetch('/api/deals?min=100&max=500');
+    await w.fetch('/api/deals?max=500&min=0100&junk=1');
+    expect(w.data.deals).toHaveBeenCalledTimes(1);
+    await w.fetch('/api/deals?min=100&max=600');
+    await w.fetch('/api/deals');
+    expect(w.data.deals).toHaveBeenCalledTimes(3);
+  });
+
   it('defaults to good deals, page 1', async () => {
     const w = setup();
     await w.fetch('/api/deals');
-    expect(w.data.deals).toHaveBeenCalledWith({ verdict: 'good', category: null, shop: null, limit: 24, offset: 0 });
+    expect(w.data.deals).toHaveBeenCalledWith({ verdict: 'good', category: null, shop: null, minCents: null, maxCents: null, limit: 24, offset: 0 });
   });
 
   it('serialises a null price as null, never 0', async () => {
@@ -294,7 +325,7 @@ describe('GET /api/home', () => {
     expect(body.good).toHaveLength(6);
     expect(body.avoid).toHaveLength(6);
     expect(body.avoid[0].verdict).toBe('avoid');
-    expect(w.data.deals).toHaveBeenCalledWith({ verdict: 'good', category: null, shop: null, limit: 6, offset: 0 });
+    expect(w.data.deals).toHaveBeenCalledWith({ verdict: 'good', category: null, shop: null, minCents: null, maxCents: null, limit: 6, offset: 0 });
   });
 
   it('home and deals carry minHistoryDays from the stored thresholds', async () => {
@@ -396,7 +427,7 @@ describe('GET /api/shops and /api/shops/:slug', () => {
     expect(body.drops).toEqual([]);
     expect(body.good).toHaveLength(5);
     expect(body.avoid).toHaveLength(5);
-    expect(w.data.deals).toHaveBeenCalledWith({ verdict: 'avoid', category: null, shop: 'scan', limit: 5, offset: 0 });
+    expect(w.data.deals).toHaveBeenCalledWith({ verdict: 'avoid', category: null, shop: 'scan', minCents: null, maxCents: null, limit: 5, offset: 0 });
     expect(w.data.shopChanges).toHaveBeenCalledWith(9);
   });
 });

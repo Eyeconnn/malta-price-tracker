@@ -63,7 +63,8 @@ export type ProductResponse = {
 };
 export type CategoriesResponse = { categories: (CategoryCount & { name: string })[] };
 
-export type DealsQuery = { type: 'good' | 'avoid'; category?: string | null; shop?: string | null; page?: number };
+/** min/max: price range in whole euros (inclusive); page: 1-based, 24 deals per page */
+export type DealsQuery = { type: 'good' | 'avoid'; category?: string | null; shop?: string | null; min?: number | null; max?: number | null; page?: number };
 
 /** A non-2xx answer from the API (or a body that is not JSON). */
 export class ApiError extends Error {
@@ -96,7 +97,7 @@ export const api = {
   /** results are empty for a query under 2 characters (the server checks too) */
   search: (q: string, shop: string | null, signal?: AbortSignal) => get<SearchResponse>(`/api/search${query({ q, shop })}`, signal),
   deals: (q: DealsQuery, signal?: AbortSignal) =>
-    get<DealsResponse>(`/api/deals${query({ type: q.type, category: q.category, shop: q.shop, page: q.page })}`, signal),
+    get<DealsResponse>(`/api/deals${query({ type: q.type, category: q.category, shop: q.shop, min: q.min, max: q.max, page: q.page })}`, signal),
   shops: (signal?: AbortSignal) => get<ShopsResponse>('/api/shops', signal),
   shop: (slug: string, signal?: AbortSignal) => get<ShopResponse>(`/api/shops/${encodeURIComponent(slug)}`, signal),
   product: (id: number, signal?: AbortSignal) => get<ProductResponse>(`/api/products/${encodeURIComponent(String(id))}`, signal),

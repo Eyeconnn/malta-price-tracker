@@ -95,7 +95,16 @@ export type OtherShop = {
 };
 export type ProductDetail = { product: ProductInfo; variants: Variant[]; history: HistoryObs[]; others: OtherShop[] };
 
-export type DealsQuery = { verdict: 'good' | 'avoid'; category: string | null; shop: string | null; limit: number; offset: number };
+/** minCents/maxCents: inclusive price range in cents; when either is set, rows without a price are left out */
+export type DealsQuery = {
+  verdict: 'good' | 'avoid';
+  category: string | null;
+  shop: string | null;
+  minCents: number | null;
+  maxCents: number | null;
+  limit: number;
+  offset: number;
+};
 export type CategoryCount = { slug: string; count: number; good: number; avoid: number };
 
 export interface Data {
@@ -235,11 +244,14 @@ export function createData(db: SqlRunner, opts: DataOptions = {}): Data {
             and ($2::text is null or sp.category = $2)
             and ($3::text is null or s.slug = $3)
             and (sp.verdict <> 'good' or sp.price_cents > 0)
+            and ($4::int is null or sp.price_cents >= $4)
+            and ($5::int is null or sp.price_cents <= $5)
+            and (($4::int is null and $5::int is null) or sp.price_cents > 0)
         )
         select t.total, x.*
         from (select count(*)::int as total from f) t
-        left join lateral (select * from f order by rank desc nulls last, id limit $4 offset $5) x on true`,
-        [q.verdict, q.category, q.shop, q.limit, q.offset],
+        left join lateral (select * from f order by rank desc nulls last, id limit $6 offset $7) x on true`,
+        [q.verdict, q.category, q.shop, q.minCents, q.maxCents, q.limit, q.offset],
       );
       return { items: rows.filter((r) => r.id !== null && r.id !== undefined).map(toCard), total: num(rows[0]?.total ?? 0) };
     },

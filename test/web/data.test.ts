@@ -93,7 +93,7 @@ describe('data.ts on PGlite', () => {
   });
 
   it('good deals: visible, fresh, priced only, biggest real drop first', async () => {
-    const r = await data.deals({ verdict: 'good', category: null, shop: null, limit: 24, offset: 0 });
+    const r = await data.deals({ verdict: 'good', category: null, shop: null, minCents: null, maxCents: null, limit: 24, offset: 0 });
     expect(r.items.map((c) => c.id)).toEqual([9, 1]);
     expect(r.total).toBe(2);
     expect(r.items[1]).toEqual({
@@ -113,7 +113,7 @@ describe('data.ts on PGlite', () => {
   });
 
   it('avoid deals keep null prices as null, largest rise first', async () => {
-    const r = await data.deals({ verdict: 'avoid', category: null, shop: null, limit: 24, offset: 0 });
+    const r = await data.deals({ verdict: 'avoid', category: null, shop: null, minCents: null, maxCents: null, limit: 24, offset: 0 });
     expect(r.items.map((c) => c.id)).toEqual([7, 8, 12]);
     // the price before the raise, from the stored facts (shown on the avoid tag)
     expect(r.items[0].raisedFrom).toEqual({ priceCents: 40000, at: '2026-10-10' });
@@ -129,10 +129,27 @@ describe('data.ts on PGlite', () => {
   });
 
   it('filters by category and shop, and reports the total past the last page', async () => {
-    expect((await data.deals({ verdict: 'good', category: 'laptops', shop: 'alpha', limit: 24, offset: 0 })).items.map((c) => c.id)).toEqual([1]);
-    expect((await data.deals({ verdict: 'good', category: 'phones', shop: null, limit: 24, offset: 0 })).items).toEqual([]);
-    expect(await data.deals({ verdict: 'good', category: null, shop: null, limit: 24, offset: 48 })).toEqual({ items: [], total: 2 });
-    expect((await data.deals({ verdict: 'good', category: null, shop: 'hidden', limit: 24, offset: 0 })).total).toBe(0);
+    expect((await data.deals({ verdict: 'good', category: 'laptops', shop: 'alpha', minCents: null, maxCents: null, limit: 24, offset: 0 })).items.map((c) => c.id)).toEqual([1]);
+    expect((await data.deals({ verdict: 'good', category: 'phones', shop: null, minCents: null, maxCents: null, limit: 24, offset: 0 })).items).toEqual([]);
+    expect(await data.deals({ verdict: 'good', category: null, shop: null, minCents: null, maxCents: null, limit: 24, offset: 48 })).toEqual({ items: [], total: 2 });
+    expect((await data.deals({ verdict: 'good', category: null, shop: 'hidden', minCents: null, maxCents: null, limit: 24, offset: 0 })).total).toBe(0);
+  });
+
+  it('filters by price range in cents (inclusive) and excludes rows with no price when a range is set', async () => {
+    const ids = async (v: 'good' | 'avoid', minCents: number | null, maxCents: number | null) =>
+      (await data.deals({ verdict: v, category: null, shop: null, minCents, maxCents, limit: 24, offset: 0 })).items.map((c) => c.id);
+    expect(await ids('good', 30000, 70000)).toEqual([9, 1]);
+    expect(await ids('good', 30001, 70000)).toEqual([1]);
+    expect(await ids('good', null, 30000)).toEqual([9]);
+    expect(await ids('good', 70001, null)).toEqual([]);
+    // avoid: the rows with no price (8, and 12 stored as 0) only come back without a range
+    expect(await ids('avoid', null, null)).toEqual([7, 8, 12]);
+    expect(await ids('avoid', 0, null)).toEqual([7]);
+    expect(await ids('avoid', null, 100000)).toEqual([7]);
+    expect(await ids('avoid', 48001, null)).toEqual([]);
+    // total follows the range, not just the page
+    const r = await data.deals({ verdict: 'good', category: null, shop: null, minCents: 0, maxCents: 30000, limit: 24, offset: 0 });
+    expect(r.total).toBe(1);
   });
 
   it('search groups canonical members, skips hidden, inactive and stale rows', async () => {
