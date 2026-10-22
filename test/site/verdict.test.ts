@@ -155,24 +155,47 @@ describe('computeVerdict', () => {
   });
 
   it('does not flag a rise of exactly raisePct percent, or a rise outside the window', () => {
-    const exact = [...days('2026-10-01', 15, 10000), obs('2026-10-16', 10300, 12000, true)];
+    // Marked Black Friday with no was price, so only the rise rules apply.
+    const exact = [...days('2026-10-01', 15, 10000), obs('2026-10-16', 10300, null, true)];
     expect(computeVerdict(exact, T, at('2026-10-16', '20:00:00Z')).label).toBe('none');
 
-    const old = [...days('2026-10-01', 5, 10000), ...days('2026-10-06', 20, 12000), obs('2026-10-26', 12000, 15000, true)];
+    const old = [...days('2026-10-01', 5, 10000), ...days('2026-10-06', 20, 12000), obs('2026-10-26', 12000, null, true)];
     const v = computeVerdict(old, T, at('2026-10-26', '20:00:00Z'));
     expect(v.label).toBe('none');
     expect(v.reason).toBe('Price €120.00 is 20.0% above its lowest price in the 5 days before 6 Oct (€100.00).');
   });
 
-  it('gives none to a judged product that is less than goodDropPct below its baseline low', () => {
+  it('flags a was price higher than any price charged in the previous baselineDays days', () => {
+    const exact = [...days('2026-10-01', 15, 10000), obs('2026-10-16', 10300, 12000, true)];
+    const e = computeVerdict(exact, T, at('2026-10-16', '20:00:00Z'));
+    expect(e.label).toBe('avoid');
+    expect(e.reason).toBe('Was price €120.00 is higher than any price charged since 1 Oct (highest €103.00).');
+    expect(e.facts.wasRaisedFrom).toBeUndefined();
+    expect(e.facts.raisedFrom).toBeUndefined();
+
+    const old = [...days('2026-10-01', 5, 10000), ...days('2026-10-06', 20, 12000), obs('2026-10-26', 12000, 15000, true)];
+    const v = computeVerdict(old, T, at('2026-10-26', '20:00:00Z'));
+    expect(v.label).toBe('avoid');
+    expect(v.reason).toBe('Was price €150.00 is higher than any price charged since 1 Oct (highest €120.00).');
+  });
+
+  it('flags a judged product less than goodDropPct below its baseline low when its was price was never charged', () => {
     const history = [...days('2026-10-01', 20, 10000), obs('2026-10-21', 9800, 12000, true)];
+    const v = computeVerdict(history, T, at('2026-10-21', '20:00:00Z'));
+    expect(v.label).toBe('avoid');
+    expect(v.facts.realPct).toBe(-2);
+    expect(v.reason).toBe('Was price €120.00 is higher than any price charged since 1 Oct (highest €100.00).');
+  });
+
+  it('gives none to a judged product that is less than goodDropPct below its baseline low', () => {
+    const history = [...days('2026-10-01', 20, 10000), obs('2026-10-21', 9800, null, true)];
     const v = computeVerdict(history, T, at('2026-10-21', '20:00:00Z'));
     expect(v.label).toBe('none');
     expect(v.facts.realPct).toBe(-2);
     expect(v.reason).toBe('Price €98.00 is 2.0% below its lowest price in the 20 days before 21 Oct (€100.00).');
   });
 
-  it('uses the median of the baseline days as the usual price', () => {
+  it('uses the median of the baseline days as the usual price, and a rise later undone is not avoid', () => {
     const history = [
       ...days('2026-10-01', 3, 9000),
       ...days('2026-10-04', 6, 10000),
@@ -182,8 +205,61 @@ describe('computeVerdict', () => {
     const v = computeVerdict(history, T, at('2026-10-15', '20:00:00Z'));
     expect(v.facts.usual).toBe(10000);
     expect(v.facts.low30).toBe(9000);
-    // 12000 vs 10000 is a rise on 10 Oct, inside the window, so the verdict is avoid, not good.
+    // The rise to 120 on 10 Oct is undone: 80 is below the 90 seen at the start of the window.
+    expect(v.label).toBe('good');
+    expect(v.facts.raisedFrom).toBeUndefined();
+    expect(v.reason).toBe('€10.00 below its lowest price in the 14 days before 15 Oct (€90.00).');
+  });
+
+  it('does not flag a rise that went back to the pre-raise price', () => {
+    const history = [...days('2026-10-01', 15, 10000), ...days('2026-10-16', 3, 12000), obs('2026-10-19', 10000, 12000, true)];
+    const v = computeVerdict(history, T, at('2026-10-19', '20:00:00Z'));
+    expect(v.label).toBe('none');
+    expect(v.facts.raisedFrom).toBeUndefined();
+  });
+
+  it('anchors the baseline on the latest was-price change, including a was price appearing', () => {
+    // 150 (was 150) for 14 days, 100 from 3 Nov for 10 days, then on 13 Nov a was price of 140 and the marker.
+    const history = [
+      ...days('2026-10-20', 14, 15000, 15000),
+      ...days('2026-11-03', 10, 10000),
+      obs('2026-11-13', 10000, 14000, true),
+    ];
+    const v = computeVerdict(history, T, at('2026-11-13', '20:00:00Z'));
+    expect(v.facts.low30).toBe(10000);
+    expect(v.facts.realPct).toBe(0);
+    expect(v.label).toBe('none');
+  });
+
+  it('measures rises net, so small daily steps still count', () => {
+    const history = [
+      ...days('2026-10-01', 15, 10000),
+      obs('2026-10-16', 10300, 15000, true),
+      obs('2026-10-17', 10600, 15000, true),
+      obs('2026-10-18', 10900, 15000, true),
+      obs('2026-10-19', 11200, 15000, true),
+    ];
+    const v = computeVerdict(history, T, at('2026-10-19', '20:00:00Z'));
     expect(v.label).toBe('avoid');
+    expect(v.facts.raisedFrom).toEqual({ price: 10000, at: '2026-10-15' });
+    expect(v.facts.raisedTo).toEqual({ price: 11200, at: '2026-10-19' });
+    expect(v.reason).toBe('Price went from €100.00 on 15 Oct to €112.00 on 19 Oct while marked Black Friday.');
+  });
+
+  it('withholds good when the was price was raised within baselineDays, even outside the raise window', () => {
+    const history = [
+      ...days('2026-10-21', 5, 30000), // the highest price charged, so the was price below is not "never charged"
+      ...days('2026-10-26', 5, 20000, 24000),
+      ...days('2026-10-31', 20, 20000, 28000), // was raised 20 days before 20 Nov
+      obs('2026-11-20', 18000, 28000, true),
+    ];
+    const v = computeVerdict(history, T, at('2026-11-20', '20:00:00Z'));
+    expect(v.facts.low30).toBe(20000);
+    expect(v.facts.realPct).toBe(-10);
+    expect(v.label).toBe('none');
+    expect(v.reason).toBe(
+      'Price €180.00 is 10.0% below its lowest price in the 30 days before 20 Nov (€200.00), but the was price went from €240.00 on 30 Oct to €280.00 on 31 Oct.',
+    );
   });
 
   it('returns no verdict facts that crash on an empty history', () => {
