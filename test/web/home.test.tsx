@@ -114,6 +114,38 @@ describe('home', () => {
     expect(within(section('Deals to avoid')).getByRole('link', { name: /See all deals to avoid/ }).getAttribute('href')).toBe('/deals?type=avoid');
   });
 
+  it('from 768px the headline and search block fills the first screen and is centred in it', async () => {
+    mockApi({ '/api/home': home() });
+    renderAt('/');
+    await waitFor(() => expect(screen.getAllByRole('article')).toHaveLength(12));
+    const hero = screen.getByTestId('home-hero');
+    expect(hero.className).toMatch(/min-h-\[calc\(100dvh-/);
+    expect(hero.className).toContain('justify-center');
+    expect(hero.contains(screen.getByRole('heading', { level: 1 }))).toBe(true);
+    expect(hero.contains(screen.getByRole('searchbox', { name: 'Search a product' }))).toBe(true);
+    expect(hero.contains(screen.getByTestId('search-status'))).toBe(true);
+    expect(hero.contains(section('Good deals'))).toBe(false);
+  });
+
+  it('on a phone the headline and search block keeps its natural height', async () => {
+    setViewport(375);
+    mockApi({ '/api/home': home() });
+    renderAt('/');
+    await screen.findByRole('tab', { name: 'Good deals' });
+    const hero = screen.getByTestId('home-hero');
+    expect(hero.className).not.toMatch(/min-h-/);
+    expect(hero.className).not.toContain('justify-center');
+    expect(screen.getAllByRole('heading', { level: 1 })).toHaveLength(1);
+  });
+
+  it('the main search types an example as an aria-hidden overlay, the name stays "Search a product"', async () => {
+    mockApi({ '/api/home': home() });
+    renderAt('/');
+    await waitFor(() => expect(screen.getAllByRole('article')).toHaveLength(12));
+    expect(screen.getByTestId('search-example').getAttribute('aria-hidden')).toBe('true');
+    expect(screen.getByRole('searchbox', { name: 'Search a product' }).getAttribute('placeholder')).toBeNull();
+  });
+
   it('on a phone shows one list with a Good / Avoid switch', async () => {
     setViewport(375);
     mockApi({ '/api/home': home() });

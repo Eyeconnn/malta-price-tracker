@@ -222,7 +222,24 @@
   }
 }
 
+@keyframes caret-blink {
+  50% {
+    opacity: 0;
+  }
+}
+
 @layer components {
+  /* Caret after the typing placeholder of the main search (components/site/SearchBox.tsx) */
+  .search-caret {
+    display: inline-block;
+    flex: none;
+    width: 2px;
+    height: 1.15em;
+    margin-left: 2px;
+    background: var(--accent);
+    animation: caret-blink 1.06s steps(1, end) infinite;
+  }
+
   /* Hanging price tag (components/site/PriceTag.tsx), approved mockup "deal tags" version A */
   .price-tag {
     --tag-w: 66px;
@@ -457,7 +474,8 @@
   .price-tag-good,
   .price-tag-sparkle,
   .headline-flip,
-  .headline-em::after {
+  .headline-em::after,
+  .search-caret {
     animation: none !important;
   }
 }

@@ -153,7 +153,15 @@ export function HomePage() {
 
   return (
     <div className="flex flex-col gap-8">
-      <div className="flex flex-col items-center gap-3 pt-2 text-center md:pt-6">
+      <div
+        data-testid="home-hero"
+        className={cn(
+          'flex flex-col items-center gap-3 pt-2 text-center md:pt-6',
+          // From 768px the block fills the first screen below the top nav and sits in its middle, so the
+          // deal lists start under the fold. 8rem = top nav (about 4rem) + main's top and bottom padding.
+          desktop && 'min-h-[calc(100dvh-8rem)] justify-center md:pt-0',
+        )}
+      >
         {/* The line is picked from the admin's phrases, so it waits for them. Meanwhile the space is kept
             and a visually hidden fallback h1 keeps the page's one h1. */}
         {phrases ? (
@@ -164,7 +172,7 @@ export function HomePage() {
           </div>
         )}
         <p className="text-muted-foreground">Price history from Maltese web shops, to check if a deal is real.</p>
-        <LiveSearch className="mt-2" />
+        <LiveSearch animated className="mt-2" />
       </div>
       <Deals state={home} desktop={desktop} />
     </div>

@@ -6,6 +6,7 @@ import { Button } from '@/components/ui/button';
 import { ApiError, type ApiState, api, type GroupResult, type SearchResponse, useApi, useDebounced } from '@/lib/api';
 import { formatEuro } from '@/lib/format';
 import { cn } from '@/lib/utils';
+import { useTypingPlaceholder } from '@/lib/useTypingPlaceholder';
 
 /** Same limits as the server (web/worker/api.ts searchPattern). */
 export const SEARCH_MIN = 2;
@@ -76,12 +77,20 @@ export type SearchBoxProps = {
   onSubmit: (value: string) => void;
   /** replaces "Search a product" (the label and the placeholder), e.g. for a search inside one shop */
   placeholder?: string;
+  /**
+   * Types example products over the empty field instead of a static placeholder (main search only).
+   * The label stays "Search a product"; the overlay is aria-hidden, so nothing is announced.
+   */
+  animated?: boolean;
   className?: string;
 };
 
 /** The big search field with its Check button. */
-export function SearchBox({ value, onChange, onSubmit, placeholder = 'Search a product', className }: SearchBoxProps) {
+export function SearchBox({ value, onChange, onSubmit, placeholder = 'Search a product', animated = false, className }: SearchBoxProps) {
   const id = useId();
+  const [focused, setFocused] = useState(false);
+  const showExample = animated && !focused && value === '';
+  const { text, caret } = useTypingPlaceholder(showExample);
   return (
     <form
       role="search"
@@ -95,17 +104,31 @@ export function SearchBox({ value, onChange, onSubmit, placeholder = 'Search a p
         {placeholder}
       </label>
       <Search aria-hidden="true" className="size-5 flex-none text-muted-foreground" />
-      <input
-        id={id}
-        type="search"
-        value={value}
-        maxLength={SEARCH_MAX}
-        autoComplete="off"
-        enterKeyHint="search"
-        placeholder={placeholder}
-        onChange={(e) => onChange(e.target.value)}
-        className="min-h-11 min-w-0 flex-1 bg-transparent text-base outline-none placeholder:text-muted-foreground [&::-webkit-search-cancel-button]:hidden"
-      />
+      <div className="relative min-w-0 flex-1">
+        <input
+          id={id}
+          type="search"
+          value={value}
+          maxLength={SEARCH_MAX}
+          autoComplete="off"
+          enterKeyHint="search"
+          placeholder={animated ? undefined : placeholder}
+          onChange={(e) => onChange(e.target.value)}
+          onFocus={() => setFocused(true)}
+          onBlur={() => setFocused(false)}
+          className="min-h-11 w-full min-w-0 bg-transparent text-base outline-none placeholder:text-muted-foreground [&::-webkit-search-cancel-button]:hidden"
+        />
+        {showExample && (
+          <span
+            aria-hidden="true"
+            data-testid="search-example"
+            className="pointer-events-none absolute inset-0 flex items-center overflow-hidden whitespace-pre text-base text-muted-foreground"
+          >
+            <span className="min-w-0 truncate">{text}</span>
+            {caret && <span className="search-caret" />}
+          </span>
+        )}
+      </div>
       <Button type="submit" className="min-h-11 rounded-full px-5 font-semibold">
         Check
       </Button>
@@ -170,7 +193,17 @@ function LiveRow({ group }: { group: GroupResult }) {
  * Search with results under the box as you type (after the debounce); Enter opens the search page
  * with the query. With `shop` (a slug) the API and the search page are limited to that shop.
  */
-export function LiveSearch({ shop = null, placeholder, className }: { shop?: string | null; placeholder?: string; className?: string }) {
+export function LiveSearch({
+  shop = null,
+  placeholder,
+  animated = false,
+  className,
+}: {
+  shop?: string | null;
+  placeholder?: string;
+  animated?: boolean;
+  className?: string;
+}) {
   const [value, setValue] = useState('');
   const navigate = useNavigate();
   const { term, state } = useSearch(value, shop);
@@ -178,7 +211,7 @@ export function LiveSearch({ shop = null, placeholder, className }: { shop?: str
 
   return (
     <div className={cn('relative mx-auto w-full max-w-xl', className)}>
-      <SearchBox value={value} onChange={setValue} onSubmit={(q) => q && navigate(searchPath(q, shop))} placeholder={placeholder} />
+      <SearchBox value={value} onChange={setValue} onSubmit={(q) => q && navigate(searchPath(q, shop))} placeholder={placeholder} animated={animated} />
       <SearchStatus state={state} term={term} />
       {state.status !== 'idle' && (
         <section aria-labelledby={headingId} className="glass mt-2 p-2 text-left">

@@ -114,6 +114,7 @@ export function SearchPage() {
     <div className="flex flex-col gap-4">
       <h1 className="text-2xl font-bold tracking-tight">Search</h1>
       <SearchBox
+        animated
         value={value}
         onChange={setValue}
         onSubmit={(q) => {
