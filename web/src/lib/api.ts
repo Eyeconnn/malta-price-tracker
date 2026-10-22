@@ -7,6 +7,8 @@ import type {
   Card,
   CategoryCount,
   Change,
+  CheaperTarget,
+  GroupItem,
   GroupResult,
   HistoryObs,
   Label,
@@ -19,14 +21,27 @@ import type {
   Variant,
 } from '../../worker/data.js';
 
-export type { Card, Change, GroupResult, HistoryObs, Label, OtherShop, ProductInfo, ShopInfo, ShopRating, ShopStats, ShopSummary, Variant };
+export type {
+  Card,
+  Change,
+  CheaperTarget,
+  GroupItem,
+  GroupResult,
+  HistoryObs,
+  Label,
+  OtherShop,
+  ProductInfo,
+  ShopInfo,
+  ShopRating,
+  ShopStats,
+  ShopSummary,
+  Variant,
+};
 
-/** A search result row: a card, and whether it is only "possibly the same" product (title-only match). */
-export type GroupItem = GroupResult['items'][number];
-
-export type HomeResponse = { phrases: Record<PhraseSlot, string[]>; good: Card[]; avoid: Card[] };
+/** minHistoryDays: days of prices needed before a deal is judged (stored threshold) */
+export type HomeResponse = { phrases: Record<PhraseSlot, string[]>; good: Card[]; avoid: Card[]; minHistoryDays: number };
 export type SearchResponse = { results: GroupResult[] };
-export type DealsResponse = { items: Card[]; total: number };
+export type DealsResponse = { items: Card[]; total: number; minHistoryDays: number };
 export type ShopsResponse = { shops: ShopSummary[] };
 export type ShopResponse = {
   shop: ShopInfo;
@@ -97,8 +112,9 @@ export type ApiState<T> =
 
 /**
  * Loads `load` whenever `key` changes (null: nothing to load, status 'idle'). The previous request
- * is aborted and its answer ignored, so only the response for the current key is ever shown.
- * `isEmpty` turns a successful but empty answer into status 'empty'. `retry` loads the same key again.
+ * is aborted (also on unmount) and its answer ignored, so only the response for the current key is
+ * ever shown. `isEmpty` turns a successful but empty answer into status 'empty'; it may also check
+ * the shape, and anything it throws becomes status 'error'. `retry` loads the same key again.
  */
 export function useApi<T>(
   key: string | null,
@@ -117,16 +133,16 @@ export function useApi<T>(
   useEffect(() => {
     if (key === null) return;
     const ctrl = new AbortController();
-    loadRef.current(ctrl.signal).then(
-      (data) => {
-        if (ctrl.signal.aborted) return;
-        setResult({ key, attempt, state: isEmptyRef.current?.(data) ? { status: 'empty', data } : { status: 'ready', data } });
-      },
-      (error: unknown) => {
-        if (ctrl.signal.aborted) return;
-        setResult({ key, attempt, state: { status: 'error', error } });
-      },
-    );
+    loadRef.current(ctrl.signal)
+      .then((data): ApiState<T> => (isEmptyRef.current?.(data) ? { status: 'empty', data } : { status: 'ready', data }))
+      .then(
+        (state) => {
+          if (!ctrl.signal.aborted) setResult({ key, attempt, state });
+        },
+        (error: unknown) => {
+          if (!ctrl.signal.aborted) setResult({ key, attempt, state: { status: 'error', error } });
+        },
+      );
     return () => ctrl.abort();
   }, [key, attempt]);
 

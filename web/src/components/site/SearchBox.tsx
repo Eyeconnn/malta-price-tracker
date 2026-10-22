@@ -1,9 +1,9 @@
 import { Search } from 'lucide-react';
 import { useId, useState } from 'react';
 import { Link, useNavigate } from 'react-router';
-import { avoidSummary, NO_PRICE } from '@/components/site/DealCard';
+import { alarmText, avoidSummary, BlackFridayMark, NO_PRICE } from '@/components/site/DealCard';
 import { Button } from '@/components/ui/button';
-import { api, type GroupResult, type SearchResponse, useApi, useDebounced } from '@/lib/api';
+import { ApiError, type ApiState, api, type GroupResult, type SearchResponse, useApi, useDebounced } from '@/lib/api';
 import { formatEuro } from '@/lib/format';
 import { cn } from '@/lib/utils';
 
@@ -32,9 +32,40 @@ export function useSearch(query: string, shop: string | null = null) {
   const state = useApi<SearchResponse>(
     term === null ? null : JSON.stringify([term, shop]),
     (signal) => api.search(term!, shop, signal),
-    (d) => d.results.length === 0,
+    (d) => {
+      if (!Array.isArray(d?.results)) throw new ApiError(200); // a 200 without the expected shape
+      return d.results.length === 0;
+    },
   );
   return { term, state };
+}
+
+/** What the search status announces for a state: empty while idle. */
+export function searchStatusText(state: ApiState<SearchResponse>, term: string | null): string {
+  switch (state.status) {
+    case 'loading':
+      return 'Searching';
+    case 'ready':
+      return state.data.results.length === 1 ? '1 product found' : `${state.data.results.length} products found`;
+    case 'empty':
+      return `No products match "${term ?? ''}"`;
+    case 'error':
+      return 'Search is not available right now';
+    default:
+      return '';
+  }
+}
+
+/**
+ * The one live region for search: always rendered (also before any results), so screen readers
+ * hear every change of its text.
+ */
+export function SearchStatus({ state, term }: { state: ApiState<SearchResponse>; term: string | null }) {
+  return (
+    <p role="status" data-testid="search-status" className="sr-only">
+      {searchStatusText(state, term)}
+    </p>
+  );
 }
 
 export type SearchBoxProps = {
@@ -99,8 +130,19 @@ function LiveRow({ group }: { group: GroupResult }) {
           <span className="block truncate font-medium">{group.title}</span>
           <span className="block truncate text-xs text-muted-foreground">
             {shops > 1 ? `${shops} shops` : best.shop}
-            {best.verdict === 'avoid' && <span className="font-semibold text-bad"> · {avoidSummary(best)}</span>}
-            {best.verdict === 'good' && <span className="font-semibold text-good"> · Real deal</span>}
+            {best.verdict === 'avoid' && (
+              <>
+                {' · '}
+                <span className="font-semibold text-bad">{best.bf ? alarmText(best) : avoidSummary(best)}</span>
+              </>
+            )}
+            {best.verdict === 'good' && (
+              <>
+                {' · '}
+                <span className="font-semibold text-good">Real deal</span>
+              </>
+            )}
+            {best.bf && best.verdict !== 'avoid' && <BlackFridayMark className="ml-1.5 py-0 align-middle text-[11px]" />}
           </span>
         </span>
         <span className="max-w-28 flex-none text-right text-sm font-bold tabular-nums">
@@ -124,6 +166,7 @@ export function LiveSearch({ className }: { className?: string }) {
   return (
     <div className={cn('relative mx-auto w-full max-w-xl', className)}>
       <SearchBox value={value} onChange={setValue} onSubmit={(q) => q && navigate(searchPath(q))} />
+      <SearchStatus state={state} term={term} />
       {state.status !== 'idle' && (
         <section aria-labelledby={headingId} className="glass mt-2 p-2 text-left">
           <h2 id={headingId} className="sr-only">
@@ -141,9 +184,6 @@ export function LiveSearch({ className }: { className?: string }) {
           )}
           {state.status === 'ready' && (
             <>
-              <p role="status" className="sr-only">
-                {state.data.results.length === 1 ? '1 product found' : `${state.data.results.length} products found`}
-              </p>
               <ul className="m-0 list-none p-0">
                 {state.data.results.slice(0, LIVE_MAX).map((g) => (
                   <LiveRow key={g.canonicalId === null ? `s${g.items[0]!.id}` : `c${g.canonicalId}`} group={g} />

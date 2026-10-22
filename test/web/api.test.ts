@@ -185,11 +185,11 @@ describe('GET /api/search', () => {
 
   it('groups hits by canonical id in data order, cheapest first inside a group, max 40 groups', async () => {
     const hits = [
-      { ...card(1, { priceCents: 900 }), groupKey: 'c5', canonicalId: 5, possible: false },
-      { ...card(2, { priceCents: 700 }), groupKey: 'c5', canonicalId: 5, possible: false },
-      { ...card(3, { priceCents: null }), groupKey: 's3', canonicalId: null, possible: false },
-      { ...card(4, { priceCents: 800 }), groupKey: 'c5', canonicalId: 5, possible: true },
-      ...Array.from({ length: 45 }, (_, i) => ({ ...card(100 + i), groupKey: `s${100 + i}`, canonicalId: null, possible: false })),
+      { ...card(1, { priceCents: 900 }), groupKey: 'c5', canonicalId: 5, possible: false, inStock: true },
+      { ...card(2, { priceCents: 700 }), groupKey: 'c5', canonicalId: 5, possible: false, inStock: true },
+      { ...card(3, { priceCents: null }), groupKey: 's3', canonicalId: null, possible: false, inStock: true },
+      { ...card(4, { priceCents: 800 }), groupKey: 'c5', canonicalId: 5, possible: true, inStock: true },
+      ...Array.from({ length: 45 }, (_, i) => ({ ...card(100 + i), groupKey: `s${100 + i}`, canonicalId: null, possible: false, inStock: true })),
     ];
     const w = setup(fakeData({ search: vi.fn(async () => hits) }));
     const body = (await (await w.fetch('/api/search?q=lenovo')).json()) as { results: { canonicalId: number | null; title: string; items: Card[] }[] };
@@ -200,6 +200,33 @@ describe('GET /api/search', () => {
     expect(body.results[1]).toMatchObject({ canonicalId: null, items: [{ id: 3, priceCents: null }] });
     expect(body.results[0].items[1]).toMatchObject({ possible: true });
     expect(body.results[0].items[0]).not.toHaveProperty('groupKey');
+  });
+
+  it('marks each exact, priced row with the cheapest exact, in-stock row at another shop at least cheaperPct cheaper', async () => {
+    const hit = (id: number, shopSlug: string, priceCents: number | null, possible: boolean, inStock: boolean | null = true) => ({
+      ...card(id, { shop: shopSlug.toUpperCase(), shopSlug, priceCents }),
+      groupKey: 'c5',
+      canonicalId: 5,
+      possible,
+      inStock,
+    });
+    const hits = [
+      hit(1, 'a', 10000, false),
+      hit(2, 'b', 9700, false), // 3% cheaper than a, at least cheaperPct 3: counts
+      hit(3, 'c', 5000, true), // title-only: never a cheaper target, never gets one
+      hit(4, 'd', 6000, false, false), // out of stock: never a cheaper target
+      hit(5, 'e', 9800, false), // 2% cheaper than a: below cheaperPct 3
+      hit(6, 'b', 9750, false), // same shop as 2: only another shop counts
+      hit(7, 'f', null, false),
+    ];
+    const settings = { ...DEFAULT_SETTINGS, thresholds: { ...DEFAULT_SETTINGS.thresholds, cheaperPct: 3 } };
+    const w = setup(fakeData({ search: vi.fn(async () => hits), settings: vi.fn(async () => settings) }));
+    const body = (await (await w.fetch('/api/search?q=lenovo')).json()) as {
+      results: { items: { id: number; cheaper: { id: number; shop: string; shopSlug: string; priceCents: number } | null }[] }[];
+    };
+    const cheaper = Object.fromEntries(body.results[0].items.map((i) => [i.id, i.cheaper?.id ?? null]));
+    expect(cheaper).toEqual({ 1: 2, 2: null, 3: null, 4: null, 5: null, 6: null, 7: null });
+    expect(body.results[0].items.find((i) => i.id === 1)!.cheaper).toEqual({ id: 2, shop: 'B', shopSlug: 'b', priceCents: 9700 });
   });
 
   it('is never cached', async () => {
@@ -268,6 +295,13 @@ describe('GET /api/home', () => {
     expect(body.avoid).toHaveLength(6);
     expect(body.avoid[0].verdict).toBe('avoid');
     expect(w.data.deals).toHaveBeenCalledWith({ verdict: 'good', category: null, shop: null, limit: 6, offset: 0 });
+  });
+
+  it('home and deals carry minHistoryDays from the stored thresholds', async () => {
+    const settings = { ...DEFAULT_SETTINGS, thresholds: { ...DEFAULT_SETTINGS.thresholds, minHistoryDays: 21 } };
+    const w = setup(fakeData({ settings: vi.fn(async () => settings) }));
+    expect(((await (await w.fetch('/api/home')).json()) as { minHistoryDays: number }).minHistoryDays).toBe(21);
+    expect(((await (await w.fetch('/api/deals?type=good')).json()) as { minHistoryDays: number }).minHistoryDays).toBe(21);
   });
 });
 

@@ -34,8 +34,11 @@ export type HistoryObs = ApiObs & { productId: number };
 /** A search query: plain text for word_similarity, and the same text as an escaped ILIKE pattern. */
 export type SearchPattern = { text: string; like: string };
 /** A search hit or a member of a hit's canonical group. groupKey is 'c<canonical_id>' or 's<site_products id>'. */
-export type SearchHit = Card & { groupKey: string; canonicalId: number | null; possible: boolean };
-export type GroupResult = { canonicalId: number | null; title: string; items: (Card & { possible: boolean })[] };
+export type SearchHit = Card & { groupKey: string; canonicalId: number | null; possible: boolean; inStock: boolean | null };
+/** Where the same product is cheaper (search): an exactly matched, in-stock row at another shop. */
+export type CheaperTarget = { id: number; shop: string; shopSlug: string; priceCents: number };
+export type GroupItem = Card & { possible: boolean; inStock: boolean | null; cheaper: CheaperTarget | null };
+export type GroupResult = { canonicalId: number | null; title: string; items: GroupItem[] };
 
 export type ShopSummary = { slug: string; name: string; grade: Grade | null; products: number };
 export type ShopInfo = { id: number; slug: string; name: string; url: string; category: string | null };
@@ -251,7 +254,7 @@ export function createData(db: SqlRunner, opts: DataOptions = {}): Data {
             select sp.id, sp.canonical_id, word_similarity($1, sp.title) as score, sp.title ilike $2 as exact
             from site_products sp join shops s on s.id = sp.shop_id
             where $1 <% sp.title and ${VISIBLE} and ($3::text is null or s.slug = $3)
-            order by exact desc, score desc, sp.price_cents asc nulls last, sp.id
+            order by exact desc, score desc, nullif(sp.price_cents, 0) asc nulls last, sp.id
             limit ${SEARCH_HITS}
           ), grp as (
             select coalesce('c' || canonical_id, 's' || id) as group_key, max(canonical_id) as canonical_id,
@@ -266,8 +269,9 @@ export function createData(db: SqlRunner, opts: DataOptions = {}): Data {
             union
             select g.group_key, g.exact, g.score, g.hit_id from grp g where g.canonical_id is null
           ), ranked as (
-            select m.group_key, m.exact, m.score, ${CARD_COLUMNS}, sp.canonical_id, sp.match_method, sp.match_confirmed,
-              row_number() over (partition by m.group_key order by sp.price_cents asc nulls last, sp.id) as rn
+            select m.group_key, m.exact, m.score, ${CARD_COLUMNS}, sp.in_stock, sp.canonical_id, sp.match_method, sp.match_confirmed,
+              -- a stored 0 is no price (serialised null): it sorts with the nulls, last
+              row_number() over (partition by m.group_key order by nullif(sp.price_cents, 0) asc nulls last, sp.id) as rn
             from members m join site_products sp on sp.id = m.id join shops s on s.id = sp.shop_id
             where ${VISIBLE} and ($3::text is null or s.slug = $3)
           )
@@ -282,6 +286,7 @@ export function createData(db: SqlRunner, opts: DataOptions = {}): Data {
         groupKey: String(r.group_key),
         canonicalId: numOrNull(r.canonical_id),
         possible: r.canonical_id !== null && !trustedMatch(strOrNull(r.match_method), Boolean(r.match_confirmed)),
+        inStock: boolOrNull(r.in_stock),
       }));
     },
 
@@ -438,7 +443,7 @@ export function createData(db: SqlRunner, opts: DataOptions = {}): Data {
                 sp.match_method, sp.match_confirmed
               from site_products sp join shops s on s.id = sp.shop_id
               where sp.canonical_id = $1 and sp.shop_id <> $2 and ${VISIBLE}
-              order by sp.price_cents asc nulls last, sp.id
+              order by nullif(sp.price_cents, 0) asc nulls last, sp.id
               limit ${OTHERS_MAX}`,
               [product.canonicalId, product.shopId],
             ),

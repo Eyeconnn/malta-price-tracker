@@ -65,7 +65,8 @@ function mockApi(routes: Record<string, Route>) {
   return fn;
 }
 
-const home = (good: Card[] = goodCards(), avoid: Card[] = avoidCards()): Route => () => json({ phrases: PHRASES, good, avoid });
+const home = (good: Card[] = goodCards(), avoid: Card[] = avoidCards(), minHistoryDays = 14): Route => () =>
+  json({ phrases: PHRASES, good, avoid, minHistoryDays });
 
 const searchCalls = (fn: ReturnType<typeof mockApi>) =>
   fn.mock.calls.map(([input]) => new URL(String(input), 'http://localhost')).filter((u) => u.pathname === '/api/search');
@@ -212,10 +213,10 @@ describe('home', () => {
     expect(within(c).getByText('<img src=x onerror=alert(1)><b>Bold</b>')).toBeTruthy();
   });
 
-  it('with no verdicts yet explains why the lists are empty', async () => {
-    mockApi({ '/api/home': home([], []) });
+  it('with no verdicts yet explains why the lists are empty, with the stored minimum history', async () => {
+    mockApi({ '/api/home': home([], [], 21) });
     renderAt('/');
-    expect(await screen.findByText(/We need 14 days of prices before we judge a deal/)).toBeTruthy();
+    expect(await screen.findByText(/We need 21 days of prices before we judge a deal/)).toBeTruthy();
     expect(screen.queryAllByRole('article')).toHaveLength(0);
   });
 
@@ -232,19 +233,46 @@ describe('home', () => {
     expect(fetchMock.mock.calls.filter(([i]) => String(i).startsWith('/api/home'))).toHaveLength(2);
   });
 
-  it('shows a loading state with the same frame while the deals load', async () => {
+  it('shows a loading state with the same frame while the deals load, and always exactly one h1', async () => {
     let release!: () => void;
     mockApi({ '/api/home': (url) => new Promise((r) => (release = () => r(home()(url) as Response))) });
     renderAt('/');
     expect(screen.getByRole('status', { name: 'Loading deals' })).toBeTruthy();
+    expect(screen.getAllByRole('heading', { level: 1 })).toHaveLength(1);
     await act(async () => release());
     await waitFor(() => expect(screen.queryByRole('status', { name: 'Loading deals' })).toBeNull());
+    expect(screen.getAllByRole('heading', { level: 1 })).toHaveLength(1);
+  });
+
+  it('a 200 answer with the wrong shape becomes the error state, not an endless load', async () => {
+    mockApi({ '/api/home': () => json({}) });
+    renderAt('/');
+    expect(await screen.findByText('Prices could not be loaded.')).toBeTruthy();
+  });
+
+  it('aborts the request when the page unmounts', async () => {
+    let signal: AbortSignal | undefined;
+    mockApi({
+      '/api/home': (_url, init) => {
+        signal = init?.signal ?? undefined;
+        return new Promise<Response>(() => {});
+      },
+    });
+    const view = renderAt('/');
+    await waitFor(() => expect(signal).toBeDefined());
+    expect(signal!.aborted).toBe(false);
+    view.unmount();
+    expect(signal!.aborted).toBe(true);
   });
 });
 
 describe('home search box', () => {
   const groups = (q: string): GroupResult[] => [
-    { canonicalId: 1, title: `${q} result`, items: [{ ...card(41, { title: `${q} result`, priceCents: 59900, shop: 'Beta', shopSlug: 'beta' }), possible: false }] },
+    {
+      canonicalId: 1,
+      title: `${q} result`,
+      items: [{ ...card(41, { title: `${q} result`, priceCents: 59900, shop: 'Beta', shopSlug: 'beta' }), possible: false, inStock: true, cheaper: null }],
+    },
   ];
 
   it('typing "ip" waits for the debounce, then shows live results; one character calls nothing', async () => {
@@ -263,6 +291,48 @@ describe('home search box', () => {
     await waitFor(() => expect(within(results).getByRole('link', { name: /ip result/ })).toBeTruthy());
     expect(within(results).getByRole('link', { name: /ip result/ }).getAttribute('href')).toBe('/p/41');
     expect(searchCalls(fn).map((u) => u.searchParams.get('q'))).toEqual(['ip']);
+  });
+
+  it('announces the search state in one status element that is there before any results', async () => {
+    let down = false;
+    mockApi({
+      '/api/home': home(),
+      '/api/search': (url) => (down ? json({ error: 'x' }, 500) : json({ results: url.searchParams.get('q') === 'zz' ? [] : groups('ip') })),
+    });
+    renderAt('/');
+    const status = screen.getByTestId('search-status');
+    expect(status.getAttribute('role')).toBe('status');
+    expect(status.textContent).toBe('');
+    const box = screen.getByRole('searchbox', { name: 'Search a product' });
+    fireEvent.change(box, { target: { value: 'ip' } });
+    await waitFor(() => expect(status.textContent).toBe('Searching'));
+    await waitFor(() => expect(status.textContent).toBe('1 product found'));
+    fireEvent.change(box, { target: { value: 'zz' } });
+    await waitFor(() => expect(status.textContent).toBe('No products match "zz"'));
+    down = true;
+    fireEvent.change(box, { target: { value: 'zzz' } });
+    await waitFor(() => expect(status.textContent).toBe('Search is not available right now'));
+    expect(screen.getByTestId('search-status')).toBe(status);
+  });
+
+  it('live results mark Black Friday rows, and a Black Friday avoid row says the price was raised', async () => {
+    const row = (c: Card) => ({ canonicalId: null, title: c.title, items: [{ ...c, possible: false, inStock: true, cheaper: null }] });
+    mockApi({
+      '/api/home': home(),
+      '/api/search': () =>
+        json({
+          results: [
+            row(card(51, { title: 'Lenovo V15', verdict: 'avoid', bf: true, priceCents: 79900, raisedFrom: { priceCents: 70900, at: '2026-10-20' } })),
+            row(card(52, { title: 'Razer keyboard', bf: true })),
+          ],
+        }),
+    });
+    renderAt('/');
+    fireEvent.change(screen.getByRole('searchbox', { name: 'Search a product' }), { target: { value: 'le' } });
+    const avoidRow = await screen.findByRole('link', { name: /Lenovo V15/ });
+    expect(within(avoidRow).getByText('Marked Black Friday, price raised')).toBeTruthy();
+    const goodRow = screen.getByRole('link', { name: /Razer keyboard/ });
+    expect(within(goodRow).getByText('Black Friday')).toBeTruthy();
   });
 
   it('ignores a stale response: the earlier request is aborted and its late answer is dropped', async () => {
@@ -310,9 +380,12 @@ describe('home search box', () => {
 });
 
 describe('search page', () => {
-  const item = (id: number, shop: string, priceCents: number | null, possible: boolean, extra: Partial<Card> = {}) => ({
+  type Cheaper = { id: number; shop: string; shopSlug: string; priceCents: number } | null;
+  const item = (id: number, shop: string, priceCents: number | null, possible: boolean, extra: Partial<Card> = {}, cheaper: Cheaper = null) => ({
     ...card(id, { title: 'Lenovo IdeaPad Slim 5', shop, shopSlug: shop.toLowerCase(), priceCents, verdict: 'none', ...extra }),
     possible,
+    inStock: true,
+    cheaper,
   });
 
   it('has its own h1 and searches the query from the URL straight away', async () => {
@@ -332,13 +405,21 @@ describe('search page', () => {
     expect(screen.queryByRole('region', { name: 'Search results' })).toBeNull();
   });
 
-  it('groups results by product, cheapest first, with a cheaper-elsewhere chip only from exact matches', async () => {
+  it('groups results by product, cheapest first, and shows the cheaper-elsewhere chip the API decided', async () => {
     mockApi({
       '/api/search': () =>
         json({
           results: [
-            { canonicalId: 1, title: 'Lenovo IdeaPad Slim 5', items: [item(1, 'Beta', 60000, false), item(2, 'Alpha', 70000, false), item(3, 'Gamma', null, false)] },
-            // the cheaper row is only "possibly the same": it never drives a cheaper claim
+            {
+              canonicalId: 1,
+              title: 'Lenovo IdeaPad Slim 5',
+              items: [
+                item(1, 'Beta', 60000, false),
+                item(2, 'Alpha', 70000, false, {}, { id: 1, shop: 'Beta', shopSlug: 'beta', priceCents: 60000 }),
+                item(3, 'Gamma', null, false),
+              ],
+            },
+            // the client never works out a cheaper claim itself: no `cheaper` from the API, no chip
             { canonicalId: 2, title: 'Lenovo IdeaPad Slim 3', items: [item(4, 'Delta', 40000, true), item(5, 'Alpha', 45000, false)] },
           ],
         }),
@@ -389,6 +470,32 @@ describe('search page', () => {
     down = false;
     fireEvent.click(screen.getByRole('button', { name: 'Try again' }));
     expect(await screen.findByText('No products match "lenovo".')).toBeTruthy();
+  });
+
+  it('the debounce fires at 250 ms, not at 249 ms', () => {
+    vi.useFakeTimers();
+    try {
+      const fn = mockApi({ '/api/search': () => json({ results: [] }) });
+      renderAt('/search');
+      fireEvent.change(screen.getByRole('searchbox'), { target: { value: 'ip' } });
+      act(() => vi.advanceTimersByTime(249));
+      expect(searchCalls(fn)).toHaveLength(0);
+      act(() => vi.advanceTimersByTime(1));
+      expect(searchCalls(fn).map((u) => u.searchParams.get('q'))).toEqual(['ip']);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('announces the search state in one persistent status element', async () => {
+    mockApi({ '/api/search': () => json({ results: [{ canonicalId: null, title: 'Lenovo', items: [item(1, 'Beta', 60000, false)] }] }) });
+    renderAt('/search');
+    const status = screen.getByTestId('search-status');
+    expect(status.getAttribute('role')).toBe('status');
+    expect(status.textContent).toBe('');
+    fireEvent.change(screen.getByRole('searchbox'), { target: { value: 'lenovo' } });
+    await waitFor(() => expect(status.textContent).toBe('1 product found'));
+    expect(screen.getByTestId('search-status')).toBe(status);
   });
 
   it('typing updates the URL after the debounce', async () => {

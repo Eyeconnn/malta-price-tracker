@@ -103,4 +103,18 @@ describe('useMediaQuery', () => {
     expect(header.className).toContain('bg-bar');
     expect(header.className).not.toContain('bg-glass');
   });
+
+  it('the floating bottom bar uses the same opaque bar fill', () => {
+    stubMatchMedia(375);
+    render(
+      <ModeProvider>
+        <MemoryRouter initialEntries={['/how-we-check']}>
+          <App />
+        </MemoryRouter>
+      </ModeProvider>,
+    );
+    const classes = screen.getByRole('navigation', { name: 'Mobile navigation' }).className.split(/\s+/);
+    expect(classes).toContain('bg-bar');
+    expect(classes).not.toContain('glass');
+  });
 });

@@ -4,7 +4,7 @@ import { SITE_CATEGORIES } from '../../src/site/categories.js';
 import { computeRating } from '../../src/site/rating.js';
 import { DEFAULT_SETTINGS } from '../../src/site/settings.js';
 import { type ResponseCache, cached } from './cache.js';
-import type { Card, Data, GroupResult, OtherShop, ProductInfo, SearchHit, SearchPattern } from './data.js';
+import type { Card, Data, GroupItem, GroupResult, SearchHit, SearchPattern } from './data.js';
 import type { Env } from './env.js';
 import { json } from './http.js';
 
@@ -45,9 +45,13 @@ function slugParam(url: URL, name: string): string | null | undefined {
   return SLUG.test(v) ? v : undefined;
 }
 
-/** Hits grouped in data order (best group first), cheapest first inside a group (no price last). */
-export function groupResults(hits: SearchHit[]): GroupResult[] {
-  const groups = new Map<string, { canonicalId: number | null; items: (Card & { possible: boolean })[] }>();
+/**
+ * Hits grouped in data order (best group first), cheapest first inside a group (no price last).
+ * Each row gets `cheaper`: cheaperAt over the group's rows at other shops (Ruling R36), so a row
+ * that is only "possibly the same", a title-only target and an out-of-stock target never count.
+ */
+export function groupResults(hits: SearchHit[], cheaperPct: number): GroupResult[] {
+  const groups = new Map<string, { canonicalId: number | null; items: Omit<GroupItem, 'cheaper'>[] }>();
   for (const { groupKey, canonicalId, ...item } of hits) {
     let g = groups.get(groupKey);
     if (!g) {
@@ -59,7 +63,11 @@ export function groupResults(hits: SearchHit[]): GroupResult[] {
   }
   const price = (c: Card) => (c.priceCents !== null && c.priceCents > 0 ? c.priceCents : Number.POSITIVE_INFINITY);
   return [...groups.values()].map((g) => {
-    const items = [...g.items].sort((a, b) => price(a) - price(b) || a.id - b.id);
+    const sorted = [...g.items].sort((a, b) => price(a) - price(b) || a.id - b.id);
+    const items: GroupItem[] = sorted.map((item) => {
+      const target = item.possible ? null : cheaperAt(item, sorted.filter((o) => o.shopSlug !== item.shopSlug), cheaperPct);
+      return { ...item, cheaper: target && { id: target.id, shop: target.shop, shopSlug: target.shopSlug, priceCents: target.priceCents as number } };
+    });
     return { canonicalId: g.canonicalId, title: items[0].title, items };
   });
 }
@@ -68,11 +76,15 @@ export function groupResults(hits: SearchHit[]): GroupResult[] {
  * The cheapest exact match (not `possible`) with a positive price, not known out of stock, at least
  * cheaperPct below the product's price; null when there is none or the product has no price.
  */
-export function cheaperAt(product: ProductInfo, others: OtherShop[], cheaperPct: number): OtherShop | null {
+export function cheaperAt<T extends { possible: boolean; priceCents: number | null; inStock: boolean | null }>(
+  product: { priceCents: number | null },
+  others: T[],
+  cheaperPct: number,
+): T | null {
   const own = product.priceCents;
   if (own === null || own <= 0) return null;
   const limit = own * (1 - cheaperPct / 100);
-  let best: OtherShop | null = null;
+  let best: T | null = null;
   for (const o of others) {
     if (o.possible || o.priceCents === null || o.priceCents <= 0 || o.inStock === false) continue;
     if (o.priceCents > limit) continue;
@@ -87,7 +99,7 @@ async function home(data: Data): Promise<Response> {
     data.deals({ verdict: 'good', category: null, shop: null, limit: HOME_CARDS, offset: 0 }),
     data.deals({ verdict: 'avoid', category: null, shop: null, limit: HOME_CARDS, offset: 0 }),
   ]);
-  return json({ phrases: settings.phrases, good: good.items, avoid: avoid.items });
+  return json({ phrases: settings.phrases, good: good.items, avoid: avoid.items, minHistoryDays: settings.thresholds.minHistoryDays });
 }
 
 async function search(data: Data, url: URL): Promise<Response> {
@@ -95,7 +107,8 @@ async function search(data: Data, url: URL): Promise<Response> {
   if (shop === undefined) return badRequest('bad shop');
   const pattern = searchPattern(url.searchParams.get('q') ?? '');
   if (!pattern) return json({ results: [] });
-  return json({ results: groupResults(await data.search(pattern, shop)) });
+  const [hits, settings] = await Promise.all([data.search(pattern, shop), data.settings()]);
+  return json({ results: groupResults(hits, settings.thresholds.cheaperPct) });
 }
 
 async function product(data: Data, id: number): Promise<Response> {
@@ -170,9 +183,14 @@ export async function handleApi(req: Request, env: Env, url: URL, deps: ApiDeps)
     if (category !== null && !CATEGORY_SLUGS.has(category)) return badRequest('bad category');
     const shop = slugParam(url, 'shop');
     if (shop === undefined) return badRequest('bad shop');
-    return cached(cache, key(p, { type, category, shop, page: String(page) }), async () =>
-      json(await data().deals({ verdict: type, category, shop, limit: PAGE_SIZE, offset: (page - 1) * PAGE_SIZE })),
-    );
+    return cached(cache, key(p, { type, category, shop, page: String(page) }), async () => {
+      const d = data();
+      const [deals, settings] = await Promise.all([
+        d.deals({ verdict: type, category, shop, limit: PAGE_SIZE, offset: (page - 1) * PAGE_SIZE }),
+        d.settings(),
+      ]);
+      return json({ ...deals, minHistoryDays: settings.thresholds.minHistoryDays });
+    });
   }
 
   if (p === '/api/shops') return cached(cache, key(p), async () => json({ shops: await data().shops() }));

@@ -1,12 +1,12 @@
 import { useId, useState } from 'react';
 import { Link } from 'react-router';
 import { DealList, DealListSkeleton, Notice } from '@/components/site/DealList';
-import { Headline } from '@/components/site/Headline';
+import { FALLBACK_LINE, Headline, parseHighlight } from '@/components/site/Headline';
 import { DESKTOP_QUERY } from '@/components/site/nav';
 import { LiveSearch } from '@/components/site/SearchBox';
 import { Button } from '@/components/ui/button';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { type ApiState, api, type Card, type HomeResponse, useApi } from '@/lib/api';
+import { ApiError, type ApiState, api, type Card, type HomeResponse, useApi } from '@/lib/api';
 import { useMediaQuery } from '@/lib/useMediaQuery';
 import { cn } from '@/lib/utils';
 
@@ -115,7 +115,7 @@ function Deals({ state, desktop }: { state: ApiState<HomeResponse> & { retry: ()
   if (state.status === 'empty') {
     return (
       <Notice title="No deals judged yet.">
-        We need 14 days of prices before we judge a deal. Until then, search a product to see its price.
+        We need {state.data.minHistoryDays} days of prices before we judge a deal. Until then, search a product to see its price.
       </Notice>
     );
   }
@@ -133,10 +133,20 @@ function Deals({ state, desktop }: { state: ApiState<HomeResponse> & { retry: ()
 }
 
 const NO_PHRASES = { morning: [], afternoon: [], evening: [], late: [], bfweek: [] };
+const FALLBACK_TEXT = parseHighlight(FALLBACK_LINE)
+  .map((s) => s.text)
+  .join('');
 
 /** Home: the welcome headline (the page's only h1), the search box, then good deals and deals to avoid. */
 export function HomePage() {
-  const home = useApi('home', (signal) => api.home(signal), (d) => d.good.length === 0 && d.avoid.length === 0);
+  const home = useApi(
+    'home',
+    (signal) => api.home(signal),
+    (d) => {
+      if (!Array.isArray(d?.good) || !Array.isArray(d?.avoid)) throw new ApiError(200); // a 200 without the expected shape
+      return d.good.length === 0 && d.avoid.length === 0;
+    },
+  );
   const desktop = useMediaQuery(DESKTOP_QUERY, true);
   const [now] = useState(() => new Date());
   const phrases = home.status === 'ready' || home.status === 'empty' ? home.data.phrases : home.status === 'error' ? NO_PHRASES : null;
@@ -144,8 +154,15 @@ export function HomePage() {
   return (
     <div className="flex flex-col gap-8">
       <div className="flex flex-col items-center gap-3 pt-2 text-center md:pt-6">
-        {/* the line is picked from the admin's phrases, so it waits for them; the space is kept meanwhile */}
-        {phrases ? <Headline phrases={phrases} now={now} /> : <div aria-hidden="true" className="h-9 sm:h-10" />}
+        {/* The line is picked from the admin's phrases, so it waits for them. Meanwhile the space is kept
+            and a visually hidden fallback h1 keeps the page's one h1. */}
+        {phrases ? (
+          <Headline phrases={phrases} now={now} />
+        ) : (
+          <div className="h-9 sm:h-10">
+            <h1 className="sr-only">{FALLBACK_TEXT}</h1>
+          </div>
+        )}
         <p className="text-muted-foreground">Price history from Maltese web shops, to check if a deal is real.</p>
         <LiveSearch className="mt-2" />
       </div>

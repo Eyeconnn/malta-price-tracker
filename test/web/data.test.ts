@@ -251,3 +251,31 @@ describe('data.ts on PGlite', () => {
     expect(c.find((x) => x.slug === 'phones')).toEqual({ slug: 'phones', count: 2, good: 0, avoid: 2 });
   });
 });
+
+describe('data.ts search and price order (fix round 1)', () => {
+  it('search hits carry the raise facts and the stock flag', async () => {
+    const hits = await data.search({ text: 'samsung galaxy tab', like: '%samsung galaxy tab%' }, null);
+    const tab = hits.find((h) => h.id === 7);
+    expect(tab?.raisedFrom).toEqual({ priceCents: 40000, at: '2026-10-10' });
+    expect(tab?.inStock).toBe(true);
+  });
+
+  it('a stored 0 price sorts last (as no price) in search groups and in other shops', async () => {
+    await pg.exec(`
+      insert into shops (id, slug, name, base_url, adapter, active, site_hidden, category) values
+        (5, 'delta', 'Delta', 'https://delta.example', 'woo', true, false, null);
+      insert into site_products (id, shop_id, group_key, title, category, price_cents, in_stock, verdict, canonical_id, match_method, match_confirmed, updated_at) values
+        (50, 1, 'Z50', 'Zeta Widget Pro', null, 0, true, 'insufficient', 300, 'gtin', false, now()),
+        (51, 2, 'Z51', 'Zeta Widget Pro', null, 5000, true, 'insufficient', 300, 'gtin', false, now()),
+        (52, 5, 'Z52', 'Zeta Widget Pro', null, 4000, false, 'insufficient', 300, 'gtin', false, now());
+    `);
+    const hits = (await data.search({ text: 'zeta widget pro', like: '%zeta widget pro%' }, null)).filter((h) => h.groupKey === 'c300');
+    expect(hits.map((h) => h.id)).toEqual([52, 51, 50]);
+    expect(hits.map((h) => h.inStock)).toEqual([false, true, true]);
+    const d = await data.product(51);
+    expect(d?.others.map((o) => [o.id, o.priceCents])).toEqual([
+      [52, 4000],
+      [50, null],
+    ]);
+  });
+});

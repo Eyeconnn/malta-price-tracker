@@ -1,11 +1,10 @@
 import { TriangleAlert } from 'lucide-react';
 import { useEffect, useId, useRef, useState } from 'react';
 import { Link, useSearchParams } from 'react-router';
-import { DEFAULT_SETTINGS } from '../../../src/site/settings.js';
 import { alarmText, avoidFact, avoidSummary, BlackFridayMark, NO_PRICE } from '@/components/site/DealCard';
 import { Notice } from '@/components/site/DealList';
 import { useMode } from '@/components/site/ModeProvider';
-import { SEARCH_DEBOUNCE_MS, SearchBox, searchPath, useSearch } from '@/components/site/SearchBox';
+import { SEARCH_DEBOUNCE_MS, SearchBox, SearchStatus, searchPath, useSearch } from '@/components/site/SearchBox';
 import { ShopBadge } from '@/components/site/ShopBadge';
 import { Button } from '@/components/ui/button';
 import { type GroupItem, type GroupResult, useDebounced } from '@/lib/api';
@@ -13,28 +12,10 @@ import { formatEuro } from '@/lib/format';
 
 const SLUG = /^[a-z0-9-]{1,64}$/;
 
-/**
- * For each exactly matched row with a price, the cheapest exactly matched row at another shop that
- * is at least `cheaperPct` cheaper. Rows that are only "possibly the same" (title-only match) are
- * left out on both sides: a title match never backs a cheaper claim.
- */
-export function cheaperElsewhere(items: GroupItem[], cheaperPct: number): Map<number, GroupItem> {
-  const exact = items.filter((i) => !i.possible && i.priceCents !== null);
-  const out = new Map<number, GroupItem>();
-  for (const item of exact) {
-    let best: GroupItem | null = null;
-    for (const o of exact) {
-      if (o.shopSlug === item.shopSlug) continue;
-      if (o.priceCents! * 100 > item.priceCents! * (100 - cheaperPct)) continue;
-      if (!best || o.priceCents! < best.priceCents!) best = o;
-    }
-    if (best) out.set(item.id, best);
-  }
-  return out;
-}
-
-function ResultRow({ item, groupTitle, cheaper }: { item: GroupItem; groupTitle: string; cheaper: GroupItem | null }) {
+/** One shop's row of a product group. `item.cheaper` is decided by the API (Ruling R36); it is only shown here. */
+function ResultRow({ item, groupTitle }: { item: GroupItem; groupTitle: string }) {
   const { mode } = useMode();
+  const { cheaper } = item;
   const avoid = item.verdict === 'avoid';
   const fact = avoid ? avoidFact(item) : null;
   return (
@@ -64,7 +45,7 @@ function ResultRow({ item, groupTitle, cheaper }: { item: GroupItem; groupTitle:
           {item.possible && <span className="text-muted-foreground">Possibly the same product</span>}
           {cheaper && (
             <span className="rounded-lg border border-line bg-secondary px-2 py-0.5 font-semibold">
-              Cheaper elsewhere: {formatEuro(cheaper.priceCents!)} at {cheaper.shop}
+              Cheaper elsewhere: {formatEuro(cheaper.priceCents)} at {cheaper.shop}
             </span>
           )}
         </div>
@@ -80,7 +61,6 @@ function ResultRow({ item, groupTitle, cheaper }: { item: GroupItem; groupTitle:
 
 function GroupCard({ group }: { group: GroupResult }) {
   const id = useId();
-  const cheaper = cheaperElsewhere(group.items, DEFAULT_SETTINGS.thresholds.cheaperPct);
   const shops = new Set(group.items.map((i) => i.shopSlug)).size;
   return (
     <article aria-labelledby={id} className="glass p-4">
@@ -90,7 +70,7 @@ function GroupCard({ group }: { group: GroupResult }) {
       {shops > 1 && <p className="text-xs text-muted-foreground">{shops} shops, cheapest first</p>}
       <ul className="m-0 mt-2 list-none p-0">
         {group.items.map((item) => (
-          <ResultRow key={item.id} item={item} groupTitle={group.title} cheaper={cheaper.get(item.id) ?? null} />
+          <ResultRow key={item.id} item={item} groupTitle={group.title} />
         ))}
       </ul>
     </article>
@@ -149,6 +129,7 @@ export function SearchPage() {
           );
         }}
       />
+      <SearchStatus state={state} term={term} />
       {shop && (
         <p className="text-sm text-muted-foreground">
           Results from one shop only.{' '}
@@ -160,9 +141,9 @@ export function SearchPage() {
       {state.status !== 'idle' && (
         <section aria-label="Search results" className="flex flex-col gap-3">
           {state.status === 'loading' && (
-            <div role="status" aria-label="Searching" className="flex flex-col gap-3">
+            <div aria-hidden="true" className="flex flex-col gap-3">
               {[0, 1, 2].map((i) => (
-                <div key={i} aria-hidden="true" className="glass h-32 opacity-60" />
+                <div key={i} className="glass h-32 opacity-60" />
               ))}
             </div>
           )}
@@ -179,7 +160,7 @@ export function SearchPage() {
           )}
           {state.status === 'ready' && (
             <>
-              <p role="status" className="text-sm text-muted-foreground">
+              <p className="text-sm text-muted-foreground">
                 {state.data.results.length === 1 ? '1 product' : `${state.data.results.length} products`}
               </p>
               {state.data.results.map((g) => (
