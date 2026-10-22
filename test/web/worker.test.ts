@@ -1,4 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { DEFAULT_SETTINGS } from '../../src/site/settings.js';
+import type { Data } from '../../web/worker/data.js';
 import { type Bindings, createHandler } from '../../web/worker/index.js';
 
 const PAGE = '<!doctype html><html><head><script>theme()</script><script type="module" src="/assets/a.js"></script></head></html>';
@@ -24,6 +26,19 @@ function setup(opts: { public: boolean; assets?: (req: Request) => Promise<Respo
   const handler = createHandler({ loadSettings: async () => ({ public: opts.public }) });
   return { assets, fetch: (path: string, password?: string) => handler.fetch(get(path, password), env) };
 }
+
+describe('API caching follows the access mode (M1)', () => {
+  it('a private site answers API reads with private, max-age=600', async () => {
+    const env = { DATABASE_URL: 'x', SITE_PASSWORD: 'site-secret', ADMIN_PASSWORD: 'admin-secret' } as Bindings;
+    const data = { shops: async () => [], settings: async () => DEFAULT_SETTINGS } as unknown as Data;
+    for (const pub of [false, true]) {
+      const handler = createHandler({ loadSettings: async () => ({ public: pub }), api: { data: () => data, cache: () => null } });
+      const res = await handler.fetch(get('/api/shops', 'site-secret'), env);
+      expect(res.status).toBe(200);
+      expect(res.headers.get('cache-control')).toBe(pub ? 'public, max-age=600' : 'private, max-age=600');
+    }
+  });
+});
 
 function get(path: string, password?: string): Request {
   const headers: Record<string, string> = {};

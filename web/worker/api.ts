@@ -1,16 +1,18 @@
 // API router. Access control already ran (index.ts); this validates parameters, calls Data and caches.
-// Every read except search is cached for 10 minutes (cache.ts); errors propagate to the handler's generic 500.
+// Every read except search is cached for 10 minutes (cache.ts; while the site is private only in the browser);
+// errors propagate to the handler's generic 500.
 // The one public write, POST /api/reports, is handed to reports.ts before any read routing and is never cached.
 // /api/admin/* goes to admin.ts (its own auth check, the site_admin role, never cached).
 import { SITE_CATEGORIES } from '../../src/site/categories.js';
 import { computeRating } from '../../src/site/rating.js';
 import { DEFAULT_SETTINGS } from '../../src/site/settings.js';
 import { type AdminDeps, DEFAULT_ADMIN, handleAdmin } from './admin.js';
-import { type ResponseCache, cached } from './cache.js';
+import { type ResponseCache, cached as cachedResponse } from './cache.js';
 import type { Card, Data, GroupItem, GroupResult, SearchHit, SearchPattern } from './data.js';
 import type { Env } from './env.js';
 import { json } from './http.js';
 import { DEFAULT_REPORTS, handleReport, type ReportDeps } from './reports.js';
+import type { AccessSettings, SettingsCache } from './settings.js';
 
 export interface ApiDeps {
   data: (env: Env) => Data;
@@ -19,6 +21,8 @@ export interface ApiDeps {
   reports?: ReportDeps;
   /** admin store (site_admin role); defaults to Neon */
   admin?: AdminDeps;
+  /** settings cache for search's thresholds (one load per isolate per minute); without it search loads them per call */
+  searchSettings?: SettingsCache;
 }
 
 const PAGE_SIZE = 24;
@@ -121,13 +125,14 @@ async function home(data: Data): Promise<Response> {
   return json({ phrases: settings.phrases, good: good.items, avoid: avoid.items, minHistoryDays: settings.thresholds.minHistoryDays });
 }
 
-async function search(data: Data, url: URL): Promise<Response> {
+async function search(data: Data, url: URL, settingsCache: SettingsCache | undefined): Promise<Response> {
   const shop = slugParam(url, 'shop');
   if (shop === undefined) return badRequest('bad shop');
   const pattern = searchPattern(url.searchParams.get('q') ?? '');
   if (!pattern) return json({ results: [] });
-  const [hits, settings] = await Promise.all([data.search(pattern, shop), data.settings()]);
-  return json({ results: groupResults(hits, settings.thresholds.cheaperPct) });
+  const settings = settingsCache ? settingsCache.get(() => data.settings()) : data.settings();
+  const [hits, { thresholds }] = await Promise.all([data.search(pattern, shop), settings]);
+  return json({ results: groupResults(hits, thresholds.cheaperPct) });
 }
 
 async function product(data: Data, id: number): Promise<Response> {
@@ -171,8 +176,12 @@ async function categories(data: Data): Promise<Response> {
   });
 }
 
-/** Handles /api and /api/*; unknown paths give JSON 404. */
-export async function handleApi(req: Request, env: Env, url: URL, deps: ApiDeps): Promise<Response> {
+/**
+ * Handles /api and /api/*; unknown paths give JSON 404. `access` is the request's access mode (index.ts passes
+ * the loaded settings): while the site is private, reads skip the shared cache (cache.ts). Callers without it
+ * (tests of the routes) get the public behaviour.
+ */
+export async function handleApi(req: Request, env: Env, url: URL, deps: ApiDeps, access: AccessSettings = { public: true }): Promise<Response> {
   const p = url.pathname;
   if (p === '/api/reports') return handleReport(req, env, url, deps.reports ?? DEFAULT_REPORTS);
   if (p === '/api/admin' || p.startsWith('/api/admin/')) return handleAdmin(req, env, url, deps.admin ?? DEFAULT_ADMIN);
@@ -182,22 +191,23 @@ export async function handleApi(req: Request, env: Env, url: URL, deps: ApiDeps)
   if (!known) return notFound();
   if (req.method === 'HEAD') {
     // same status and headers as GET, no body
-    const res = await handleApi(new Request(req.url, { method: 'GET', headers: req.headers }), env, url, deps);
+    const res = await handleApi(new Request(req.url, { method: 'GET', headers: req.headers }), env, url, deps, access);
     return new Response(null, res);
   }
   if (req.method !== 'GET') return json({ error: 'method not allowed' }, 405, { allow: 'GET, HEAD' });
 
   const data = () => deps.data(env);
   const cache = deps.cache();
+  const cached = (key: string, build: () => Promise<Response>) => cachedResponse(cache, key, build, { private: !access.public });
   const key = (path: string, params: Record<string, string | null> = {}) => {
     const u = new URL(path, url.origin);
     for (const [k, v] of Object.entries(params)) if (v !== null) u.searchParams.set(k, v);
     return u.toString();
   };
 
-  if (p === '/api/search') return search(data(), url);
+  if (p === '/api/search') return search(data(), url, deps.searchSettings);
 
-  if (p === '/api/home') return cached(cache, key(p), () => home(data()));
+  if (p === '/api/home') return cached(key(p), () => home(data()));
 
   if (p === '/api/deals') {
     const type = url.searchParams.get('type') ?? 'good';
@@ -217,7 +227,7 @@ export async function handleApi(req: Request, env: Env, url: URL, deps: ApiDeps)
     const minCents = min === null ? null : min * 100;
     const maxCents = max === null ? null : max * 100;
     const range = { min: min === null ? null : String(min), max: max === null ? null : String(max) };
-    return cached(cache, key(p, { type, category, shop, ...range, page: String(page) }), async () => {
+    return cached(key(p, { type, category, shop, ...range, page: String(page) }), async () => {
       const d = data();
       const [deals, settings] = await Promise.all([
         d.deals({ verdict: type, category, shop, minCents, maxCents, limit: PAGE_SIZE, offset: (page - 1) * PAGE_SIZE }),
@@ -227,24 +237,24 @@ export async function handleApi(req: Request, env: Env, url: URL, deps: ApiDeps)
     });
   }
 
-  if (p === '/api/shops') return cached(cache, key(p), async () => json({ shops: await data().shops() }));
+  if (p === '/api/shops') return cached(key(p), async () => json({ shops: await data().shops() }));
 
-  if (p === '/api/categories') return cached(cache, key(p), () => categories(data()));
+  if (p === '/api/categories') return cached(key(p), () => categories(data()));
 
   // the live verdict and rating thresholds, for the How we check page
-  if (p === '/api/thresholds') return cached(cache, key(p), async () => json({ thresholds: (await data().settings()).thresholds }));
+  if (p === '/api/thresholds') return cached(key(p), async () => json({ thresholds: (await data().settings()).thresholds }));
 
   if (shopMatch) {
     const slug = shopMatch[1];
     if (!SLUG.test(slug)) return notFound();
-    return cached(cache, key(p), () => shopPage(data(), slug));
+    return cached(key(p), () => shopPage(data(), slug));
   }
 
   if (productMatch) {
     const raw = productMatch[1];
     if (!/^\d{1,15}$/.test(raw)) return notFound();
     const id = Number(raw);
-    return cached(cache, key(`/api/products/${id}`), () => product(data(), id));
+    return cached(key(`/api/products/${id}`), () => product(data(), id));
   }
 
   return notFound();

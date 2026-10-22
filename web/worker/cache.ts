@@ -1,5 +1,7 @@
 // Response cache for the public read API (Neon Build plan: keep compute low). Every read except search is
-// cached for 10 minutes in the Workers Cache API. The cache is injected so tests run without the runtime.
+// cached for 10 minutes in the Workers Cache API while the site is public. While it is private (behind the
+// site password) answers are marked private for the browser only and never go through the shared cache.
+// The cache is injected so tests run without the runtime.
 
 /** The subset of the Workers Cache API (caches.default) the API uses. */
 export interface ResponseCache {
@@ -8,6 +10,8 @@ export interface ResponseCache {
 }
 
 export const PUBLIC_CACHE_CONTROL = 'public, max-age=600';
+/** While the site is private: the visitor's browser may keep an answer, no shared cache may. */
+export const PRIVATE_CACHE_CONTROL = 'private, max-age=600';
 
 /** caches.default in the Workers runtime, null elsewhere (Node tests, scripts). */
 export function defaultCache(): ResponseCache | null {
@@ -19,8 +23,22 @@ export function defaultCache(): ResponseCache | null {
  * Serves `key` (an absolute URL built from validated parameters only, so junk query strings cannot bust the
  * cache) from the cache, else builds it. A 200 is stored and returned with PUBLIC_CACHE_CONTROL; anything
  * else is returned as built and not stored. A failing cache never fails the request.
+ * With `private` (the site is private) the shared cache is neither read nor written, so an answer made behind
+ * the password is never stored where it could outlive the password, and a 200 gets PRIVATE_CACHE_CONTROL.
  */
-export async function cached(cache: ResponseCache | null, key: string, build: () => Promise<Response>): Promise<Response> {
+export async function cached(
+  cache: ResponseCache | null,
+  key: string,
+  build: () => Promise<Response>,
+  opts: { private?: boolean } = {},
+): Promise<Response> {
+  if (opts.private) {
+    const res = await build();
+    if (res.status !== 200) return res;
+    const out = new Response(res.body, res);
+    out.headers.set('cache-control', PRIVATE_CACHE_CONTROL);
+    return out;
+  }
   const req = new Request(key, { method: 'GET' });
   if (cache) {
     try {

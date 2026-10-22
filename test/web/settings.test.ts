@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { loadSiteSettings, resetSiteSettingsCache } from '../../web/worker/settings.js';
+import { DEFAULT_SETTINGS } from '../../src/site/settings.js';
+import { createSettingsCache, loadSiteSettings, resetSiteSettingsCache, searchSettingsCache } from '../../web/worker/settings.js';
 
 describe('loadSiteSettings', () => {
   beforeEach(() => resetSiteSettingsCache());
@@ -46,6 +47,24 @@ describe('loadSiteSettings', () => {
     err.mockRestore();
   });
 
+  it('keeps the last known settings when a later query fails (final review I4)', async () => {
+    const err = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const query = vi
+      .fn<() => Promise<{ value: unknown }[]>>()
+      .mockResolvedValueOnce([{ value: true }])
+      .mockRejectedValueOnce(new Error('db down'))
+      .mockResolvedValueOnce([{ value: false }]);
+    expect(await loadSiteSettings('url', query, 0)).toEqual({ public: true });
+    // a public site stays public while the database is down: visitors get no password prompt
+    expect(await loadSiteSettings('url', query, 60_000)).toEqual({ public: true });
+    // the failure is cached briefly, then the query is tried again
+    expect(await loadSiteSettings('url', query, 69_999)).toEqual({ public: true });
+    expect(query).toHaveBeenCalledTimes(2);
+    expect(await loadSiteSettings('url', query, 70_000)).toEqual({ public: false });
+    expect(query).toHaveBeenCalledTimes(3);
+    err.mockRestore();
+  });
+
   it('shares one in-flight query between concurrent cold requests', async () => {
     let release!: (rows: { value: unknown }[]) => void;
     const query = vi.fn(() => new Promise<{ value: unknown }[]>((r) => (release = r)));
@@ -54,5 +73,34 @@ describe('loadSiteSettings', () => {
     release([{ value: true }]);
     expect(await Promise.all([a, b])).toEqual([{ public: true }, { public: true }]);
     expect(query).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('createSettingsCache (search thresholds per isolate, T11)', () => {
+  const custom = { ...DEFAULT_SETTINGS, thresholds: { ...DEFAULT_SETTINGS.thresholds, cheaperPct: 7 } };
+
+  it('loads once per 60 seconds and shares an in-flight load', async () => {
+    const cache = createSettingsCache();
+    const load = vi.fn(async () => custom);
+    expect(await Promise.all([cache.get(load, 0), cache.get(load, 0)])).toEqual([custom, custom]);
+    expect(await cache.get(load, 59_999)).toBe(custom);
+    expect(load).toHaveBeenCalledTimes(1);
+    await cache.get(load, 60_000);
+    expect(load).toHaveBeenCalledTimes(2);
+  });
+
+  it('does not keep a failed load', async () => {
+    const cache = createSettingsCache();
+    const load = vi.fn<() => Promise<typeof custom>>().mockRejectedValueOnce(new Error('db down')).mockResolvedValueOnce(custom);
+    await expect(cache.get(load, 0)).rejects.toThrow('db down');
+    expect(await cache.get(load, 1)).toBe(custom);
+  });
+
+  it('is emptied by resetSiteSettingsCache (admin saved new settings)', async () => {
+    const load = vi.fn(async () => custom);
+    await searchSettingsCache.get(load, 0);
+    resetSiteSettingsCache();
+    await searchSettingsCache.get(load, 1);
+    expect(load).toHaveBeenCalledTimes(2);
   });
 });

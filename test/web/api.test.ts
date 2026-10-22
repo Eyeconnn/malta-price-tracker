@@ -5,6 +5,7 @@ import { type ApiDeps, handleApi, searchPattern } from '../../web/worker/api.js'
 import type { ResponseCache } from '../../web/worker/cache.js';
 import type { Card, Data, OtherShop, ProductDetail } from '../../web/worker/data.js';
 import type { Bindings } from '../../web/worker/index.js';
+import { createSettingsCache } from '../../web/worker/settings.js';
 
 const env = { DATABASE_URL: 'postgres://ro@example/db' } as Bindings;
 
@@ -233,6 +234,17 @@ describe('GET /api/search', () => {
     const cheaper = Object.fromEntries(body.results[0].items.map((i) => [i.id, i.cheaper?.id ?? null]));
     expect(cheaper).toEqual({ 1: 2, 2: null, 3: null, 4: null, 5: null, 6: null, 7: null });
     expect(body.results[0].items.find((i) => i.id === 1)!.cheaper).toEqual({ id: 2, shop: 'B', shopSlug: 'b', priceCents: 9700 });
+  });
+
+  it('reads the thresholds through the per-isolate settings cache, not once per call (T11)', async () => {
+    const data = fakeData();
+    const deps: ApiDeps = { data: () => data, cache: () => null, searchSettings: createSettingsCache() };
+    for (const q of ['ipad', 'iphone']) {
+      const req = new Request('https://guide.example/api/search?q=' + q);
+      expect((await handleApi(req, env, new URL(req.url), deps)).status).toBe(200);
+    }
+    expect(data.search).toHaveBeenCalledTimes(2);
+    expect(data.settings).toHaveBeenCalledTimes(1);
   });
 
   it('is never cached', async () => {
@@ -540,6 +552,28 @@ describe('routing and caching', () => {
       expect(res.status, path).toBe(200);
       expect(res.headers.get('cache-control'), path).toBe('public, max-age=600');
     }
+  });
+
+  it('while the site is private: private, max-age=600 and never the shared cache (M1)', async () => {
+    const cache = memoryCache();
+    const data = fakeData();
+    const deps: ApiDeps = { data: () => data, cache: () => cache };
+    const call = (path: string, access: { public: boolean }) => {
+      const req = new Request('https://guide.example' + path);
+      return handleApi(req, env, new URL(req.url), deps, access);
+    };
+    // a public answer already in the cache is not served to a private request, and nothing private is stored
+    await call('/api/shops', { public: true });
+    expect(cache.store.size).toBe(1);
+    const res = await call('/api/shops', { public: false });
+    expect(res.status).toBe(200);
+    expect(res.headers.get('cache-control')).toBe('private, max-age=600');
+    expect(data.shops).toHaveBeenCalledTimes(2);
+    const head = await call('/api/categories', { public: false });
+    expect(head.headers.get('cache-control')).toBe('private, max-age=600');
+    expect(cache.store.size).toBe(1);
+    // public stays as it was
+    expect((await call('/api/shops', { public: true })).headers.get('cache-control')).toBe('public, max-age=600');
   });
 
   it('serves a repeat from the cache without touching data, keyed on validated params only', async () => {
