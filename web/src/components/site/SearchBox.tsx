@@ -14,10 +14,11 @@ export const SEARCH_DEBOUNCE_MS = 250;
 
 const length = (s: string) => Array.from(s).length;
 
-/** The path of the search page for a query. */
-export function searchPath(q: string): string {
+/** The path of the search page for a query, optionally limited to one shop (its slug). */
+export function searchPath(q: string, shop: string | null = null): string {
   const query = q.trim();
-  return query ? `/search?${new URLSearchParams({ q: query })}` : '/search';
+  if (!query) return shop ? `/search?${new URLSearchParams({ shop })}` : '/search';
+  return `/search?${new URLSearchParams(shop ? { q: query, shop } : { q: query })}`;
 }
 
 /**
@@ -73,11 +74,13 @@ export type SearchBoxProps = {
   onChange: (value: string) => void;
   /** Enter or the Check button; gets the trimmed text */
   onSubmit: (value: string) => void;
+  /** replaces "Search a product" (the label and the placeholder), e.g. for a search inside one shop */
+  placeholder?: string;
   className?: string;
 };
 
 /** The big search field with its Check button. */
-export function SearchBox({ value, onChange, onSubmit, className }: SearchBoxProps) {
+export function SearchBox({ value, onChange, onSubmit, placeholder = 'Search a product', className }: SearchBoxProps) {
   const id = useId();
   return (
     <form
@@ -89,7 +92,7 @@ export function SearchBox({ value, onChange, onSubmit, className }: SearchBoxPro
       className={cn('glass flex items-center gap-2 rounded-full p-1.5 pl-4 focus-within:ring-[3px] focus-within:ring-ring/50', className)}
     >
       <label htmlFor={id} className="sr-only">
-        Search a product
+        {placeholder}
       </label>
       <Search aria-hidden="true" className="size-5 flex-none text-muted-foreground" />
       <input
@@ -99,7 +102,7 @@ export function SearchBox({ value, onChange, onSubmit, className }: SearchBoxPro
         maxLength={SEARCH_MAX}
         autoComplete="off"
         enterKeyHint="search"
-        placeholder="Search a product"
+        placeholder={placeholder}
         onChange={(e) => onChange(e.target.value)}
         className="min-h-11 min-w-0 flex-1 bg-transparent text-base outline-none placeholder:text-muted-foreground [&::-webkit-search-cancel-button]:hidden"
       />
@@ -154,18 +157,18 @@ function LiveRow({ group }: { group: GroupResult }) {
 }
 
 /**
- * Home's search: results appear under the box as you type (after the debounce); Enter opens the
- * search page with the query.
+ * Search with results under the box as you type (after the debounce); Enter opens the search page
+ * with the query. With `shop` (a slug) the API and the search page are limited to that shop.
  */
-export function LiveSearch({ className }: { className?: string }) {
+export function LiveSearch({ shop = null, placeholder, className }: { shop?: string | null; placeholder?: string; className?: string }) {
   const [value, setValue] = useState('');
   const navigate = useNavigate();
-  const { term, state } = useSearch(value);
+  const { term, state } = useSearch(value, shop);
   const headingId = useId();
 
   return (
     <div className={cn('relative mx-auto w-full max-w-xl', className)}>
-      <SearchBox value={value} onChange={setValue} onSubmit={(q) => q && navigate(searchPath(q))} />
+      <SearchBox value={value} onChange={setValue} onSubmit={(q) => q && navigate(searchPath(q, shop))} placeholder={placeholder} />
       <SearchStatus state={state} term={term} />
       {state.status !== 'idle' && (
         <section aria-labelledby={headingId} className="glass mt-2 p-2 text-left">
@@ -190,7 +193,7 @@ export function LiveSearch({ className }: { className?: string }) {
                 ))}
               </ul>
               <Link
-                to={searchPath(term ?? '')}
+                to={searchPath(term ?? '', shop)}
                 className="flex min-h-11 items-center rounded-xl px-3 text-sm font-semibold text-brand outline-none hover:underline focus-visible:ring-[3px] focus-visible:ring-ring/50"
               >
                 See all results
