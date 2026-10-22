@@ -449,7 +449,8 @@ export function createData(db: SqlRunner, opts: DataOptions = {}): Data {
           from products p
           left join lateral (
             select po.price_cents, po.in_stock from price_observations po
-            where po.product_id = p.id order by po.observed_at desc limit 1
+            where po.product_id = p.id and (po.review_flag is null or po.review_flag <> 'jump_70pct')
+            order by po.observed_at desc limit 1
           ) lo on true
           where p.shop_id = $1 and coalesce(p.parent_external_id, p.external_id) = $2
           order by p.id

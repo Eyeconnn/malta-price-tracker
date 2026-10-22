@@ -326,6 +326,15 @@ describe('data.ts flagged readings (Ruling R55)', () => {
     const prices = d?.history.filter((h) => h.productId === 10).map((h) => h.price);
     expect(prices).toEqual([80000, 70000, 71000]);
   });
+
+  it('a variant shows its latest unflagged price, not a flagged jump', async () => {
+    await pg.exec(`
+      insert into price_observations (product_id, observed_at, price_cents, was_price_cents, in_stock, bf_marked, review_flag) values
+        (11, now() - interval '1 hour', 990000, null, true, null, 'jump_70pct');
+    `);
+    const d = await data.product(1);
+    expect(d?.variants.find((v) => v.id === 11)?.priceCents).toBe(95000);
+  });
 });
 
 describe('data.ts shop stats count judged products like the rating (Ruling R53)', () => {
