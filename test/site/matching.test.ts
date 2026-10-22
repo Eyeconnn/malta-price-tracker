@@ -203,3 +203,27 @@ describe('assignMatches', () => {
     expect(m.size).toBeGreaterThan(items.length * 0.95);
   });
 });
+
+describe('assignMatches brand check (final review I2)', () => {
+  const title = 'Laptop 15.6 Intel Core i5-1235U 16GB 512GB SSD';
+
+  it('does not title-match two rows whose brands differ', () => {
+    const m = assignMatches([item(1, 10, title, { brand: 'Acer' }), item(2, 20, title, { brand: 'Lenovo' })]);
+    expect(m.size).toBe(0);
+  });
+
+  it('compares brands lowercased and trimmed, and lets a row without a brand match', () => {
+    const same = assignMatches([item(1, 10, title, { brand: 'Acer' }), item(2, 20, title, { brand: ' ACER ' })]);
+    expect(same.get(1)?.method).toBe('title');
+    expect(same.get(2)?.key).toBe(same.get(1)?.key);
+    const unknown = assignMatches([item(1, 10, title, { brand: 'Acer' }), item(2, 20, title, { brand: null })]);
+    expect(unknown.get(2)?.key).toBe(unknown.get(1)?.key);
+  });
+
+  it('keeps an Acer and a Lenovo apart even when both look like a brandless first row', () => {
+    const m = assignMatches([item(1, 10, title), item(2, 20, title, { brand: 'Acer' }), item(3, 30, title, { brand: 'Lenovo' })]);
+    const k2 = m.get(2)?.key;
+    const k3 = m.get(3)?.key;
+    expect(k2 === undefined || k3 === undefined || k2 !== k3).toBe(true);
+  });
+});

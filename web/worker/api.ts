@@ -55,17 +55,18 @@ function slugParam(url: URL, name: string): string | null | undefined {
 }
 
 /**
- * Hits grouped in data order (best group first), cheapest first inside a group (no price last).
+ * Hits grouped in data order (best group first), cheapest first inside a group (no price last). A group is
+ * titled after its best hit (groupTitle), not after its cheapest member.
  * Each row gets `cheaper`: cheaperAt over the group's rows at other shops (Ruling R36), so a row
  * that is only "possibly the same", a title-only target and an out-of-stock target never count.
  */
 export function groupResults(hits: SearchHit[], cheaperPct: number): GroupResult[] {
-  const groups = new Map<string, { canonicalId: number | null; items: Omit<GroupItem, 'cheaper'>[] }>();
-  for (const { groupKey, canonicalId, ...item } of hits) {
+  const groups = new Map<string, { canonicalId: number | null; title: string; items: Omit<GroupItem, 'cheaper'>[] }>();
+  for (const { groupKey, groupTitle, canonicalId, ...item } of hits) {
     let g = groups.get(groupKey);
     if (!g) {
       if (groups.size >= SEARCH_GROUPS) continue;
-      g = { canonicalId, items: [] };
+      g = { canonicalId, title: groupTitle, items: [] };
       groups.set(groupKey, g);
     }
     g.items.push(item);
@@ -77,7 +78,7 @@ export function groupResults(hits: SearchHit[], cheaperPct: number): GroupResult
       const target = item.possible ? null : cheaperAt(item, sorted.filter((o) => o.shopSlug !== item.shopSlug), cheaperPct);
       return { ...item, cheaper: target && { id: target.id, shop: target.shop, shopSlug: target.shopSlug, priceCents: target.priceCents as number } };
     });
-    return { canonicalId: g.canonicalId, title: items[0].title, items };
+    return { canonicalId: g.canonicalId, title: g.title, items };
   });
 }
 

@@ -115,14 +115,24 @@ export function SearchBox({ value, onChange, onSubmit, placeholder = 'Search a p
 
 const LIVE_MAX = 5;
 
-/** The cheapest row of a group with a price (rows come cheapest first), else the first row. */
-function cheapest(g: GroupResult) {
-  return g.items.find((i) => i.priceCents !== null) ?? g.items[0]!;
+/**
+ * The rows a Simple live result may show: never a "possibly the same" (title-only) row, which only the full
+ * search page shows with its label (spec 9a). The API groups trusted rows only; this keeps the rule if it ever does not.
+ */
+function exactItems(g: GroupResult) {
+  return g.items.filter((i) => !i.possible);
+}
+
+/** The cheapest row with a price (rows come cheapest first), else the first row. */
+function cheapest(items: GroupResult['items']) {
+  return items.find((i) => i.priceCents !== null) ?? items[0]!;
 }
 
 function LiveRow({ group }: { group: GroupResult }) {
-  const best = cheapest(group);
-  const shops = new Set(group.items.map((i) => i.shopSlug)).size;
+  const items = exactItems(group);
+  if (items.length === 0) return null;
+  const best = cheapest(items);
+  const shops = new Set(items.map((i) => i.shopSlug)).size;
   return (
     <li>
       <Link

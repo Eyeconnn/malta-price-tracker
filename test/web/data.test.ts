@@ -161,9 +161,14 @@ describe('data.ts on PGlite', () => {
     const g100 = hits.filter((h) => h.groupKey === 'c100');
     expect(g100.map((h) => h.id).sort()).toEqual([1, 2]);
     expect(g100.every((h) => !h.possible)).toBe(true);
-    const g200 = hits.filter((h) => h.groupKey === 'c200');
-    expect(g200.map((h) => h.id).sort()).toEqual([10, 11]);
-    expect(g200.every((h) => h.possible)).toBe(true);
+    // title-only matches (not confirmed) are never grouped: each is its own result, and not "possibly the same"
+    expect(hits.filter((h) => h.groupKey === 'c200')).toEqual([]);
+    expect(hits.filter((h) => h.id === 10 || h.id === 11).map((h) => [h.id, h.groupKey, h.possible])).toEqual(
+      expect.arrayContaining([
+        [10, 's10', false],
+        [11, 's11', false],
+      ]),
+    );
   });
 
   it('search with a shop filter only returns that shop', async () => {
@@ -327,5 +332,50 @@ describe('data.ts shop stats count judged products like the rating (Ruling R53)'
     const after = (await data.shop('beta'))!.stats;
     expect(after.judged).toBe(before.judged + 1);
     expect(after.realDealPct).toBe(Math.round((1000 * after.good) / after.judged) / 10);
+  });
+});
+
+describe('data.ts search groups only trusted matches (final review I1)', () => {
+  beforeAll(async () => {
+    await pg.exec(`
+      insert into site_products (id, shop_id, group_key, title, price_cents, in_stock, verdict, canonical_id, match_method, match_confirmed, updated_at) values
+        -- the live case: a Lenovo title-matched (unconfirmed) with a cheaper Acer at another shop
+        (70, 1, 'L70', 'Lenovo IdeaPad Slim 3 15IAN8', 39900, true, 'none', 700, 'title', false, now()),
+        (71, 2, 'A71', 'Acer Aspire Lite 15 AL15', 29900, true, 'none', 700, 'title', false, now()),
+        -- a confirmed title group: the confirmed rows group, the unconfirmed one does not join
+        (72, 1, 'L72', 'Lenovo Tab M11 128GB', 19900, true, 'none', 701, 'title', true, now()),
+        (73, 2, 'L73', 'Lenovo Tab M11 128 GB tablet', 18900, true, 'none', 701, 'title', true, now()),
+        (74, 5, 'L74', 'Protective sleeve 11 inch', 1500, true, 'none', 701, 'title', false, now()),
+        -- order: the best hit's group first, whatever its key
+        (75, 1, 'Q75', 'Quokka Phone', 50000, true, 'none', null, null, false, now()),
+        (76, 2, 'Q76', 'Quokka Phone Case', 1000, true, 'none', 702, 'gtin', false, now()),
+        (77, 5, 'Q77', 'QPC-1 protective cover', 900, true, 'none', 702, 'gtin', false, now());
+    `);
+  });
+
+  it('never pulls a title-only match into a hit group (Lenovo / Acer)', async () => {
+    const hits = await data.search({ text: 'lenovo ideapad slim 3', like: '%lenovo ideapad slim 3%' }, null);
+    const own = hits.filter((h) => h.groupKey === 's70');
+    expect(own.map((h) => h.id)).toEqual([70]);
+    expect(own[0].groupTitle).toBe('Lenovo IdeaPad Slim 3 15IAN8');
+    expect(hits.map((h) => h.id)).not.toContain(71);
+  });
+
+  it('expands a confirmed group only to its confirmed members', async () => {
+    const hits = await data.search({ text: 'lenovo tab m11', like: '%lenovo tab m11%' }, null);
+    const g = hits.filter((h) => h.groupKey === 'c701');
+    expect(g.map((h) => h.id).sort()).toEqual([72, 73]);
+    expect(g.every((h) => !h.possible)).toBe(true);
+    expect(hits.map((h) => h.id)).not.toContain(74);
+  });
+
+  it('orders groups by their best hit and titles them after it', async () => {
+    const hits = await data.search({ text: 'quokka phone', like: '%quokka phone%' }, null);
+    const keys = [...new Set(hits.map((h) => h.groupKey))];
+    expect(keys).toEqual(['s75', 'c702']);
+    const g = hits.filter((h) => h.groupKey === 'c702');
+    // the cheaper member is listed, but the group is named after the row that matched the search
+    expect(g.map((h) => h.id)).toEqual([77, 76]);
+    expect(new Set(g.map((h) => h.groupTitle))).toEqual(new Set(['Quokka Phone Case']));
   });
 });

@@ -187,19 +187,21 @@ describe('GET /api/search', () => {
   });
 
   it('groups hits by canonical id in data order, cheapest first inside a group, max 40 groups', async () => {
+    const c5 = { groupKey: 'c5', groupTitle: 'Product 1', canonicalId: 5, inStock: true };
     const hits = [
-      { ...card(1, { priceCents: 900 }), groupKey: 'c5', canonicalId: 5, possible: false, inStock: true },
-      { ...card(2, { priceCents: 700 }), groupKey: 'c5', canonicalId: 5, possible: false, inStock: true },
-      { ...card(3, { priceCents: null }), groupKey: 's3', canonicalId: null, possible: false, inStock: true },
-      { ...card(4, { priceCents: 800 }), groupKey: 'c5', canonicalId: 5, possible: true, inStock: true },
-      ...Array.from({ length: 45 }, (_, i) => ({ ...card(100 + i), groupKey: `s${100 + i}`, canonicalId: null, possible: false, inStock: true })),
+      { ...card(1, { priceCents: 900 }), ...c5, possible: false },
+      { ...card(2, { priceCents: 700 }), ...c5, possible: false },
+      { ...card(3, { priceCents: null }), groupKey: 's3', groupTitle: 'Product 3', canonicalId: null, possible: false, inStock: true },
+      { ...card(4, { priceCents: 800 }), ...c5, possible: true },
+      ...Array.from({ length: 45 }, (_, i) => ({ ...card(100 + i), groupKey: `s${100 + i}`, groupTitle: `Product ${100 + i}`, canonicalId: null, possible: false, inStock: true })),
     ];
     const w = setup(fakeData({ search: vi.fn(async () => hits) }));
     const body = (await (await w.fetch('/api/search?q=lenovo')).json()) as { results: { canonicalId: number | null; title: string; items: Card[] }[] };
     expect(body.results).toHaveLength(40);
     expect(body.results[0].canonicalId).toBe(5);
     expect(body.results[0].items.map((c) => c.id)).toEqual([2, 4, 1]);
-    expect(body.results[0].title).toBe('Product 2');
+    // named after the best hit (the data's groupTitle), not the cheapest member
+    expect(body.results[0].title).toBe('Product 1');
     expect(body.results[1]).toMatchObject({ canonicalId: null, items: [{ id: 3, priceCents: null }] });
     expect(body.results[0].items[1]).toMatchObject({ possible: true });
     expect(body.results[0].items[0]).not.toHaveProperty('groupKey');
@@ -209,6 +211,7 @@ describe('GET /api/search', () => {
     const hit = (id: number, shopSlug: string, priceCents: number | null, possible: boolean, inStock: boolean | null = true) => ({
       ...card(id, { shop: shopSlug.toUpperCase(), shopSlug, priceCents }),
       groupKey: 'c5',
+      groupTitle: 'Product 1',
       canonicalId: 5,
       possible,
       inStock,

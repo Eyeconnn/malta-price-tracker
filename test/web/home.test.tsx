@@ -335,6 +335,32 @@ describe('home search box', () => {
     expect(within(goodRow).getByText('Black Friday')).toBeTruthy();
   });
 
+  it('live results never show or count a "possibly the same" row (final review I1)', async () => {
+    mockApi({
+      '/api/home': home(),
+      '/api/search': () =>
+        json({
+          results: [
+            {
+              canonicalId: 9,
+              title: 'Lenovo IdeaPad Slim 3',
+              items: [
+                { ...card(62, { title: 'Acer Aspire Lite 15', priceCents: 29900, shop: 'Beta', shopSlug: 'beta' }), possible: true, inStock: true, cheaper: null },
+                { ...card(61, { title: 'Lenovo IdeaPad Slim 3', priceCents: 39900, shop: 'Alpha', shopSlug: 'alpha' }), possible: false, inStock: true, cheaper: null },
+              ],
+            },
+          ],
+        }),
+    });
+    renderAt('/');
+    fireEvent.change(screen.getByRole('searchbox', { name: 'Search a product' }), { target: { value: 'lenovo' } });
+    const row = await screen.findByRole('link', { name: /Lenovo IdeaPad Slim 3/ });
+    expect(row.getAttribute('href')).toBe('/p/61');
+    expect(row.textContent).toContain('Alpha');
+    expect(row.textContent).not.toContain('2 shops');
+    expect(row.textContent).toContain('€399.00');
+  });
+
   it('ignores a stale response: the earlier request is aborted and its late answer is dropped', async () => {
     const pending: { q: string; signal: AbortSignal | undefined; resolve: (r: Response) => void }[] = [];
     mockApi({

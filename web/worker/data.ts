@@ -33,8 +33,12 @@ export type HistoryObs = ApiObs & { productId: number };
 
 /** A search query: plain text for word_similarity, and the same text as an escaped ILIKE pattern. */
 export type SearchPattern = { text: string; like: string };
-/** A search hit or a member of a hit's canonical group. groupKey is 'c<canonical_id>' or 's<site_products id>'. */
-export type SearchHit = Card & { groupKey: string; canonicalId: number | null; possible: boolean; inStock: boolean | null };
+/**
+ * A search hit or a member of a hit's trusted group. groupKey is 'c<canonical_id>' for a row matched by GTIN/MPN
+ * or confirmed by the admin, else 's<site_products id>' (the row alone). groupTitle: the title of the group's
+ * best hit, the row that matched the search best.
+ */
+export type SearchHit = Card & { groupKey: string; groupTitle: string; canonicalId: number | null; possible: boolean; inStock: boolean | null };
 /** Where the same product is cheaper (search): an exactly matched, in-stock row at another shop. */
 export type CheaperTarget = { id: number; shop: string; shopSlug: string; priceCents: number };
 export type GroupItem = Card & { possible: boolean; inStock: boolean | null; cheaper: CheaperTarget | null };
@@ -112,7 +116,7 @@ export interface Data {
   settings(): Promise<SiteSettings>;
   /** good lists never include rows without a positive price */
   deals(q: DealsQuery): Promise<{ items: Card[]; total: number }>;
-  /** hits ordered by group relevance (max 40 groups), plus the visible members of each hit's canonical group */
+  /** hits ordered by their group's best hit (max 40 groups), plus the visible trusted members of each trusted hit's group */
   search(p: SearchPattern, shop: string | null): Promise<SearchHit[]>;
   shops(): Promise<ShopSummary[]>;
   shop(slug: string): Promise<{ shop: ShopInfo; rating: ShopRating | null; stats: ShopStats } | null>;
@@ -144,6 +148,9 @@ export function neonRunner(databaseUrl: string): SqlRunner {
 
 /** Visible shop and fresh site_products row (R21, R28); needs aliases sp and s. */
 const VISIBLE = `s.active and not s.site_hidden and sp.updated_at > now() - interval '2 days'`;
+
+/** SQL: the row's match is exact (GTIN/MPN, or confirmed by the admin) and so may group publicly (R30); needs alias sp. */
+const TRUSTED = `(sp.canonical_id is not null and (sp.match_method in ('gtin', 'mpn') or sp.match_confirmed))`;
 
 const CARD_COLUMNS = `sp.id, sp.title, s.name as shop, s.slug as shop_slug, sp.price_cents, sp.was_price_cents, sp.verdict,
   sp.reason, sp.bf_status, sp.category, sp.facts -> 'raisedFrom' as raised_from, sp.facts ->> 'wasRaisedFrom' as was_raised_from`;
@@ -263,44 +270,58 @@ export function createData(db: SqlRunner, opts: DataOptions = {}): Data {
       const [, rows] = await db.transaction([
         { text: `select set_config('pg_trgm.word_similarity_threshold', $1, true)`, params: [WORD_SIMILARITY] },
         {
+          // Only trusted rows group (Ruling R30, final review I1): a title-only match is its own result and never
+          // pulls another shop's row into a hit. Groups follow their best hit's rank, and carry its title.
           text: `with hits as (
-            select sp.id, sp.canonical_id, word_similarity($1, sp.title) as score, sp.title ilike $2 as exact
+            select sp.id, sp.title, sp.canonical_id, ${TRUSTED} as trusted,
+              case when ${TRUSTED} then 'c' || sp.canonical_id else 's' || sp.id end as group_key,
+              row_number() over (
+                order by sp.title ilike $2 desc, word_similarity($1, sp.title) desc, similarity($1, sp.title) desc,
+                  nullif(sp.price_cents, 0) asc nulls last, sp.id
+              ) as hit_rank
             from site_products sp join shops s on s.id = sp.shop_id
             where $1 <% sp.title and ${VISIBLE} and ($3::text is null or s.slug = $3)
-            order by exact desc, score desc, nullif(sp.price_cents, 0) asc nulls last, sp.id
+            order by hit_rank
             limit ${SEARCH_HITS}
           ), grp as (
-            select coalesce('c' || canonical_id, 's' || id) as group_key, max(canonical_id) as canonical_id,
-              max(id) as hit_id, bool_or(exact) as exact, max(score) as score
-            from hits group by 1
-            order by exact desc, score desc, group_key
-            limit ${SEARCH_GROUPS}
+            select distinct on (group_key) group_key, hit_rank, id as hit_id, title as group_title, canonical_id, trusted
+            from hits
+            order by group_key, hit_rank
+          ), top as (
+            select * from grp order by hit_rank limit ${SEARCH_GROUPS}
           ), members as (
-            select g.group_key, g.exact, g.score, sp.id
-            from grp g join site_products sp on sp.canonical_id = g.canonical_id
-            where g.canonical_id is not null
+            select t.group_key, t.hit_rank, t.group_title, sp.id
+            from top t join site_products sp on sp.canonical_id = t.canonical_id
+            where t.trusted and ${TRUSTED}
             union
-            select g.group_key, g.exact, g.score, g.hit_id from grp g where g.canonical_id is null
+            select t.group_key, t.hit_rank, t.group_title, t.hit_id from top t where not t.trusted
           ), ranked as (
-            select m.group_key, m.exact, m.score, ${CARD_COLUMNS}, sp.in_stock, sp.canonical_id, sp.match_method, sp.match_confirmed,
+            select m.group_key, m.hit_rank, m.group_title, ${CARD_COLUMNS}, sp.in_stock, sp.canonical_id, sp.match_method,
+              sp.match_confirmed,
               -- a stored 0 is no price (serialised null): it sorts with the nulls, last
               row_number() over (partition by m.group_key order by nullif(sp.price_cents, 0) asc nulls last, sp.id) as rn
             from members m join site_products sp on sp.id = m.id join shops s on s.id = sp.shop_id
             where ${VISIBLE} and ($3::text is null or s.slug = $3)
           )
           select * from ranked where rn <= ${GROUP_MEMBERS}
-          order by exact desc, score desc, group_key, rn`,
+          order by hit_rank, rn`,
           params: [p.text, p.like, shop],
         },
       ]);
-      // a row of a canonical group is "possibly the same" unless its own match is exact (GTIN/MPN or confirmed)
-      return rows.map((r) => ({
-        ...toCard(r),
-        groupKey: String(r.group_key),
-        canonicalId: numOrNull(r.canonical_id),
-        possible: r.canonical_id !== null && !trustedMatch(strOrNull(r.match_method), Boolean(r.match_confirmed)),
-        inStock: boolOrNull(r.in_stock),
-      }));
+      // groups hold trusted rows only, so no row of a search group is "possibly the same"; an untrusted row is
+      // alone in its group (its canonical id is not shown, so nothing links it to the title-only match)
+      return rows.map((r) => {
+        const groupKey = String(r.group_key);
+        const trusted = trustedMatch(strOrNull(r.match_method), Boolean(r.match_confirmed));
+        return {
+          ...toCard(r),
+          groupKey,
+          groupTitle: String(r.group_title),
+          canonicalId: groupKey.startsWith('c') ? numOrNull(r.canonical_id) : null,
+          possible: groupKey.startsWith('c') && !trusted,
+          inStock: boolOrNull(r.in_stock),
+        };
+      });
     },
 
     async shops() {

@@ -2,7 +2,8 @@
 // The title rule is ported from dashboard/src/page.ts (tokens and sameProduct).
 import { cleanGtin } from '../util/normalise.js';
 
-export type MatchInput = { id: number; shopId: number; gtin: string | null; mpn: string | null; title: string };
+/** brand: the shop's brand field when it has one; two rows with different brands are never title-matched */
+export type MatchInput = { id: number; shopId: number; gtin: string | null; mpn: string | null; title: string; brand?: string | null };
 export type MatchMethod = 'gtin' | 'mpn' | 'title';
 export type Match = { key: string; method: MatchMethod };
 
@@ -110,6 +111,12 @@ function matchByMpn(items: MatchInput[], out: Map<number, Match>): void {
   }
 }
 
+/** The brand compared case-insensitively, or null when the row has none. */
+function brandKey(it: MatchInput): string | null {
+  const b = (it.brand ?? '').trim().toLowerCase();
+  return b === '' ? null : b;
+}
+
 /** A numeric token present in more than this share of items (and at least TITLE_MIN_COMMON items) is too common to probe with. */
 const TITLE_COMMON_SHARE = 0.02;
 const TITLE_MIN_COMMON = 50;
@@ -123,10 +130,11 @@ const TITLE_MAX_INDEX_KEYS = 8;
 /**
  * Greedy grouping against each group's first item. Numeric tokens shared by many items (storage sizes,
  * generation numbers) are not used to find candidates; an item is probed only through its rarest numeric tokens,
- * so the cost stays near linear. Items with only common numeric tokens are not title-matched.
+ * so the cost stays near linear. Items with only common numeric tokens are not title-matched. An item with a brand
+ * never joins a group that already holds a different brand (an Acer and a Lenovo with the same specs differ).
  */
 function matchByTitle(items: MatchInput[], out: Map<number, Match>): void {
-  type Group = { first: MatchInput; tokens: string[]; members: MatchInput[] };
+  type Group = { first: MatchInput; tokens: string[]; members: MatchInput[]; brand: string | null };
 
   const tokenised = items.map((it) => titleTokens(it.title));
   const freq = new Map<string, number>();
@@ -140,6 +148,7 @@ function matchByTitle(items: MatchInput[], out: Map<number, Match>): void {
 
   items.forEach((it, i) => {
     const tokens = tokenised[i];
+    const brand = brandKey(it);
     const keys = [...new Set(tokens.filter(hasDigit))]
       .filter((n) => freq.get(n)! <= commonAbove)
       .sort((a, b) => freq.get(a)! - freq.get(b)!);
@@ -152,7 +161,7 @@ function matchByTitle(items: MatchInput[], out: Map<number, Match>): void {
       for (const g of byNumber.get(n) ?? []) {
         if (seen.has(g)) continue;
         seen.add(g);
-        if (sameTitle(g.tokens, tokens)) {
+        if ((brand === null || g.brand === null || g.brand === brand) && sameTitle(g.tokens, tokens)) {
           home = g;
           break probe;
         }
@@ -161,9 +170,10 @@ function matchByTitle(items: MatchInput[], out: Map<number, Match>): void {
     }
     if (home) {
       home.members.push(it);
+      home.brand ??= brand;
       return;
     }
-    const g: Group = { first: it, tokens, members: [it] };
+    const g: Group = { first: it, tokens, members: [it], brand };
     groups.push(g);
     for (const n of keys.slice(0, TITLE_MAX_INDEX_KEYS)) {
       const list = byNumber.get(n);
