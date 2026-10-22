@@ -11,7 +11,11 @@ Search results look untidy. Shops write the same product in different ways ("LEN
 
 ## Decisions taken
 
-- **Sources: free data only.** We use what the shops already publish in the pages and feeds we already download, plus agreement between shops that sell the same barcode. No AI rewriting (it costs money; the owner was asked and stated no preference, so the free option is the default). No outside catalogue for now; Open Icecat (free account, barcode lookup, strong for electronics) is a possible later add-on and needs the owner to sign up.
+- **Sources: what the shops publish, cleaned by Claude Code on the owner's PC (owner decision, 22 Oct).** We use only data from pages and feeds we already download. Clean names and attributes are produced by a local script that runs Claude Code in scripting mode (`claude -p`) on the owner's Windows PC, using the owner's Claude plan, not a pay-per-use API key. No outside catalogue for now; Open Icecat stays a possible later add-on.
+- **Normalise once.** Each product group is normalised once and stored with the time it was done and a fingerprint of the shop's title. It is queued again only if it was never done or the shop's title changed. New products are picked up by a scheduled run.
+- **Batches by category (owner decision).** Every batch holds products from one site category only, and each category has a fixed attribute list (keys and units) given to Claude in the instructions, so attributes come out the same across all batches of a category and can drive that category's filters later.
+- **Pilot first, with different models.** Small pilot runs (about 500 groups, spread over categories and shops) are made with different models so the owner can compare quality and usage before the full run. The owner starts runs by hand until a schedule is agreed.
+- **Shop text is data.** Titles go to Claude as data inside the batch; the instructions say to ignore any text in them addressed to an AI. Claude runs with all tools switched off, so a title cannot make it do anything.
 - **No new sites are crawled and no robots or rate-limit rules change.** Almost all attribute data is already in the payloads we download today.
 - **Raw facts are stored at scrape time; normalising happens at site-build time.** The scraper keeps what the shop said. The nightly site-build turns it into clean names and normalised attributes. Rules can then improve and be re-run over old data without re-scraping.
 - **The shop's own title stays visible** (product page and Advanced views), so a cleaned name never hides what the shop actually wrote.
@@ -54,7 +58,17 @@ Database today: 936 MB of 5 GB, products table 410 MB for 392k rows.
 
 ## Part 2: clean names
 
-Built nightly per site_products group into a new `site_products.display_name` column (the existing `title` stays the shop's text):
+### The normaliser script (Claude Code, local)
+
+- `pnpm normalise-names` (TypeScript, in this repo, so it reuses the database code and the title-token code of `src/site/matching.ts`). Options: `--model` (for example haiku, sonnet, opus), `--category <slug>` or all, `--batch-size` (default 50), `--parallel` (default 2), `--max-batches` (the cap per run), `--pilot` (a spread sample across categories and shops), `--dry-run` (no database writes; writes the results file only).
+- Each batch: products of one category, with shop title, variant titles, brand, shop category path, GTIN and MPN, and any stored raw attributes. Claude is called with `claude -p --model <m> --output-format json --json-schema <schema>`, tools off, no MCP servers, no hooks or user settings, no session saved, and the category's instructions and attribute list. It returns per product: clean name, variant label, attributes in the category's keys.
+- Every answer is checked (Part 2 safety rule, schema, attribute keys and units). Failed items are stored as rejected with the reason and keep the shop title.
+- Results go to a new table `product_names` (key: shop_id, group_key) with display name, attributes, model, title fingerprint, status, normalised_at and run id. A `name_runs` table records each run: model, categories, batches, items, accepted, rejected, input and output tokens and the usage figure Claude Code reports.
+- Each run writes a report file (before and after names, attributes, rejects, usage per batch and per 100 products) for the owner to judge.
+- The rules below (variant parts, shop noise, casing, units, agreement, safety) go into the instructions Claude follows, and the safety rule is also enforced in code.
+- After the pilot, a Windows scheduled task runs it nightly for new or changed products with a cap.
+
+Results are copied into a new `site_products.display_name` column at site-build (the existing `title` stays the shop's text). The rules:
 
 1. **Remove variant parts.** Option values that belong to variants (colour, size, storage) are removed from the end or brackets of the title, so the variants of one product share one name; the variant values are shown as chips.
 2. **Remove shop noise.** Shop names, "free delivery", "new", "sale", "Black Friday", stock notes, repeated brand, SKU codes in brackets, trailing separators.
@@ -72,7 +86,7 @@ Built nightly per site_products group into a new `site_products.display_name` co
 
 ## Not in scope
 
-- AI rewriting or paid catalogues; Open Icecat (possible later add-on); new crawls of product pages for the HTML shops; the attribute filter UI itself.
+- Pay-per-use API keys or paid catalogues; Open Icecat (possible later add-on); new crawls of product pages for the HTML shops; the attribute filter UI itself.
 
 ## Testing
 
@@ -83,6 +97,7 @@ Built nightly per site_products group into a new `site_products.display_name` co
 
 ## Rollout
 
+0. Tonight: the normaliser script with `--pilot` and `--dry-run`, run by hand, so the owner can try a small batch per model and judge names and usage.
 1. Scraper capture (Shopify and Woo first, then Magento and JSON-LD) and migration 007; the next nightly run fills `products.attrs`.
 2. Site-build normalising, `display_name` and `site_products.attrs`.
 3. Search and list presentation.
