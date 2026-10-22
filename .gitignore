@@ -12,3 +12,6 @@ out/
 
 # brainstorming mockups
 .superpowers/
+
+# git worktrees for feature work
+.worktrees/
