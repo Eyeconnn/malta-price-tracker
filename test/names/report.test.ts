@@ -5,7 +5,7 @@ import { afterAll, describe, expect, it } from 'vitest';
 import { renderCsv, writeReport, type ReportRow, type RunSummary } from '../../src/names/report.js';
 
 const summary: RunSummary = {
-  runId: '12', model: 'haiku', categories: ['laptops', 'toys'], pilot: true, dryRun: true,
+  runId: '12', model: 'haiku', effort: 'low', categories: ['laptops', 'toys'], pilot: true, dryRun: true,
   batches: 2, groups: 3, accepted: 2, rejected: 1, failedBatches: 0,
   inputTokens: 1000, outputTokens: 500, cacheReadTokens: 100, cacheWriteTokens: 50, costUsd: 0.0123, wallSeconds: 42.5,
 };
@@ -34,6 +34,7 @@ describe('writeReport', () => {
     expect(html).not.toContain('<script>alert');
     expect(html).not.toMatch(/<link|<script|src="http/);
     expect(html).toContain('haiku');
+    expect(html).toContain('<dt>Effort</dt><dd>low</dd>');
     expect(html).toContain('0.0123');
     expect(html).toContain('0.41'); // cost per 100 groups
     expect(html).toContain('lost tokens: 42115');

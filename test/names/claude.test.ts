@@ -1,6 +1,6 @@
 import { readFile } from 'node:fs/promises';
 import { describe, expect, it } from 'vitest';
-import { callClaude, childEnv, claudeArgs, parseClaudeOutput, type Runner } from '../../src/names/claude.js';
+import { callClaude, childEnv, claudeArgs, EFFORT_LEVELS, parseClaudeOutput, type Runner } from '../../src/names/claude.js';
 
 const opts = {
   model: 'haiku',
@@ -34,6 +34,17 @@ describe('claudeArgs', () => {
     expect(valueAfter(args, '--setting-sources')).toBe('');
     expect(args).toContain('--no-session-persistence');
     expect(args).toContain('--disable-slash-commands');
+  });
+
+  it('passes no --effort by default (CLI default) and passes it through when given', () => {
+    expect(args).not.toContain('--effort');
+    const withEffort = claudeArgs({ ...opts, effort: 'low' });
+    expect(valueAfter(withEffort, '--effort')).toBe('low');
+  });
+
+  it('accepts only the effort levels the CLI lists', () => {
+    expect(EFFORT_LEVELS).toEqual(['low', 'medium', 'high', 'xhigh', 'max']);
+    expect(() => claudeArgs({ ...opts, effort: 'turbo' as never })).toThrow(/effort/);
   });
 
   it('never uses --bare and passes no prompt argument (the batch goes on stdin)', () => {

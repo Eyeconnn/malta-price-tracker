@@ -68,7 +68,7 @@ describe.skipIf(!process.env.SITE_BUILD_TEST_DB)('name normaliser on PGlite', ()
   });
 
   it('records a run, upserts product_names and then skips unchanged groups', async () => {
-    const runId = await startRun(sql, { model: 'haiku', categories: ['laptops'], pilot: true });
+    const runId = await startRun(sql, { model: 'haiku', categories: ['laptops'], pilot: true, effort: 'low' });
     const groups = await loadGroups(sql, { categories: ['laptops'] });
     const g = groups[0];
     await saveResults(sql, runId, 'haiku', [
@@ -85,6 +85,7 @@ describe.skipIf(!process.env.SITE_BUILD_TEST_DB)('name normaliser on PGlite', ()
     expect(Number(row.run_id)).toBe(runId); // bigint comes back as a string
     const [run] = await sql`select * from name_runs where id = ${runId}`;
     expect(run.accepted).toBe(1);
+    expect(run.effort).toBe('low');
     expect(run.finished_at).not.toBeNull();
     expect(Number(run.reported_cost_usd)).toBeCloseTo(0.001);
 

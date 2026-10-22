@@ -26,10 +26,13 @@ export type RunTotals = {
   reportPath: string | null;
 };
 
-export async function startRun(sql: postgres.Sql, r: { model: string; categories: string[]; pilot: boolean }): Promise<number> {
+export async function startRun(
+  sql: postgres.Sql,
+  r: { model: string; categories: string[]; pilot: boolean; effort?: string | null },
+): Promise<number> {
   const [row] = await sql<{ id: string }[]>`
-    insert into name_runs (model, categories, pilot, dry_run)
-    values (${r.model}, ${r.categories}::text[], ${r.pilot}, false)
+    insert into name_runs (model, effort, categories, pilot, dry_run)
+    values (${r.model}, ${r.effort ?? null}, ${r.categories}::text[], ${r.pilot}, false)
     returning id`;
   return Number(row.id);
 }

@@ -3,8 +3,14 @@
 // no slash commands or skills, no session saved, and the child runs in an empty temp folder.
 import { spawn } from 'node:child_process';
 
+/** The levels `claude --help` lists for --effort (v2.1.306). */
+export const EFFORT_LEVELS = ['low', 'medium', 'high', 'xhigh', 'max'] as const;
+export type Effort = (typeof EFFORT_LEVELS)[number];
+
 export type ClaudeOptions = {
   model: string;
+  /** passed as --effort when set; otherwise the CLI default */
+  effort?: Effort;
   systemPromptFile: string;
   /** a JSON file holding {"mcpServers":{}} */
   mcpConfigFile: string;
@@ -31,9 +37,13 @@ export function addUsage(a: Usage, b: Usage): Usage {
 
 /** The CLI arguments. The batch goes on stdin, so there is no prompt argument. */
 export function claudeArgs(o: ClaudeOptions): string[] {
+  if (o.effort !== undefined && !EFFORT_LEVELS.includes(o.effort)) {
+    throw new Error(`effort must be one of ${EFFORT_LEVELS.join(', ')}, got ${String(o.effort)}`);
+  }
   return [
     '-p',
     '--model', o.model,
+    ...(o.effort !== undefined ? ['--effort', o.effort] : []),
     '--output-format', 'json',
     '--json-schema', o.jsonSchema,
     '--system-prompt-file', o.systemPromptFile,

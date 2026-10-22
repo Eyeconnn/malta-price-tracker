@@ -1,4 +1,4 @@
-// pnpm normalise-names --model haiku [--pilot] [--limit 500] [--category laptops ...] [--batch-size 40]
+// pnpm normalise-names --model haiku [--effort low] [--pilot] [--limit 500] [--category laptops ...] [--batch-size 40]
 //   [--parallel 2] [--max-batches N] [--dry-run] [--seed pilot] [--timeout 300] [--save-raw]
 // Sends batches of one site category's product groups to Claude Code (claude -p, on the owner's own login) for clean
 // names and the category's attributes, checks every answer (src/names/check.ts) and writes a report to out/names/.
@@ -13,7 +13,7 @@ import { closeDb, db } from '../db.js';
 import { env } from '../env.js';
 import { SITE_CATEGORIES } from '../site/categories.js';
 import { checkBatch } from '../names/check.js';
-import { addUsage, callClaude, NO_USAGE, type Usage } from '../names/claude.js';
+import { addUsage, callClaude, EFFORT_LEVELS, NO_USAGE, type Effort, type Usage } from '../names/claude.js';
 import { makeBatches, systemPrompt, userMessage, type Batch } from '../names/prompt.js';
 import { writeReport, type ReportRow } from '../names/report.js';
 import { answerJsonSchema, loadAttributeSchemas } from '../names/schema.js';
@@ -23,6 +23,7 @@ import { finishRun, saveResults, startRun } from '../names/store.js';
 const { values } = parseArgs({
   options: {
     model: { type: 'string' },
+    effort: { type: 'string' },
     pilot: { type: 'boolean', default: false },
     limit: { type: 'string', default: '500' },
     category: { type: 'string', multiple: true },
@@ -65,6 +66,11 @@ async function main() {
   const model = values.model?.trim();
   if (!model) throw new Error('--model is required (for example haiku, sonnet, opus)');
   if (!/^[A-Za-z0-9._\-[\]]+$/.test(model)) throw new Error(`--model has unexpected characters: ${model}`);
+  const effortRaw = values.effort?.trim();
+  if (effortRaw !== undefined && !(EFFORT_LEVELS as readonly string[]).includes(effortRaw)) {
+    throw new Error(`--effort must be one of ${EFFORT_LEVELS.join(', ')}, got ${effortRaw}`);
+  }
+  const effort = effortRaw as Effort | undefined;
   const pilot = values.pilot;
   const dryRun = values['dry-run'];
   const limit = intOption('limit', values.limit, 1, 100000);
@@ -91,7 +97,7 @@ async function main() {
   const groupCount = batches.reduce((n, b) => n + b.items.length, 0);
   console.log(
     `normalise-names: ${groupsAll.length} fresh groups, ${candidates.length} new or changed; ` +
-      `${groupCount} groups in ${batches.length} batches (${runCats.join(', ') || 'none'}), model ${model}` +
+      `${groupCount} groups in ${batches.length} batches (${runCats.join(', ') || 'none'}), model ${model}, effort ${effort ?? 'CLI default'}` +
       `${pilot ? ', pilot' : ''}${dryRun ? ', dry run (no database writes)' : ''}`,
   );
   if (batches.length === 0) return;
@@ -110,7 +116,7 @@ async function main() {
   await mkdir(childCwd);
 
   const rw = dryRun ? null : db();
-  const runId = rw ? String(await startRun(rw, { model, categories: runCats, pilot })) : `dry-${stamp()}`;
+  const runId = rw ? String(await startRun(rw, { model, categories: runCats, pilot, effort: effort ?? null })) : `dry-${stamp()}`;
   const rawDir = path.join(OUT_DIR, `${runId}-${model.replace(/[^A-Za-z0-9._-]+/g, '_')}-raw`);
   if (values['save-raw']) await mkdir(rawDir, { recursive: true });
 
@@ -134,7 +140,7 @@ async function main() {
   async function runBatch(index: number, batch: Batch) {
     const t0 = Date.now();
     const cat = perCategory.get(batch.category)!;
-    const call = await callClaude({ model: model!, ...cat, mcpConfigFile, cwd: childCwd, timeoutMs }, userMessage(batch));
+    const call = await callClaude({ model: model!, effort, ...cat, mcpConfigFile, cwd: childCwd, timeoutMs }, userMessage(batch));
     usage = addUsage(usage, call.usage);
     costUsd += call.costUsd;
     if (values['save-raw']) await writeFile(path.join(rawDir, `batch-${index + 1}.json`), call.raw, 'utf8');
@@ -190,7 +196,7 @@ async function main() {
   const items = accepted + rejected;
   rows.sort((a, b) => a.category.localeCompare(b.category) || a.shop.localeCompare(b.shop) || a.sourceTitle.localeCompare(b.sourceTitle));
   const summary = {
-    runId, model, categories: runCats, pilot, dryRun, batches: done, groups: items, accepted, rejected, failedBatches,
+    runId, model, effort: effort ?? null, categories: runCats, pilot, dryRun, batches: done, groups: items, accepted, rejected, failedBatches,
     ...usage, costUsd, wallSeconds,
   };
   const files = await writeReport(OUT_DIR, summary, rows);

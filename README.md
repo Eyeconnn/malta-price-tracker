@@ -172,7 +172,7 @@ pnpm normalise-names --model sonnet --pilot --limit 200 --dry-run
 pnpm normalise-names --model haiku --category toys --max-batches 5
 ```
 
-Options: `--model` (required), `--pilot` with `--limit` (default 500) and `--seed`, `--category <slug>` (repeatable),
+Options: `--model` (required), `--effort` (low, medium, high, xhigh or max, passed to `claude --effort`; left out it is the CLI default), `--pilot` with `--limit` (default 500) and `--seed`, `--category <slug>` (repeatable),
 `--batch-size` (default 40), `--parallel` (default 2, max 6), `--max-batches`, `--timeout` (seconds per call,
 default 300), `--dry-run`, `--save-raw` (keeps each batch's raw JSON). Each run writes `out/names/<run>-<model>.html`
 and `.csv` (names before and after, attributes, rejects, tokens and the cost Claude Code reports, which on a plan is

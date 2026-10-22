@@ -5,6 +5,8 @@ import path from 'node:path';
 export type RunSummary = {
   runId: string;
   model: string;
+  /** the --effort passed to claude, null for the CLI default */
+  effort: string | null;
   categories: string[];
   pilot: boolean;
   dryRun: boolean;
@@ -54,6 +56,7 @@ export function renderHtml(s: RunSummary, rows: ReportRow[]): string {
   const facts: [string, string][] = [
     ['Run', s.runId],
     ['Model', s.model],
+    ['Effort', s.effort ?? 'CLI default'],
     ['Mode', `${s.pilot ? 'pilot' : 'full'}${s.dryRun ? ', dry run (nothing written)' : ''}`],
     ['Categories', s.categories.join(', ')],
     ['Groups', int(s.groups)],
