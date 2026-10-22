@@ -5,6 +5,7 @@ import postgres from 'postgres';
 import { DEFAULT_SETTINGS, loadSettings } from '../../src/site/settings.js';
 import type { Obs, Verdict } from '../../src/site/verdict.js';
 import {
+  buildShop,
   buildShopRatings,
   buildSiteProducts,
   lastFullBuild,
@@ -493,5 +494,42 @@ describe.skipIf(!process.env.SITE_BUILD_TEST_DB)('site-build on PGlite', () => {
     await buildShopRatings(sql, { ...DEFAULT_SETTINGS, thresholds: { ...DEFAULT_SETTINGS.thresholds, minJudgedForRating: 3 } }, NOW);
     const [r] = await sql`select grade, judged, good, avoid, was_raised, sentence from shop_ratings where shop_id = ${shopId}`;
     expect(r).toEqual({ grade: 'F', judged: 3, good: 1, avoid: 1, was_raised: 1, sentence: '1 of 3 judged products was a Deal to Avoid (1 with a raised was price).' });
+  }, 60_000);
+
+  it('a row whose GTIN or MPN changed loses its match until matching runs again (M2)', async () => {
+    const shopRow = async (slug: string) =>
+      (
+        await sql<{ id: number; slug: string; category: string | null }[]>`
+          insert into shops (slug, name, base_url, category, adapter) values (${slug}, ${slug}, ${'https://' + slug + '.test'}, null, 'woo')
+          returning id, slug, category`
+      )[0];
+    const x = await shopRow('codeshop');
+    const y = await shopRow('codeshop2');
+    const pid = async (shopId: number, key: string, gtin: string) =>
+      (
+        await sql<{ id: string }[]>`
+          insert into products (shop_id, external_id, title, gtin, last_seen)
+          values (${shopId}, ${key}, 'Code Widget', ${gtin}, ${new Date(NOW.getTime() - HOUR)}) returning id`
+      )[0].id;
+    const px = await pid(x.id, 'X1', '96385074');
+    const py = await pid(y.id, 'Y1', '96385074');
+    for (const p of [px, py]) {
+      await sql`insert into price_observations (product_id, observed_at, price_cents, in_stock) values (${p}, ${new Date(NOW.getTime() - 2 * HOUR)}, 1000, true)`;
+    }
+    await buildSiteProducts(sql, DEFAULT_SETTINGS, NOW, { shop: 'codeshop' });
+    await buildSiteProducts(sql, DEFAULT_SETTINGS, NOW, { shop: 'codeshop2' });
+    await sql`update site_products set match_confirmed = true where shop_id in (${x.id}, ${y.id})`;
+    const before = await sql<Row[]>`select * from site_products where shop_id in (${x.id}, ${y.id}) order by shop_id`;
+    expect(before.map((r) => r.match_method)).toEqual(['gtin', 'gtin']);
+
+    // the shop now reports another GTIN; the build writes the row, matching has not run yet
+    await sql`update products set gtin = '4006381333931' where id = ${px}`;
+    await buildShop(sql, x, DEFAULT_SETTINGS, NOW);
+    await buildShop(sql, y, DEFAULT_SETTINGS, NOW);
+    const [rx] = await sql<Row[]>`select * from site_products where shop_id = ${x.id}`;
+    expect([rx.gtin, rx.canonical_id, rx.match_method, rx.match_confirmed]).toEqual(['4006381333931', null, null, false]);
+    // a row whose codes did not change keeps its match and confirmation
+    const [ry] = await sql<Row[]>`select * from site_products where shop_id = ${y.id}`;
+    expect([ry.canonical_id, ry.match_method, ry.match_confirmed]).toEqual([before[1].canonical_id, 'gtin', true]);
   }, 60_000);
 });

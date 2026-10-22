@@ -154,13 +154,24 @@ async function product(data: Data, id: number): Promise<Response> {
 async function shopPage(data: Data, slug: string): Promise<Response> {
   const found = await data.shop(slug);
   if (!found) return json({ error: 'unknown shop' }, 404);
+  const { thresholds } = await data.settings();
   const [avoid, good, changes] = await Promise.all([
     data.deals({ verdict: 'avoid', category: null, shop: slug, minCents: null, maxCents: null, limit: SHOP_CARDS, offset: 0 }),
     data.deals({ verdict: 'good', category: null, shop: slug, minCents: null, maxCents: null, limit: SHOP_CARDS, offset: 0 }),
-    data.shopChanges(found.shop.id),
+    // price changes over the stored raise window, which the page names
+    data.shopChanges(found.shop.id, thresholds.raiseWindowDays),
   ]);
   const rating = found.rating ?? { ...computeRating({ judged: 0, good: 0, avoid: 0, wasRaised: 0 }, DEFAULT_SETTINGS.thresholds), judged: 0 };
-  return json({ shop: found.shop, rating, avoid: avoid.items, good: good.items, rises: changes.rises, drops: changes.drops, stats: found.stats });
+  return json({
+    shop: found.shop,
+    rating,
+    avoid: avoid.items,
+    good: good.items,
+    rises: changes.rises,
+    drops: changes.drops,
+    stats: found.stats,
+    raiseWindowDays: thresholds.raiseWindowDays,
+  });
 }
 
 async function categories(data: Data): Promise<Response> {

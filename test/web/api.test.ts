@@ -481,7 +481,19 @@ describe('GET /api/shops and /api/shops/:slug', () => {
     expect(body.good).toHaveLength(5);
     expect(body.avoid).toHaveLength(5);
     expect(w.data.deals).toHaveBeenCalledWith({ verdict: 'avoid', category: null, shop: 'scan', minCents: null, maxCents: null, limit: 5, offset: 0 });
-    expect(w.data.shopChanges).toHaveBeenCalledWith(9);
+    // the change lists look back the stored raise window (M4)
+    expect(w.data.shopChanges).toHaveBeenCalledWith(9, DEFAULT_SETTINGS.thresholds.raiseWindowDays);
+    expect(body.raiseWindowDays).toBe(DEFAULT_SETTINGS.thresholds.raiseWindowDays);
+  });
+
+  it('passes a stored raise window to the change lists', async () => {
+    const shop = { id: 9, slug: 'scan', name: 'Scan', url: 'https://scan.example', category: null };
+    const stats = { products: 0, judged: 0, good: 0, avoid: 0, wasRaised: 0, bfMarked: 0, realDealPct: null };
+    const settings = { ...DEFAULT_SETTINGS, thresholds: { ...DEFAULT_SETTINGS.thresholds, raiseWindowDays: 9 } };
+    const w = setup(fakeData({ shop: vi.fn(async () => ({ shop, rating: null, stats })), settings: vi.fn(async () => settings) }));
+    const body = (await (await w.fetch('/api/shops/scan')).json()) as { raiseWindowDays: number };
+    expect(w.data.shopChanges).toHaveBeenCalledWith(9, 9);
+    expect(body.raiseWindowDays).toBe(9);
   });
 });
 

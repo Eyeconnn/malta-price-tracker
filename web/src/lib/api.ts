@@ -53,6 +53,8 @@ export type ShopResponse = {
   rises: Change[];
   drops: Change[];
   stats: ShopStats;
+  /** days the rises and drops look back (the stored raise window) */
+  raiseWindowDays: number;
 };
 export type ProductResponse = {
   product: Omit<ProductInfo, 'verdict' | 'reason' | 'facts'>;

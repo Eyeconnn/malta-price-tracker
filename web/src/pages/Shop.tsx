@@ -15,8 +15,6 @@ import { cn } from '@/lib/utils';
 
 /** Cards per list on a shop page. */
 const LIST_MAX = 5;
-/** The API looks at the last 14 days for price changes (raiseWindowDays). */
-const CHANGE_DAYS = 14;
 
 const count = new Intl.NumberFormat('en-GB');
 
@@ -168,9 +166,15 @@ function ChangeTable({ caption, rows, tone, none }: { caption: string; rows: Cha
   );
 }
 
+/** "in the last 14 days" for the stored raise window the API sent; "recently" when it sent no usable number. */
+function lastDays(n: unknown): string {
+  return isCount(n) && n > 0 ? `in the last ${count.format(n)} ${n === 1 ? 'day' : 'days'}` : 'recently';
+}
+
 function ShopContent({ data, slug }: { data: ShopResponse; slug: string }) {
   const { mode } = useMode();
   const { shop, rating } = data;
+  const changeWindow = lastDays(data.raiseWindowDays);
   return (
     <div className="flex flex-col gap-6">
       <div className="glass flex flex-col gap-4 p-4 md:flex-row md:items-center md:justify-between">
@@ -191,8 +195,8 @@ function ShopContent({ data, slug }: { data: ShopResponse; slug: string }) {
       <DealSection kind="good" cards={data.good} slug={slug} />
       {mode === 'advanced' && (
         <div className="grid gap-3 lg:grid-cols-2">
-          <ChangeTable caption="Top price rises" rows={data.rises} tone="bad" none={`No price rises in the last ${CHANGE_DAYS} days.`} />
-          <ChangeTable caption="Top real drops" rows={data.drops} tone="good" none={`No price drops in the last ${CHANGE_DAYS} days.`} />
+          <ChangeTable caption="Top price rises" rows={data.rises} tone="bad" none={`No price rises ${changeWindow}.`} />
+          <ChangeTable caption="Top real drops" rows={data.drops} tone="good" none={`No price drops ${changeWindow}.`} />
         </div>
       )}
     </div>

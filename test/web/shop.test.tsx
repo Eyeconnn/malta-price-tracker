@@ -63,6 +63,7 @@ function shopResponse(extra: Partial<ShopResponse> = {}): ShopResponse {
     rises: [change(21), change(22, { title: 'Tefal iron', fromCents: 7495, toCents: 8995, pct: 20 })],
     drops: [change(31, { title: 'Finlux fridge', fromCents: 99900, toCents: 93900, pct: -6 })],
     stats: { products: 500, judged: 120, good: 73, avoid: 23, wasRaised: 9, bfMarked: 1287, realDealPct: 61 },
+    raiseWindowDays: 14,
     ...extra,
   };
 }
@@ -325,6 +326,13 @@ describe('shop page', () => {
       await screen.findByRole('table', { name: 'Top price rises' });
       expect(document.body.textContent).not.toContain('€0.00');
       expect(screen.getAllByText('Price not shown by the shop').length).toBeGreaterThan(0);
+    });
+
+    it('names the stored raise window when there are no changes (M4)', async () => {
+      mockApi({ '/api/shops/alpha': () => json(shopResponse({ rises: [], drops: [], raiseWindowDays: 9 })) });
+      renderAt('/shops/alpha');
+      expect(await screen.findByText('No price rises in the last 9 days.')).toBeTruthy();
+      expect(screen.getByText('No price drops in the last 9 days.')).toBeTruthy();
     });
 
     it('states facts when there are no changes', async () => {

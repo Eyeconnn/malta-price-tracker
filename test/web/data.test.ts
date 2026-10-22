@@ -215,7 +215,7 @@ describe('data.ts on PGlite', () => {
   });
 
   it('shopChanges finds rises and drops of the shown variant over 14 days', async () => {
-    const c = await data.shopChanges(1);
+    const c = await data.shopChanges(1, 14);
     expect(c.rises).toEqual([expect.objectContaining({ id: 7, title: 'Samsung Galaxy Tab', fromCents: 40000, toCents: 48000, pct: 20 })]);
     expect(c.drops).toEqual([expect.objectContaining({ id: 1, fromCents: 80000, toCents: 70000, pct: -12.5 })]);
     expect(c.drops[0].at).toMatch(/^\d{4}-\d\d-\d\dT.*Z$/);
@@ -304,6 +304,14 @@ describe('data.ts search and price order (fix round 1)', () => {
       [52, 4000],
       [50, null],
     ]);
+  });
+});
+
+describe('data.ts shopChanges window (M4)', () => {
+  it('looks back the given number of days', async () => {
+    // product 20: 40000 five days ago, 48000 one day ago
+    expect((await data.shopChanges(1, 14)).rises.map((r) => r.id)).toContain(7);
+    expect((await data.shopChanges(1, 4)).rises.map((r) => r.id)).not.toContain(7);
   });
 });
 

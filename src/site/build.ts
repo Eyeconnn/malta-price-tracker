@@ -41,7 +41,7 @@ export type ObsRow = {
 
 export type VariantResult = { product: ProductRow; latest: Obs | null; verdict: Verdict };
 
-type Shop = { id: number; slug: string; category: string | null };
+export type Shop = { id: number; slug: string; category: string | null };
 
 type GroupRow = {
   group_key: string;
@@ -171,6 +171,9 @@ export function pctColumn(v: number | null): number | null {
   return r === 0 ? 0 : r;
 }
 
+/** In the site_products upsert: the shown variant's GTIN or MPN differs from the stored row's. */
+const CODES_CHANGED = `(site_products.gtin is distinct from excluded.gtin or site_products.mpn is distinct from excluded.mpn)`;
+
 /** postgres.js types a JS boolean array as a single boolean, so booleans travel as text[] and are cast per row. */
 const boolText = (b: boolean | null) => (b === null ? null : String(b));
 
@@ -195,7 +198,12 @@ async function writeGroups(sql: postgres.Sql, shopId: number, groups: GroupRow[]
       category = excluded.category, variant_count = excluded.variant_count, rep_product_id = excluded.rep_product_id,
       gtin = excluded.gtin, mpn = excluded.mpn, price_cents = excluded.price_cents, was_price_cents = excluded.was_price_cents,
       in_stock = excluded.in_stock, bf_status = excluded.bf_status, verdict = excluded.verdict, reason = excluded.reason,
-      facts = excluded.facts, updated_at = excluded.updated_at`;
+      facts = excluded.facts, updated_at = excluded.updated_at,
+      -- new codes: the old match (and its confirmation) no longer describes this row; assignCanonicalIds decides
+      -- again after every shop is built, and until then the row claims no match (a build may stop in between)
+      canonical_id = case when ${sql.unsafe(CODES_CHANGED)} then null else site_products.canonical_id end,
+      match_method = case when ${sql.unsafe(CODES_CHANGED)} then null else site_products.match_method end,
+      match_confirmed = case when ${sql.unsafe(CODES_CHANGED)} then false else site_products.match_confirmed end`;
 
   // History of judged groups only, to keep storage small: one row per good/avoid group per run, all from the
   // variant that produced the label (rep_product_id and prices are that variant's for good/avoid groups).
@@ -212,7 +220,8 @@ async function writeGroups(sql: postgres.Sql, shopId: number, groups: GroupRow[]
     ) as t(product_id, label, price_cents, was_price_cents, low_30d_cents, history_days, claimed_pct, real_pct)`;
 }
 
-async function buildShop(sql: postgres.Sql, shop: Shop, settings: SiteSettings, now: Date): Promise<{ products: number; judged: number }> {
+/** Builds one shop's site_products rows (no matching; buildSiteProducts runs assignCanonicalIds after all shops). */
+export async function buildShop(sql: postgres.Sql, shop: Shop, settings: SiteSettings, now: Date): Promise<{ products: number; judged: number }> {
   const t = settings.thresholds;
   const seenSince = new Date(now.getTime() - SEEN_DAYS * DAY_MS);
   const obsSince = new Date(now.getTime() - (t.baselineDays + t.raiseWindowDays + 2) * DAY_MS);

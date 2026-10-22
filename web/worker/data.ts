@@ -57,7 +57,7 @@ export type ShopStats = {
   /** good / judged in %, null when nothing was judged */
   realDealPct: number | null;
 };
-/** Latest price against the last different price in the last 14 days, of a group's shown variant. */
+/** Latest price against the last different price in the last `days` days (raiseWindowDays), of a group's shown variant. */
 export type Change = { id: number; title: string; fromCents: number; toCents: number; pct: number; fromAt: string; at: string };
 
 export type ProductInfo = {
@@ -120,7 +120,8 @@ export interface Data {
   search(p: SearchPattern, shop: string | null): Promise<SearchHit[]>;
   shops(): Promise<ShopSummary[]>;
   shop(slug: string): Promise<{ shop: ShopInfo; rating: ShopRating | null; stats: ShopStats } | null>;
-  shopChanges(shopId: number): Promise<{ rises: Change[]; drops: Change[] }>;
+  /** days: how far back to look, the stored raiseWindowDays */
+  shopChanges(shopId: number, days: number): Promise<{ rises: Change[]; drops: Change[] }>;
   product(id: number): Promise<ProductDetail | null>;
   categories(): Promise<CategoryCount[]>;
 }
@@ -158,7 +159,6 @@ const CARD_COLUMNS = `sp.id, sp.title, s.name as shop, s.slug as shop_slug, sp.p
 /** word_similarity threshold for `<%`, as in the dashboard search. */
 const WORD_SIMILARITY = '0.5';
 const HISTORY_DAYS = 60;
-const CHANGE_DAYS = 14;
 const CHANGES_EACH = 10;
 const OTHERS_MAX = 30;
 const VARIANTS_MAX = 200;
@@ -373,7 +373,7 @@ export function createData(db: SqlRunner, opts: DataOptions = {}): Data {
       };
     },
 
-    async shopChanges(shopId) {
+    async shopChanges(shopId, days) {
       const rows = await db.query(
         `with g as (
           select sp.id, sp.rep_product_id, sp.title
@@ -387,13 +387,13 @@ export function createData(db: SqlRunner, opts: DataOptions = {}): Data {
           from g
           cross join lateral (
             select po.price_cents, po.observed_at from price_observations po
-            where po.product_id = g.rep_product_id and po.observed_at > now() - interval '${CHANGE_DAYS} days'
+            where po.product_id = g.rep_product_id and po.observed_at > now() - make_interval(days => $2::int)
               and po.price_cents > 0 and po.review_flag is null
             order by po.observed_at desc limit 1
           ) l
           cross join lateral (
             select po.price_cents, po.observed_at from price_observations po
-            where po.product_id = g.rep_product_id and po.observed_at > now() - interval '${CHANGE_DAYS} days'
+            where po.product_id = g.rep_product_id and po.observed_at > now() - make_interval(days => $2::int)
               and po.observed_at < l.observed_at and po.price_cents > 0 and po.review_flag is null and po.price_cents <> l.price_cents
             order by po.observed_at desc limit 1
           ) p
@@ -401,7 +401,7 @@ export function createData(db: SqlRunner, opts: DataOptions = {}): Data {
         (select 'rise' as kind, * from changes where pct > 0 order by pct desc, id limit ${CHANGES_EACH})
         union all
         (select 'drop' as kind, * from changes where pct < 0 order by pct asc, id limit ${CHANGES_EACH})`,
-        [shopId],
+        [shopId, days],
       );
       return { rises: rows.filter((r) => r.kind === 'rise').map(toChange), drops: rows.filter((r) => r.kind === 'drop').map(toChange) };
     },
