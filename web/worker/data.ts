@@ -145,6 +145,11 @@ const GROUP_MEMBERS = 20;
 
 const num = (v: unknown): number => Number(v);
 const numOrNull = (v: unknown): number | null => (v === null || v === undefined ? null : Number(v));
+/** A price in cents: 0 or less (or missing) means the shop shows no price, so null, never 0. */
+const priceOrNull = (v: unknown): number | null => {
+  const n = numOrNull(v);
+  return n !== null && n > 0 ? n : null;
+};
 const strOrNull = (v: unknown): string | null => (v === null || v === undefined ? null : String(v));
 const boolOrNull = (v: unknown): boolean | null => (v === null || v === undefined ? null : Boolean(v));
 const iso = (v: unknown): string => new Date(v as string | Date).toISOString();
@@ -160,8 +165,8 @@ function toCard(r: Row): Card {
     title: String(r.title),
     shop: String(r.shop),
     shopSlug: String(r.shop_slug),
-    priceCents: numOrNull(r.price_cents),
-    wasCents: numOrNull(r.was_price_cents),
+    priceCents: priceOrNull(r.price_cents),
+    wasCents: priceOrNull(r.was_price_cents),
     verdict: r.verdict as Label,
     reason: strOrNull(r.reason),
     bf: r.bf_status === 'marked',
@@ -190,7 +195,13 @@ const DEAL_RANK = `case when sp.verdict = 'good' then -(sp.facts ->> 'realPct'):
     (sp.was_price_cents - (sp.facts ->> 'wasRaisedFrom')::float8) / nullif((sp.facts ->> 'wasRaisedFrom')::float8, 0))
   end`;
 
-export function createData(db: SqlRunner): Data {
+export type DataOptions = {
+  /** most history points per product page (default 5000); the newest are kept */
+  historyMax?: number;
+};
+
+export function createData(db: SqlRunner, opts: DataOptions = {}): Data {
+  const historyMax = opts.historyMax ?? HISTORY_MAX;
   return {
     async settings() {
       const rows = await db.query('select key, value from site_settings', []);
@@ -281,7 +292,7 @@ export function createData(db: SqlRunner): Data {
         cross join lateral (
           select count(*)::int as products,
             count(*) filter (where sp.verdict in ('good', 'avoid'))::int as judged,
-            count(*) filter (where sp.verdict = 'good')::int as good,
+            count(*) filter (where sp.verdict = 'good' and sp.price_cents > 0)::int as good,
             count(*) filter (where sp.verdict = 'avoid')::int as avoid,
             count(*) filter (where sp.verdict in ('good', 'avoid') and sp.facts -> 'wasRaisedFrom' is not null)::int as was_raised,
             count(*) filter (where sp.bf_status = 'marked')::int as bf_marked
@@ -363,8 +374,8 @@ export function createData(db: SqlRunner): Data {
         shopId: num(r.shop_id),
         shop: String(r.shop),
         shopSlug: String(r.shop_slug),
-        priceCents: numOrNull(r.price_cents),
-        wasCents: numOrNull(r.was_price_cents),
+        priceCents: priceOrNull(r.price_cents),
+        wasCents: priceOrNull(r.was_price_cents),
         inStock: boolOrNull(r.in_stock),
         bf: r.bf_status === 'marked',
         variantCount: num(r.variant_count),
@@ -391,15 +402,19 @@ export function createData(db: SqlRunner): Data {
           limit ${VARIANTS_MAX}`,
           [product.shopId, groupKey],
         ),
+        // a wide group can exceed the cap: keep the newest points, then return them oldest first
         db.query(
-          `select po.product_id, po.observed_at, po.price_cents, po.was_price_cents, po.in_stock,
-            coalesce(po.bf_marked, coalesce(p.bf_status = 'marked', false)) as bf
-          from products p join price_observations po on po.product_id = p.id
-          where p.shop_id = $1 and coalesce(p.parent_external_id, p.external_id) = $2
-            and po.observed_at > now() - interval '${HISTORY_DAYS} days'
-          order by po.observed_at, po.product_id
-          limit ${HISTORY_MAX}`,
-          [product.shopId, groupKey],
+          `select * from (
+            select po.product_id, po.observed_at, po.price_cents, po.was_price_cents, po.in_stock,
+              coalesce(po.bf_marked, coalesce(p.bf_status = 'marked', false)) as bf
+            from products p join price_observations po on po.product_id = p.id
+            where p.shop_id = $1 and coalesce(p.parent_external_id, p.external_id) = $2
+              and po.observed_at > now() - interval '${HISTORY_DAYS} days'
+            order by po.observed_at desc, po.product_id desc
+            limit $3
+          ) h
+          order by observed_at, product_id`,
+          [product.shopId, groupKey, historyMax],
         ),
         product.canonicalId === null
           ? Promise.resolve([] as Row[])
@@ -420,14 +435,14 @@ export function createData(db: SqlRunner): Data {
           id: num(v.id),
           title: strOrNull(v.title),
           variantTitle: strOrNull(v.variant_title),
-          priceCents: numOrNull(v.price_cents),
+          priceCents: priceOrNull(v.price_cents),
           inStock: boolOrNull(v.in_stock),
         })),
         history: historyRows.map((h) => ({
           productId: num(h.product_id),
           at: iso(h.observed_at),
-          price: numOrNull(h.price_cents),
-          was: numOrNull(h.was_price_cents),
+          price: priceOrNull(h.price_cents),
+          was: priceOrNull(h.was_price_cents),
           inStock: boolOrNull(h.in_stock),
           bf: boolOrNull(h.bf),
         })),
@@ -436,7 +451,7 @@ export function createData(db: SqlRunner): Data {
           title: String(o.title),
           shop: String(o.shop),
           shopSlug: String(o.shop_slug),
-          priceCents: numOrNull(o.price_cents),
+          priceCents: priceOrNull(o.price_cents),
           inStock: boolOrNull(o.in_stock),
           verdict: o.verdict as Label,
           matchMethod: strOrNull(o.match_method),

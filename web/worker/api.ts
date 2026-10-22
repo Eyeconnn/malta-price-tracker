@@ -141,7 +141,12 @@ export async function handleApi(req: Request, env: Env, url: URL, deps: ApiDeps)
   const shopMatch = /^\/api\/shops\/([^/]*)$/.exec(p);
   const known = ['/api/home', '/api/search', '/api/deals', '/api/shops', '/api/categories'].includes(p) || productMatch || shopMatch;
   if (!known) return notFound();
-  if (req.method !== 'GET') return json({ error: 'method not allowed' }, 405, { allow: 'GET' });
+  if (req.method === 'HEAD') {
+    // same status and headers as GET, no body
+    const res = await handleApi(new Request(req.url, { method: 'GET', headers: req.headers }), env, url, deps);
+    return new Response(null, res);
+  }
+  if (req.method !== 'GET') return json({ error: 'method not allowed' }, 405, { allow: 'GET, HEAD' });
 
   const data = () => deps.data(env);
   const cache = deps.cache();

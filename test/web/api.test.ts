@@ -383,7 +383,27 @@ describe('routing and caching', () => {
     expect(await res.json()).toEqual({ error: 'not found' });
     const post = await w.fetch('/api/home', { method: 'POST' });
     expect(post.status).toBe(405);
-    expect(post.headers.get('allow')).toBe('GET');
+    expect(post.headers.get('allow')).toBe('GET, HEAD');
+  });
+
+  it('answers HEAD like GET without a body', async () => {
+    const cache = memoryCache();
+    const w = setup(fakeData(), cache);
+    const res = await w.fetch('/api/home', { method: 'HEAD' });
+    expect(res.status).toBe(200);
+    expect(res.headers.get('cache-control')).toBe('public, max-age=600');
+    expect(res.headers.get('content-type')).toContain('application/json');
+    expect(await res.text()).toBe('');
+    // the cached GET body is intact
+    const get = (await (await w.fetch('/api/home')).json()) as { good: Card[] };
+    expect(get.good).toHaveLength(6);
+    expect(w.data.settings).toHaveBeenCalledTimes(1);
+
+    const search = await w.fetch('/api/search?q=ipad', { method: 'HEAD' });
+    expect(search.status).toBe(200);
+    expect(search.headers.get('cache-control')).toBe('no-store');
+    expect(await search.text()).toBe('');
+    expect((await w.fetch('/api/products/999', { method: 'HEAD' })).status).toBe(404);
   });
 
   it('marks every read except search public for 10 minutes', async () => {

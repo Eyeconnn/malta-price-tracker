@@ -43,7 +43,8 @@ beforeAll(async () => {
       (10, 1, 'v1', 'G1', 'Lenovo IdeaPad Slim 5', '16GB', 'marked'),
       (11, 1, 'v2', 'G1', 'Lenovo IdeaPad Slim 5', '32GB', null),
       (12, 1, 'other', null, 'Other thing', null, null),
-      (20, 1, 'p7', null, 'Samsung Galaxy Tab', null, null);
+      (20, 1, 'p7', null, 'Samsung Galaxy Tab', null, null),
+      (30, 2, 'z1', null, 'Zero priced thing', null, null);
 
     insert into price_observations (product_id, observed_at, price_cents, was_price_cents, in_stock, bf_marked) values
       (10, now() - interval '70 days', 90000, null, true, null),
@@ -51,7 +52,8 @@ beforeAll(async () => {
       (10, now() - interval '1 day', 70000, 90000, true, true),
       (11, now() - interval '2 days', 95000, null, false, null),
       (20, now() - interval '5 days', 40000, null, true, null),
-      (20, now() - interval '1 day', 48000, null, true, null);
+      (20, now() - interval '1 day', 48000, null, true, null),
+      (30, now() - interval '1 day', 0, 0, true, null);
 
     insert into shop_ratings (shop_id, grade, judged, good, avoid, was_raised, sentence) values
       (1, 'B', 30, 25, 3, 1, 'Mostly honest. A few deals need a closer look.');
@@ -72,7 +74,8 @@ beforeAll(async () => {
       (8, 2, 'B8', 'Beta avoid no price', 'phones', null, null, null, false, null, 'avoid', 'r8', '${avoidFacts(100, 110)}', null, null, false, now()),
       (9, 2, 'B9', 'Beta good big drop', 'laptops', null, 30000, 50000, true, 'marked', 'good', 'r9', '${goodFacts(-25)}', null, null, false, now()),
       (10, 2, 'B10', 'Lenovo IdeaPad Slim 5 lookalike', 'laptops', null, 40000, null, true, null, 'none', null, null, 200, 'title', false, now()),
-      (11, 1, 'other', 'Lenovo IdeaPad Slim 5 lookalike too', 'laptops', 12, 45000, null, true, null, 'none', null, null, 200, 'title', false, now());
+      (11, 1, 'other', 'Lenovo IdeaPad Slim 5 lookalike too', 'laptops', 12, 45000, null, true, null, 'none', null, null, 200, 'title', false, now()),
+      (12, 2, 'z1', 'Zero priced thing', null, 30, 0, 0, true, null, 'avoid', 'r12', null, null, null, false, now());
   `);
   data = createData(runner(pg));
 }, 60_000);
@@ -109,9 +112,12 @@ describe('data.ts on PGlite', () => {
 
   it('avoid deals keep null prices as null, largest rise first', async () => {
     const r = await data.deals({ verdict: 'avoid', category: null, shop: null, limit: 24, offset: 0 });
-    expect(r.items.map((c) => c.id)).toEqual([7, 8]);
+    expect(r.items.map((c) => c.id)).toEqual([7, 8, 12]);
     expect(r.items[1].priceCents).toBeNull();
     expect(r.items[1].wasCents).toBeNull();
+    // a stored 0 is no price either
+    expect(r.items[2].priceCents).toBeNull();
+    expect(r.items[2].wasCents).toBeNull();
   });
 
   it('filters by category and shop, and reports the total past the last page', async () => {
@@ -161,7 +167,7 @@ describe('data.ts on PGlite', () => {
   it('shops lists visible shops with fresh products', async () => {
     expect(await data.shops()).toEqual([
       { slug: 'alpha', name: 'Alpha', grade: 'B', products: 4 },
-      { slug: 'beta', name: 'Beta', grade: null, products: 4 },
+      { slug: 'beta', name: 'Beta', grade: null, products: 5 },
     ]);
   });
 
@@ -173,7 +179,7 @@ describe('data.ts on PGlite', () => {
     expect(alpha).toEqual({
       shop: { id: 1, slug: 'alpha', name: 'Alpha', url: 'https://alpha.example', category: 'electronics' },
       rating: { grade: 'B', sentence: 'Mostly honest. A few deals need a closer look.', judged: 30 },
-      stats: { products: 4, judged: 3, good: 2, avoid: 1, wasRaised: 0, bfMarked: 3, realDealPct: 66.7 },
+      stats: { products: 4, judged: 3, good: 1, avoid: 1, wasRaised: 0, bfMarked: 3, realDealPct: 33.3 },
     });
     expect((await data.shop('beta'))?.rating).toBeNull();
   });
@@ -203,6 +209,23 @@ describe('data.ts on PGlite', () => {
     expect(d?.others).toEqual([
       { id: 2, title: 'Lenovo IdeaPad Slim 5 Laptop', shop: 'Beta', shopSlug: 'beta', priceCents: 60000, inStock: true, verdict: 'none', matchMethod: 'gtin', possible: false },
     ]);
+  });
+
+  it('history keeps the newest points when a group has more than the cap', async () => {
+    const capped = createData(runner(pg), { historyMax: 2 });
+    const d = await capped.product(1);
+    expect(d?.history.map((h) => [h.productId, h.price])).toEqual([
+      [11, 95000],
+      [10, 70000],
+    ]);
+  });
+
+  it('a zero price or was price in history and variants serialises as null', async () => {
+    const d = await data.product(12);
+    expect(d?.product.priceCents).toBeNull();
+    expect(d?.product.wasCents).toBeNull();
+    expect(d?.variants.map((v) => v.priceCents)).toEqual([null]);
+    expect(d?.history.map((h) => [h.price, h.was])).toEqual([[null, null]]);
   });
 
   it('product marks title-only matches as possible', async () => {
