@@ -32,14 +32,27 @@ describe('loadSiteSettings', () => {
     expect(query).toHaveBeenCalledTimes(2);
   });
 
-  it('does not cache a failure', async () => {
+  it('caches a failure for 10 seconds, still private', async () => {
     const err = vi.spyOn(console, 'error').mockImplementation(() => {});
     const query = vi
       .fn<() => Promise<{ value: unknown }[]>>()
       .mockRejectedValueOnce(new Error('db down'))
       .mockResolvedValueOnce([{ value: true }]);
     expect(await loadSiteSettings('url', query, 0)).toEqual({ public: false });
-    expect(await loadSiteSettings('url', query, 1)).toEqual({ public: true });
+    expect(await loadSiteSettings('url', query, 9_999)).toEqual({ public: false });
+    expect(query).toHaveBeenCalledTimes(1);
+    expect(await loadSiteSettings('url', query, 10_000)).toEqual({ public: true });
+    expect(query).toHaveBeenCalledTimes(2);
     err.mockRestore();
+  });
+
+  it('shares one in-flight query between concurrent cold requests', async () => {
+    let release!: (rows: { value: unknown }[]) => void;
+    const query = vi.fn(() => new Promise<{ value: unknown }[]>((r) => (release = r)));
+    const a = loadSiteSettings('url', query, 0);
+    const b = loadSiteSettings('url', query, 0);
+    release([{ value: true }]);
+    expect(await Promise.all([a, b])).toEqual([{ public: true }, { public: true }]);
+    expect(query).toHaveBeenCalledTimes(1);
   });
 });

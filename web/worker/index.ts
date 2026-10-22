@@ -3,7 +3,7 @@
 import { checkAccess } from './auth.js';
 import type { Env } from './env.js';
 import { injectNonce, newNonce, withSecurityHeaders } from './security.js';
-import { loadSiteSettings } from './settings.js';
+import { type AccessSettings, loadSiteSettings } from './settings.js';
 
 /** Env plus the static assets binding declared in wrangler.toml. */
 export interface Bindings extends Env {
@@ -35,26 +35,36 @@ async function serveAsset(req: Request, env: Bindings): Promise<{ res: Response;
   return { res: new Response(html, { status: res.status, headers }), nonce };
 }
 
-export default {
-  async fetch(req: Request, env: Bindings): Promise<Response> {
-    const url = new URL(req.url);
-    const settings = await loadSiteSettings(env.DATABASE_URL);
-    const finish = (res: Response, nonce?: string): Response => {
-      const out = withSecurityHeaders(res, nonce);
-      if (!settings.public) out.headers.set('x-robots-tag', 'noindex, nofollow');
-      return out;
-    };
+export interface HandlerDeps {
+  loadSettings: (env: Bindings) => Promise<AccessSettings>;
+}
 
-    const denied = await checkAccess(req, env, settings);
-    if (denied) return finish(denied);
+/** The fetch handler; settings loading is injected so tests run without a database. */
+export function createHandler(deps: HandlerDeps) {
+  return {
+    async fetch(req: Request, env: Bindings): Promise<Response> {
+      const url = new URL(req.url);
+      const settings = await deps.loadSettings(env);
+      const finish = (res: Response, nonce?: string): Response => {
+        const out = withSecurityHeaders(res, nonce);
+        if (!settings.public) out.headers.set('x-robots-tag', 'noindex, nofollow');
+        return out;
+      };
 
-    try {
-      if (url.pathname === '/api' || url.pathname.startsWith('/api/')) return finish(await routeApi(req, env, url));
-      const { res, nonce } = await serveAsset(req, env);
-      return finish(res, nonce);
-    } catch (e) {
-      console.error('site error', url.pathname, (e as Error).message);
-      return finish(json({ error: 'internal error' }, 500));
-    }
-  },
-};
+      // access control first: also rejects non-canonical /api spellings
+      const denied = await checkAccess(req, env, settings);
+      if (denied) return finish(denied);
+
+      try {
+        if (url.pathname === '/api' || url.pathname.startsWith('/api/')) return finish(await routeApi(req, env, url));
+        const { res, nonce } = await serveAsset(req, env);
+        return finish(res, nonce);
+      } catch (e) {
+        console.error('site error', url.pathname, (e as Error).message);
+        return finish(json({ error: 'internal error' }, 500));
+      }
+    },
+  };
+}
+
+export default createHandler({ loadSettings: (env) => loadSiteSettings(env.DATABASE_URL) });

@@ -1,12 +1,38 @@
 // Access control: private-mode Basic auth for the whole site, admin password for the admin area.
 // Logic carried over from dashboard/src/worker.ts (SHA-256 digest compare, 750 ms delay on failure).
 import type { Env } from './env.js';
+import type { AccessSettings } from './settings.js';
 
 const FAILURE_DELAY_MS = 750;
 
-/** True for /admin, /admin/..., /api/admin and /api/admin/... (not /administrator). */
+/**
+ * The form used for access decisions: percent-encoded unreserved characters (A-Z a-z 0-9 - . _ ~)
+ * decoded, runs of '/' collapsed, lowercased. So /Admin, /api//admin and /api/%61dmin all match.
+ */
+export function canonicalPath(pathname: string): string {
+  return pathname
+    .replace(/%([0-9a-f]{2})/gi, (m, hex: string) => {
+      const ch = String.fromCharCode(parseInt(hex, 16));
+      return /[A-Za-z0-9\-._~]/.test(ch) ? ch : m;
+    })
+    .replace(/\/{2,}/g, '/')
+    .toLowerCase();
+}
+
+/** True for /admin, /admin/..., /api/admin and /api/admin/... in any spelling (not /administrator). */
 export function isAdminPath(pathname: string): boolean {
-  return /^\/(api\/)?admin(\/|$)/.test(pathname);
+  return /^\/(api\/)?admin(\/|$)/.test(canonicalPath(pathname));
+}
+
+function isApiPath(canonical: string): boolean {
+  return canonical === '/api' || canonical.startsWith('/api/');
+}
+
+function notFound(): Response {
+  return new Response(JSON.stringify({ error: 'not found' }), {
+    status: 404,
+    headers: { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' },
+  });
 }
 
 /** The password from an HTTP Basic authorization header (any user name), or null. */
@@ -52,15 +78,18 @@ async function denied(realm: string): Promise<Response> {
 }
 
 /**
- * Null when the request may proceed, otherwise the 401 response to send.
- * Admin paths always need ADMIN_PASSWORD. While the site is private every other path needs
+ * Null when the request may proceed, otherwise the response to send.
+ * An /api path not already in canonical form gets 404, so API routing never sees a spelling the
+ * admin gate did not. Admin paths (any spelling) always need ADMIN_PASSWORD. While the site is private every other path needs
  * SITE_PASSWORD (the admin password works too, so the owner is not asked twice).
  */
-export async function checkAccess(req: Request, env: Env, settings: { public: boolean }): Promise<Response | null> {
+export async function checkAccess(req: Request, env: Env, settings: AccessSettings): Promise<Response | null> {
   const pathname = new URL(req.url).pathname;
+  const canonical = canonicalPath(pathname);
+  if (isApiPath(canonical) && canonical !== pathname) return notFound();
   const password = basicPassword(req);
 
-  if (isAdminPath(pathname)) {
+  if (isAdminPath(canonical)) {
     if (password !== null && (await matches(password, env.ADMIN_PASSWORD))) return null;
     return denied('Black Friday Guide admin');
   }

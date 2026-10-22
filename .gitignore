@@ -9,6 +9,7 @@ dist/
 
 # Cloudflare Worker local secrets and state
 .dev.vars
+.dev.vars.*
 .wrangler/
 
 # brainstorming mockups
