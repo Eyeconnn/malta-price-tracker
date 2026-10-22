@@ -55,7 +55,8 @@ describe.each([
   const bg = color('--bg');
   const glass = over(parse(tokens.get('--glass')!), bg);
 
-  it.each(['--ink', '--muted', '--good', '--bad', '--accent'])('%s text is at least 4.5:1 on bg and on glass', (name) => {
+  const textTokens = ['--ink', '--muted', '--good', '--bad', '--accent', '--grade-a', '--grade-b', '--grade-c', '--grade-d', '--grade-e', '--grade-f'];
+  it.each(textTokens)('%s text is at least 4.5:1 on bg and on glass', (name) => {
     expect(ratio(color(name), bg)).toBeGreaterThanOrEqual(4.5);
     expect(ratio(color(name), glass)).toBeGreaterThanOrEqual(4.5);
   });

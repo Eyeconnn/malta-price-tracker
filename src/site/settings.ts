@@ -23,7 +23,7 @@ export type SiteSettings = {
   categoryOverrides: Record<string, string>;
 };
 
-// `*word*` marks the highlighted word in a headline.
+// `*word*` marks the highlighted word in a headline; `{days}` is the days left to Black Friday.
 export const DEFAULT_SETTINGS: SiteSettings = {
   public: false,
   thresholds: {
@@ -56,10 +56,11 @@ export const DEFAULT_SETTINGS: SiteSettings = {
       '2am shopping is how they get you. *Check first.*',
       "The tags change while you sleep. *We don't.*",
     ],
+    // {days} becomes "5 days" or "1 day" (whole Malta days to 27 Nov); lines with it are skipped on the day itself.
     bfweek: [
-      '*5 days* to Black Friday. Prices are already moving.',
-      'Black Friday is *tomorrow*. Which deals are real?',
-      "It's *Black Friday*. Trust the tag, not the banner.",
+      '*{days}* to Black Friday. Prices are already moving.',
+      '*Black Friday* week. Trust the tag, not the banner.',
+      'Black Friday prices are moving. *Which deals are real?*',
     ],
   },
   categoryOverrides: {},

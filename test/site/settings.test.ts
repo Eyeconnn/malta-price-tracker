@@ -32,6 +32,14 @@ describe('DEFAULT_SETTINGS', () => {
     expect(DEFAULT_SETTINGS.phrases.late).toContain('2am shopping is how they get you. *Check first.*');
   });
 
+  it('has Black Friday week lines that fit every day of the week', () => {
+    const lines = DEFAULT_SETTINGS.phrases.bfweek;
+    // date-specific wording comes only from {days}; at least one line works on the day itself
+    for (const l of lines) expect(l).not.toMatch(/tomorrow|today|\d+ days?/i);
+    expect(lines.some((l) => l.includes('{days}'))).toBe(true);
+    expect(lines.filter((l) => !l.includes('{days}')).length).toBeGreaterThanOrEqual(2);
+  });
+
   it('contains no em dash', () => {
     expect(JSON.stringify(DEFAULT_SETTINGS)).not.toContain(String.fromCharCode(0x2014));
   });

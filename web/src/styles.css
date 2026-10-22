@@ -40,6 +40,17 @@
   --tag-red: #f6d2cb;
   --tag-red-edge: #d0574a;
   --tag-red-ink: #8f1f12;
+  --tag-gold-string: #8a7a55;
+  --tag-red-string: #8a5550;
+  /* RATING letters A (best) to F (worst); text tokens, AA on bg and glass */
+  --grade-a: #137e4e;
+  --grade-b: #3f7a22;
+  --grade-c: #846800;
+  --grade-d: #a8501a;
+  --grade-e: #b23a1c;
+  --grade-f: #a0170f;
+  --sparkle: #c9a443;
+  --glow-warm: rgba(255, 120, 80, 0.14);
   /* derived, builder's call */
   --fill: rgba(20, 22, 28, 0.06);
   --surface: #fbfaf7;
@@ -65,6 +76,16 @@
     --tag-red: #ef9d92;
     --tag-red-edge: #b5392b;
     --tag-red-ink: #5a0d05;
+    --tag-gold-string: #a89a75;
+    --tag-red-string: #a8756f;
+    --grade-a: #3ecf8e;
+    --grade-b: #9bd35a;
+    --grade-c: #e8c547;
+    --grade-d: #f5a05a;
+    --grade-e: #ff7f61;
+    --grade-f: #ff5c52;
+    --sparkle: #ffe08a;
+    --glow-warm: rgba(255, 100, 70, 0.16);
     --fill: rgba(255, 255, 255, 0.08);
     --surface: #171a21;
     --glow: rgba(77, 165, 252, 0.14);
@@ -125,17 +146,6 @@
     min-height: 100dvh;
     font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
   }
-  /* Dotted desk: fine dot grid plus one soft accent glow at the top, fixed behind the content */
-  body::before {
-    content: "";
-    position: fixed;
-    inset: 0;
-    z-index: -1;
-    pointer-events: none;
-    background:
-      radial-gradient(60% 420px at 50% -120px, var(--glow), transparent 70%) no-repeat,
-      radial-gradient(var(--tex) 1.1px, transparent 1.4px) 0 0 / 18px 18px;
-  }
 }
 
 /* Frosted glass card */
@@ -148,6 +158,274 @@
   box-shadow: var(--shadow);
 }
 
+/* Page background (components/site/Background.tsx): dotted desk, a cool glow at the top and a warm one bottom right */
+.site-bg {
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  background:
+    radial-gradient(60% 420px at 50% -120px, var(--glow), transparent 70%) no-repeat,
+    radial-gradient(45% 360px at 100% 105%, var(--glow-warm), transparent 70%) no-repeat,
+    radial-gradient(var(--tex) 1.1px, transparent 1.4px) 0 0 / 18px 18px;
+}
+
+@keyframes tag-swing {
+  0%,
+  100% {
+    transform: rotate(3deg);
+  }
+  50% {
+    transform: rotate(9deg);
+  }
+}
+
+@keyframes twinkle {
+  0%,
+  100% {
+    opacity: 0.25;
+    transform: scale(0.7) rotate(0);
+  }
+  50% {
+    opacity: 1;
+    transform: scale(1.15) rotate(20deg);
+  }
+}
+
+@keyframes headline-flip {
+  0% {
+    transform: rotateX(-95deg);
+    opacity: 0;
+  }
+  60% {
+    transform: rotateX(14deg);
+    opacity: 1;
+  }
+  80% {
+    transform: rotateX(-6deg);
+  }
+  100% {
+    transform: rotateX(0);
+  }
+}
+
+@layer components {
+  /* Hanging price tag (components/site/PriceTag.tsx), approved mockup "deal tags" version A */
+  .price-tag {
+    --tag-w: 66px;
+    --tag-h: 88px;
+    position: relative;
+    display: inline-block;
+    flex: none;
+    width: var(--tag-w);
+    height: var(--tag-h);
+    transform-origin: 50% -25px;
+    transform: rotate(6deg);
+  }
+  .price-tag-sm {
+    --tag-w: 50px;
+    --tag-h: 67px;
+    transform-origin: 50% -19px;
+  }
+  .price-tag-good {
+    animation: tag-swing 3.2s ease-in-out infinite;
+  }
+  .price-tag-avoid {
+    transform: rotate(-9deg);
+  }
+  .price-tag svg {
+    display: block;
+    overflow: visible;
+    filter: drop-shadow(0 6px 8px rgba(0, 0, 0, 0.18));
+  }
+  .price-tag-good .price-tag-body {
+    fill: var(--tag-gold);
+    stroke: var(--tag-gold-edge);
+  }
+  .price-tag-good .price-tag-string {
+    stroke: var(--tag-gold-string);
+  }
+  .price-tag-good .price-tag-hole {
+    stroke: var(--tag-gold-edge);
+  }
+  .price-tag-avoid .price-tag-body {
+    fill: var(--tag-red);
+    stroke: var(--tag-red-edge);
+  }
+  .price-tag-avoid .price-tag-string {
+    stroke: var(--tag-red-string);
+  }
+  .price-tag-avoid .price-tag-hole {
+    stroke: var(--tag-red-edge);
+  }
+  .price-tag-hole {
+    fill: var(--bg);
+  }
+  .price-tag-label {
+    position: absolute;
+    left: 0;
+    right: 0;
+    top: 37px;
+    text-align: center;
+    font: 800 11px/1.15 ui-rounded, system-ui, sans-serif;
+    letter-spacing: 0.02em;
+    font-variant-numeric: tabular-nums;
+    color: var(--tag-gold-ink);
+  }
+  .price-tag-avoid .price-tag-label {
+    top: 31px;
+    font-size: 10.5px;
+    letter-spacing: -0.01em;
+    color: var(--tag-red-ink);
+  }
+  .price-tag-label s {
+    opacity: 0.7;
+    font-weight: 600;
+  }
+  .price-tag-label small {
+    display: block;
+    font-size: 8.5px;
+    letter-spacing: 0.04em;
+  }
+  .price-tag-long .price-tag-label {
+    font-size: 9px;
+  }
+  .price-tag-sm .price-tag-label {
+    top: 28px;
+    font-size: 8px;
+  }
+  .price-tag-sm.price-tag-avoid .price-tag-label {
+    top: 22px;
+    font-size: 9px;
+  }
+  .price-tag-sm.price-tag-long .price-tag-label {
+    font-size: 7.5px;
+  }
+  .price-tag-sm .price-tag-label small {
+    font-size: 6.5px;
+  }
+  .price-tag-sparkle {
+    position: absolute;
+    font-size: 13px;
+    line-height: 1;
+    color: var(--sparkle);
+    animation: twinkle 2.4s ease-in-out infinite;
+  }
+  .price-tag-sparkle-small {
+    font-size: 9px;
+  }
+  .price-tag-sm .price-tag-sparkle {
+    font-size: 10px;
+  }
+  .price-tag-sm .price-tag-sparkle-small {
+    font-size: 7px;
+  }
+
+  /* RATING ruler (components/site/RatingScale.tsx), approved mockup "rating scale" */
+  .rating-label {
+    font-weight: 800;
+    font-size: 10.5px;
+    letter-spacing: 0.22em;
+    color: var(--muted);
+    margin: 10px 0 2px;
+  }
+  .rating-ruler {
+    position: relative;
+    height: 96px;
+  }
+  .rating-letters {
+    position: absolute;
+    left: 0;
+    right: 0;
+    bottom: 22px;
+    display: grid;
+    grid-template-columns: repeat(6, 1fr);
+    align-items: end;
+    text-align: center;
+  }
+  .rating-letter {
+    font-weight: 800;
+    line-height: 1;
+    transition: font-size 0.3s;
+  }
+  .rating-letter[data-on="true"] {
+    position: relative;
+    padding: 4px 0 2px;
+  }
+  .rating-letter[data-on="true"]::after {
+    content: "";
+    position: absolute;
+    left: 50%;
+    bottom: -14px;
+    width: 0;
+    height: 0;
+    border: 7px solid transparent;
+    border-bottom-color: currentColor;
+    transform: translateX(-50%);
+  }
+  .rating-ticks {
+    position: absolute;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    height: 16px;
+    border-top: 2px solid var(--ink);
+    opacity: 0.85;
+    background-image: repeating-linear-gradient(90deg, var(--ink) 0 1.5px, transparent 1.5px calc(100% / 30));
+    background-size: 100% 7px;
+    background-repeat: no-repeat;
+  }
+  .rating-ticks::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    background-image: repeating-linear-gradient(90deg, var(--ink) 0 2px, transparent 2px calc(100% / 6));
+    background-size: 100% 13px;
+    background-repeat: no-repeat;
+    background-position: calc(100% / 12) 0;
+  }
+  .rating-band {
+    position: absolute;
+    left: 0;
+    right: 0;
+    bottom: -6px;
+    height: 4px;
+    border-radius: 2px;
+    background: linear-gradient(90deg, var(--grade-a), var(--grade-b), var(--grade-c), var(--grade-d), var(--grade-e), var(--grade-f));
+  }
+  .rating-none {
+    margin-top: 16px;
+    font-weight: 700;
+    color: var(--muted);
+  }
+
+  /* Welcome headline (components/site/Headline.tsx): flips in like a turned price tag; the highlight sparkles */
+  .headline {
+    perspective: 600px;
+  }
+  .headline-flip {
+    display: inline-block;
+    transform-origin: 50% 0;
+    animation: headline-flip 0.9s cubic-bezier(0.2, 0.9, 0.25, 1.25) both;
+  }
+  .headline-em {
+    position: relative;
+    font-style: italic;
+    color: var(--accent);
+  }
+  .headline-em::after {
+    /* decorative sparkle with empty alt text, so screen readers skip it */
+    content: "\2726" / "";
+    position: absolute;
+    right: -0.45em;
+    top: -0.25em;
+    font-size: 0.42em;
+    font-style: normal;
+    color: var(--sparkle);
+    animation: twinkle 1.8s ease-in-out 0.7s infinite;
+  }
+}
+
 /* prefers-reduced-motion disables all animation */
 @media (prefers-reduced-motion: reduce) {
   *,
@@ -157,5 +435,11 @@
     animation-iteration-count: 1 !important;
     transition-duration: 0.01ms !important;
     scroll-behavior: auto !important;
+  }
+  .price-tag,
+  .price-tag-sparkle,
+  .headline-flip,
+  .headline-em::after {
+    animation: none !important;
   }
 }
