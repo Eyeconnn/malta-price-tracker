@@ -20,6 +20,8 @@ function card(id: number, extra: Partial<Card> = {}): Card {
     reason: 'reason',
     bf: true,
     category: 'laptops',
+    raisedFrom: null,
+    wasRaisedFromCents: null,
     ...extra,
   };
 }

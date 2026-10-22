@@ -28,10 +28,14 @@
   --ink: #1b1d22;
   --muted: #6a6e77;
   --glass: rgba(255, 255, 255, 0.72);
+  /* sticky top bar: nearly opaque so text scrolling under it does not show through (AA over ink, contrast test) */
+  --bar: rgba(251, 250, 247, 0.97);
   --line: rgba(20, 22, 28, 0.1);
   --tex: rgba(20, 22, 28, 0.15);
   --good: #137e4e;
   --bad: #c2321f;
+  /* text on a --bad fill (the Black Friday avoid banner) */
+  --bad-ink: #ffffff;
   --accent: #136cd5;
   --accent-ink: #ffffff;
   --tag-gold: #f4e6b8;
@@ -67,10 +71,12 @@
     --ink: #eef0f4;
     --muted: #9097a3;
     --glass: rgba(255, 255, 255, 0.065);
+    --bar: rgba(14, 16, 21, 0.9);
     --line: rgba(255, 255, 255, 0.11);
     --tex: rgba(255, 255, 255, 0.1);
     --good: #3ecf8e;
     --bad: #ff6b5e;
+    --bad-ink: #0e1015;
     --accent: #4da5fc;
     --accent-ink: #0e1015;
     --tag-gold: #efd98f;
@@ -124,6 +130,8 @@
   --color-brand: var(--accent);
   --color-good: var(--good);
   --color-bad: var(--bad);
+  --color-bad-ink: var(--bad-ink);
+  --color-bar: var(--bar);
   --color-ink: var(--ink);
   --color-glass: var(--glass);
   --color-line: var(--line);

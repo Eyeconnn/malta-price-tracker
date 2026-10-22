@@ -1,0 +1,148 @@
+// The one typed client for the public read API (web/worker/api.ts), and useApi for components.
+// Response types are built from the Worker's own types, so a change there breaks the build here.
+import { useCallback, useEffect, useRef, useState } from 'react';
+import type { PhraseSlot } from '../../../src/site/settings.js';
+import type { VerdictFacts } from '../../../src/site/verdict.js';
+import type {
+  Card,
+  CategoryCount,
+  Change,
+  GroupResult,
+  HistoryObs,
+  Label,
+  OtherShop,
+  ProductInfo,
+  ShopInfo,
+  ShopRating,
+  ShopStats,
+  ShopSummary,
+  Variant,
+} from '../../worker/data.js';
+
+export type { Card, Change, GroupResult, HistoryObs, Label, OtherShop, ProductInfo, ShopInfo, ShopRating, ShopStats, ShopSummary, Variant };
+
+/** A search result row: a card, and whether it is only "possibly the same" product (title-only match). */
+export type GroupItem = GroupResult['items'][number];
+
+export type HomeResponse = { phrases: Record<PhraseSlot, string[]>; good: Card[]; avoid: Card[] };
+export type SearchResponse = { results: GroupResult[] };
+export type DealsResponse = { items: Card[]; total: number };
+export type ShopsResponse = { shops: ShopSummary[] };
+export type ShopResponse = {
+  shop: ShopInfo;
+  rating: ShopRating;
+  avoid: Card[];
+  good: Card[];
+  rises: Change[];
+  drops: Change[];
+  stats: ShopStats;
+};
+export type ProductResponse = {
+  product: Omit<ProductInfo, 'verdict' | 'reason' | 'facts'>;
+  variants: Variant[];
+  history: HistoryObs[];
+  verdict: { label: Label; reason: string | null; facts: VerdictFacts | null };
+  others: OtherShop[];
+  /** the cheapest exact match at another shop, at least cheaperPct cheaper; null when none */
+  cheaper: OtherShop | null;
+};
+export type CategoriesResponse = { categories: (CategoryCount & { name: string })[] };
+
+export type DealsQuery = { type: 'good' | 'avoid'; category?: string | null; shop?: string | null; page?: number };
+
+/** A non-2xx answer from the API (or a body that is not JSON). */
+export class ApiError extends Error {
+  constructor(readonly status: number) {
+    super(`API answered ${status}`);
+    this.name = 'ApiError';
+  }
+}
+
+function query(params: Record<string, string | number | null | undefined>): string {
+  const u = new URLSearchParams();
+  for (const [k, v] of Object.entries(params)) if (v !== null && v !== undefined && v !== '') u.set(k, String(v));
+  const s = u.toString();
+  return s ? `?${s}` : '';
+}
+
+async function get<T>(path: string, signal?: AbortSignal): Promise<T> {
+  const res = await fetch(path, { signal, headers: { accept: 'application/json' } });
+  if (!res.ok) throw new ApiError(res.status);
+  try {
+    return (await res.json()) as T;
+  } catch (e) {
+    if (signal?.aborted) throw e;
+    throw new ApiError(res.status);
+  }
+}
+
+export const api = {
+  home: (signal?: AbortSignal) => get<HomeResponse>('/api/home', signal),
+  /** results are empty for a query under 2 characters (the server checks too) */
+  search: (q: string, shop: string | null, signal?: AbortSignal) => get<SearchResponse>(`/api/search${query({ q, shop })}`, signal),
+  deals: (q: DealsQuery, signal?: AbortSignal) =>
+    get<DealsResponse>(`/api/deals${query({ type: q.type, category: q.category, shop: q.shop, page: q.page })}`, signal),
+  shops: (signal?: AbortSignal) => get<ShopsResponse>('/api/shops', signal),
+  shop: (slug: string, signal?: AbortSignal) => get<ShopResponse>(`/api/shops/${encodeURIComponent(slug)}`, signal),
+  product: (id: number, signal?: AbortSignal) => get<ProductResponse>(`/api/products/${encodeURIComponent(String(id))}`, signal),
+  categories: (signal?: AbortSignal) => get<CategoriesResponse>('/api/categories', signal),
+};
+
+export type ApiState<T> =
+  | { status: 'idle' }
+  | { status: 'loading' }
+  | { status: 'error'; error: unknown }
+  | { status: 'empty'; data: T }
+  | { status: 'ready'; data: T };
+
+/**
+ * Loads `load` whenever `key` changes (null: nothing to load, status 'idle'). The previous request
+ * is aborted and its answer ignored, so only the response for the current key is ever shown.
+ * `isEmpty` turns a successful but empty answer into status 'empty'. `retry` loads the same key again.
+ */
+export function useApi<T>(
+  key: string | null,
+  load: (signal: AbortSignal) => Promise<T>,
+  isEmpty?: (data: T) => boolean,
+): ApiState<T> & { retry: () => void } {
+  const [attempt, setAttempt] = useState(0);
+  const [result, setResult] = useState<{ key: string; attempt: number; state: ApiState<T> } | null>(null);
+  const loadRef = useRef(load);
+  const isEmptyRef = useRef(isEmpty);
+  useEffect(() => {
+    loadRef.current = load;
+    isEmptyRef.current = isEmpty;
+  });
+
+  useEffect(() => {
+    if (key === null) return;
+    const ctrl = new AbortController();
+    loadRef.current(ctrl.signal).then(
+      (data) => {
+        if (ctrl.signal.aborted) return;
+        setResult({ key, attempt, state: isEmptyRef.current?.(data) ? { status: 'empty', data } : { status: 'ready', data } });
+      },
+      (error: unknown) => {
+        if (ctrl.signal.aborted) return;
+        setResult({ key, attempt, state: { status: 'error', error } });
+      },
+    );
+    return () => ctrl.abort();
+  }, [key, attempt]);
+
+  const retry = useCallback(() => setAttempt((a) => a + 1), []);
+  // A result for another key or attempt is stale: until the new one arrives the state is loading.
+  const state: ApiState<T> =
+    key === null ? { status: 'idle' } : result && result.key === key && result.attempt === attempt ? result.state : { status: 'loading' };
+  return { ...state, retry };
+}
+
+/** `value`, but only after it has stayed the same for `ms` milliseconds. The first value is immediate. */
+export function useDebounced<T>(value: T, ms: number): T {
+  const [settled, setSettled] = useState(value);
+  useEffect(() => {
+    const t = setTimeout(() => setSettled(value), ms);
+    return () => clearTimeout(t);
+  }, [value, ms]);
+  return settled;
+}

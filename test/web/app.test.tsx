@@ -1,11 +1,18 @@
 // @vitest-environment jsdom
 import { cleanup, render, screen } from '@testing-library/react';
 import { MemoryRouter } from 'react-router';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { App } from '@/App';
 import { ModeProvider } from '@/components/site/ModeProvider';
 
-afterEach(cleanup);
+// Pages that load data get an API that is down; their h1 does not depend on it.
+beforeEach(() => {
+  vi.stubGlobal('fetch', vi.fn(async () => new Response('{"error":"internal error"}', { status: 500 })));
+});
+afterEach(() => {
+  cleanup();
+  vi.unstubAllGlobals();
+});
 
 function renderAt(path: string) {
   return render(
@@ -19,7 +26,8 @@ function renderAt(path: string) {
 
 describe('App routes', () => {
   it.each([
-    ['/', 'Home'],
+    // Home's h1 is the welcome headline; with the API down it is the fallback line
+    ['/', 'Is that deal real?'],
     ['/search', 'Search'],
     ['/deals', 'Deals'],
     ['/shops', 'Shops'],
@@ -29,9 +37,9 @@ describe('App routes', () => {
     ['/admin', 'Admin'],
     ['/admin/reports', 'Admin'],
     ['/nowhere', 'Page not found'],
-  ])('%s renders one h1: %s', (path, heading) => {
+  ])('%s renders one h1: %s', async (path, heading) => {
     renderAt(path);
-    const h1 = screen.getAllByRole('heading', { level: 1 });
+    const h1 = await screen.findAllByRole('heading', { level: 1 });
     expect(h1).toHaveLength(1);
     expect(h1[0]!.textContent).toBe(heading);
   });

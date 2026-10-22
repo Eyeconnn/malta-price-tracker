@@ -65,6 +65,21 @@ describe.each([
     expect(ratio(color('--accent-ink'), color('--accent'))).toBeGreaterThanOrEqual(4.5);
   });
 
+  it('text on bad (the Black Friday avoid banner) is at least 4.5:1', () => {
+    expect(ratio(color('--bad-ink'), color('--bad'))).toBeGreaterThanOrEqual(4.5);
+  });
+
+  // The sticky top bar floats over scrolling content: its text must stay readable over the page
+  // and over the most contrasting content that can pass under it (ink-coloured text).
+  it.each(['--ink', '--muted', '--accent'])('%s nav text is at least 4.5:1 on the top bar over the page and over ink', (name) => {
+    const bar = parse(tokens.get('--bar')!);
+    for (const under of [bg, color('--ink')]) expect(ratio(color(name), over(bar, under))).toBeGreaterThanOrEqual(4.5);
+  });
+
+  it('the top bar is more opaque than glass', () => {
+    expect(parse(tokens.get('--bar')!).alpha).toBeGreaterThan(parse(tokens.get('--glass')!).alpha);
+  });
+
   it('tag ink is at least 4.5:1 on its tag fill', () => {
     expect(ratio(color('--tag-gold-ink'), color('--tag-gold'))).toBeGreaterThanOrEqual(4.5);
     expect(ratio(color('--tag-red-ink'), color('--tag-red'))).toBeGreaterThanOrEqual(4.5);

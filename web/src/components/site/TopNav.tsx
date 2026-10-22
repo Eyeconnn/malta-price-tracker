@@ -13,7 +13,7 @@ const link = ({ isActive }: { isActive: boolean }) =>
 /** Desktop navigation (768px and wider): logo, page links, and the mode and theme controls. */
 export function TopNav() {
   return (
-    <header className="sticky top-0 z-40 hidden border-b border-line bg-glass backdrop-blur-md md:block">
+    <header className="sticky top-0 z-40 hidden border-b border-line bg-bar backdrop-blur-md md:block">
       <nav aria-label="Main navigation" className="mx-auto flex max-w-5xl items-center gap-2 px-4 py-2">
         <SiteLogo />
         <div className="ml-3 flex items-center gap-1">

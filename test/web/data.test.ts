@@ -22,8 +22,8 @@ function runner(db: PGlite): SqlRunner {
 }
 
 const goodFacts = (realPct: number) => JSON.stringify({ low30: 80000, usual: 80000, claimedPct: 20, realPct, historyDays: 20, priceChanges: 1, wasChanges: 0, daysWorthBuying: 1 });
-const avoidFacts = (from: number, to: number) =>
-  JSON.stringify({ low30: from, usual: from, claimedPct: 10, realPct: 5, historyDays: 20, priceChanges: 1, wasChanges: 0, daysWorthBuying: 0, raisedFrom: { price: from, at: '2026-10-10' }, raisedTo: { price: to, at: '2026-10-20' } });
+const avoidFacts = (from: number, to: number, wasRaisedFrom?: number) =>
+  JSON.stringify({ low30: from, usual: from, claimedPct: 10, realPct: 5, historyDays: 20, priceChanges: 1, wasChanges: 0, daysWorthBuying: 0, raisedFrom: { price: from, at: '2026-10-10' }, raisedTo: { price: to, at: '2026-10-20' }, wasRaisedFrom });
 
 beforeAll(async () => {
   const { PGlite } = await import('@electric-sql/pglite');
@@ -71,7 +71,7 @@ beforeAll(async () => {
       (5, 4, 'X1', 'Lenovo IdeaPad inactive shop', 'laptops', null, 50000, null, true, null, 'good', 'r5', '${goodFacts(-40)}', 100, 'gtin', false, now()),
       (6, 1, 'S1', 'Lenovo IdeaPad stale row', 'laptops', null, 50000, null, true, null, 'good', 'r6', '${goodFacts(-40)}', 100, 'gtin', false, now() - interval '3 days'),
       (7, 1, 'p7', 'Samsung Galaxy Tab', 'phones', 20, 48000, 50000, true, 'marked', 'avoid', 'r7', '${avoidFacts(40000, 48000)}', null, null, false, now()),
-      (8, 2, 'B8', 'Beta avoid no price', 'phones', null, null, null, false, null, 'avoid', 'r8', '${avoidFacts(100, 110)}', null, null, false, now()),
+      (8, 2, 'B8', 'Beta avoid no price', 'phones', null, null, null, false, null, 'avoid', 'r8', '${avoidFacts(100, 110, 90)}', null, null, false, now()),
       (9, 2, 'B9', 'Beta good big drop', 'laptops', null, 30000, 50000, true, 'marked', 'good', 'r9', '${goodFacts(-25)}', null, null, false, now()),
       (10, 2, 'B10', 'Lenovo IdeaPad Slim 5 lookalike', 'laptops', null, 40000, null, true, null, 'none', null, null, 200, 'title', false, now()),
       (11, 1, 'other', 'Lenovo IdeaPad Slim 5 lookalike too', 'laptops', 12, 45000, null, true, null, 'none', null, null, 200, 'title', false, now()),
@@ -107,12 +107,20 @@ describe('data.ts on PGlite', () => {
       reason: 'r1',
       bf: true,
       category: 'laptops',
+      raisedFrom: null,
+      wasRaisedFromCents: null,
     });
   });
 
   it('avoid deals keep null prices as null, largest rise first', async () => {
     const r = await data.deals({ verdict: 'avoid', category: null, shop: null, limit: 24, offset: 0 });
     expect(r.items.map((c) => c.id)).toEqual([7, 8, 12]);
+    // the price before the raise, from the stored facts (shown on the avoid tag)
+    expect(r.items[0].raisedFrom).toEqual({ priceCents: 40000, at: '2026-10-10' });
+    expect(r.items[0].wasRaisedFromCents).toBeNull();
+    expect(r.items[1].wasRaisedFromCents).toBe(90);
+    // no facts stored: no raise facts
+    expect(r.items[2].raisedFrom).toBeNull();
     expect(r.items[1].priceCents).toBeNull();
     expect(r.items[1].wasCents).toBeNull();
     // a stored 0 is no price either
