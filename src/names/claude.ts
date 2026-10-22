@@ -1,7 +1,7 @@
 // Runs one batch through the local Claude Code CLI in print mode, on the owner's own login (never --bare, never an
 // API key). Shop text is untrusted: tools off, no MCP servers, no user/project settings (so no hooks or plugins),
-// no slash commands or skills, no session saved, and the child runs in an empty temp folder.
-import { spawn } from 'node:child_process';
+// no slash commands or skills, no session saved, and the child runs in an empty temp folder with an allowlisted env.
+import { spawn, spawnSync, type ChildProcess } from 'node:child_process';
 
 /** The levels `claude --help` lists for --effort (v2.1.306). */
 export const EFFORT_LEVELS = ['low', 'medium', 'high', 'xhigh', 'max'] as const;
@@ -23,8 +23,8 @@ export type ClaudeOptions = {
   bin?: string;
 };
 
-export type Usage = { inputTokens: number; outputTokens: number; cacheReadTokens: number; cacheWriteTokens: number };
-export const NO_USAGE: Usage = { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0 };
+export type Usage = { inputTokens: number; outputTokens: number; cacheReadTokens: number; cacheWriteTokens: number; thinkingTokens: number };
+export const NO_USAGE: Usage = { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0, thinkingTokens: 0 };
 
 export function addUsage(a: Usage, b: Usage): Usage {
   return {
@@ -32,6 +32,7 @@ export function addUsage(a: Usage, b: Usage): Usage {
     outputTokens: a.outputTokens + b.outputTokens,
     cacheReadTokens: a.cacheReadTokens + b.cacheReadTokens,
     cacheWriteTokens: a.cacheWriteTokens + b.cacheWriteTokens,
+    thinkingTokens: a.thinkingTokens + b.thinkingTokens,
   };
 }
 
@@ -59,22 +60,30 @@ export function claudeArgs(o: ClaudeOptions): string[] {
 }
 
 /**
- * Not passed on to the child:
- * - ANTHROPIC_API_KEY, ANTHROPIC_AUTH_TOKEN and ANTHROPIC_BASE_URL (would move billing to an API key or another endpoint);
- * - CLAUDE_CODE_SIMPLE (what --bare sets) and every other CLAUDE_CODE_* / CLAUDE_AGENT_SDK_* / CLAUDECODE variable a
- *   surrounding Claude Code session sets (host session, provider switches such as CLAUDE_CODE_USE_BEDROCK);
- * - the project's own secrets from .env (database URLs, passwords, keys, salts).
- * Kept: CLAUDE_CODE_OAUTH_TOKEN (the owner's own login, from `claude setup-token`), CLAUDE_CODE_GIT_BASH_PATH and
- * CLAUDE_CONFIG_DIR.
+ * The child's environment is an allowlist: what Windows and Node need to start a program and find the user's
+ * profile (where Claude Code keeps the owner's login), locale, proxy settings, and the owner's own login token
+ * (CLAUDE_CODE_OAUTH_TOKEN from `claude setup-token`), git bash path and config folder. Everything else stays out:
+ * ANTHROPIC_* (API keys, other endpoints), CLAUDE_CODE_SIMPLE (what --bare sets) and the variables of a surrounding
+ * Claude Code session, database URLs, GitHub tokens and every other secret.
  */
-const DROP_ENV =
-  /^ANTHROPIC_(API_KEY|AUTH_TOKEN|BASE_URL)$|^CLAUDECODE$|^CLAUDE_CODE_|^CLAUDE_AGENT_SDK_|^CLAUDE_PID$|^CLAUDE_EFFORT$|^CLAUDE_PREVIEW_|DATABASE_URL$|PASSWORD|SECRET|_API_KEY$|_ACCESS_KEY|^IP_SALT$/i;
-const KEEP_ENV = /^CLAUDE_CODE_(OAUTH_TOKEN|GIT_BASH_PATH)$/i;
+const ALLOW_ENV = new RegExp(
+  '^(' +
+    [
+      'PATH', 'PATHEXT', 'SYSTEMROOT', 'SYSTEMDRIVE', 'WINDIR', 'COMSPEC', 'TEMP', 'TMP', 'TMPDIR', 'USERPROFILE', 'HOME',
+      'HOMEDRIVE', 'HOMEPATH', 'APPDATA', 'LOCALAPPDATA', 'PROGRAMDATA', 'PROGRAMFILES', 'PROGRAMFILES\\(X86\\)', 'PROGRAMW6432',
+      'COMMONPROGRAMFILES', 'COMMONPROGRAMFILES\\(X86\\)', 'COMMONPROGRAMW6432', 'USERNAME', 'USER', 'LOGNAME', 'OS',
+      'PROCESSOR_[A-Z_]+', 'NUMBER_OF_PROCESSORS', 'LANG', 'LANGUAGE', 'LC_[A-Z_]+', 'TZ', 'XDG_CONFIG_HOME',
+      'HTTPS_PROXY', 'HTTP_PROXY', 'NO_PROXY', 'NODE_EXTRA_CA_CERTS',
+      'CLAUDE_CODE_OAUTH_TOKEN', 'CLAUDE_CODE_GIT_BASH_PATH', 'CLAUDE_CONFIG_DIR',
+    ].join('|') +
+    ')$',
+  'i',
+);
 
 export function childEnv(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
   const out: NodeJS.ProcessEnv = {};
   for (const [k, v] of Object.entries(env)) {
-    if (v !== undefined && (KEEP_ENV.test(k) || !DROP_ENV.test(k))) out[k] = v;
+    if (v !== undefined && ALLOW_ENV.test(k)) out[k] = v;
   }
   return out;
 }
@@ -86,33 +95,79 @@ export type Runner = (
   o: { input: string; env: NodeJS.ProcessEnv; cwd: string; timeoutMs: number },
 ) => Promise<RunResult>;
 
-/** Spawns the CLI. On Windows it gets its own process group, so Ctrl+C in the console lets running batches finish. */
+/** How to kill a process and everything it started: taskkill /T on Windows, the process group elsewhere. */
+export function killTreeCommand(pid: number, platform: NodeJS.Platform = process.platform): { cmd: string; args: string[] } | { group: number } {
+  return platform === 'win32' ? { cmd: 'taskkill', args: ['/PID', String(pid), '/T', '/F'] } : { group: -pid };
+}
+
+/** Kills a process tree. sync: for process exit handlers, where nothing asynchronous runs. */
+export function killTree(pid: number, sync = false): void {
+  const how = killTreeCommand(pid);
+  try {
+    if ('group' in how) process.kill(how.group, 'SIGKILL');
+    else if (sync) spawnSync(how.cmd, how.args, { stdio: 'ignore', windowsHide: true });
+    else spawn(how.cmd, how.args, { stdio: 'ignore', windowsHide: true }).on('error', () => {});
+  } catch {
+    // already gone
+  }
+}
+
+const live = new Set<ChildProcess>();
+
+/** Children still running. */
+export function liveChildren(): number {
+  return live.size;
+}
+
+/** Kills every running child tree (second Ctrl+C, process exit). */
+export function killAllChildren(sync = false): void {
+  for (const c of live) if (c.pid !== undefined) killTree(c.pid, sync);
+}
+
+/** After a kill or an exit, the attempt settles within this time even if the pipes never close. */
+const SETTLE_GRACE_MS = 5000;
+
+/**
+ * Spawns the CLI in its own process group (on Windows that also keeps the console's Ctrl+C away from it, so running
+ * batches can finish). On timeout the whole tree is killed; the result settles at close, or at most
+ * SETTLE_GRACE_MS after the kill or the exit, even when a grandchild still holds the pipes.
+ */
 export const spawnRunner: Runner = (bin, args, o) =>
   new Promise((resolve) => {
-    const child = spawn(bin, args, {
-      cwd: o.cwd,
-      env: o.env,
-      stdio: ['pipe', 'pipe', 'pipe'],
-      windowsHide: true,
-      detached: process.platform === 'win32',
-    });
+    const child = spawn(bin, args, { cwd: o.cwd, env: o.env, stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true, detached: true });
+    live.add(child);
     const out: Buffer[] = [];
     const err: Buffer[] = [];
     let timedOut = false;
     let settled = false;
+    let exitCode: number | null = null;
+    let grace: ReturnType<typeof setTimeout> | undefined;
     const finish = (code: number | null, extra = '') => {
       if (settled) return;
       settled = true;
       clearTimeout(timer);
+      clearTimeout(grace);
+      live.delete(child);
+      child.stdout.destroy();
+      child.stderr.destroy();
       resolve({ code, stdout: Buffer.concat(out).toString('utf8'), stderr: Buffer.concat(err).toString('utf8') + extra, timedOut });
+    };
+    const settleSoon = () => {
+      grace ??= setTimeout(() => finish(exitCode, timedOut ? '' : ' (pipes still open after exit)'), SETTLE_GRACE_MS);
     };
     const timer = setTimeout(() => {
       timedOut = true;
-      child.kill();
+      if (child.pid !== undefined) killTree(child.pid);
+      settleSoon();
     }, o.timeoutMs);
     child.stdout.on('data', (d: Buffer) => out.push(d));
     child.stderr.on('data', (d: Buffer) => err.push(d));
     child.on('error', (e) => finish(null, e.message));
+    child.on('exit', (code) => {
+      exitCode = code;
+      live.delete(child);
+      settleSoon();
+    });
     child.on('close', (code) => finish(code));
     child.stdin.on('error', () => {});
     child.stdin.end(o.input, 'utf8');
@@ -147,11 +202,13 @@ export function parseClaudeOutput(stdout: string): ParsedResult {
   const obj = jsonObject(stdout);
   if (!obj) throw new ClaudeOutputError('claude output is not JSON', NO_USAGE, 0);
   const u = (obj.usage ?? {}) as Record<string, unknown>;
+  const details = (u.output_tokens_details ?? {}) as Record<string, unknown>;
   const usage: Usage = {
     inputTokens: num(u.input_tokens),
     outputTokens: num(u.output_tokens),
     cacheReadTokens: num(u.cache_read_input_tokens),
     cacheWriteTokens: num(u.cache_creation_input_tokens),
+    thinkingTokens: num(details.thinking_tokens),
   };
   const costUsd = num(obj.total_cost_usd);
   if (obj.is_error === true || (typeof obj.subtype === 'string' && obj.subtype !== 'success')) {
@@ -179,12 +236,16 @@ export type CallResult = {
   raw: string;
 };
 
-/** One batch: up to two attempts (one retry on a failed, timed out or unparsable answer). Usage adds up over attempts. */
+/**
+ * One batch: up to two attempts (one retry on a failed, timed out or unparsable answer, unless shouldStop says
+ * the run is stopping). Usage adds up over attempts.
+ */
 export async function callClaude(
   opts: ClaudeOptions,
   input: string,
   runner: Runner = spawnRunner,
   env: NodeJS.ProcessEnv = process.env,
+  shouldStop: () => boolean = () => false,
 ): Promise<CallResult> {
   const bin = opts.bin ?? env.CLAUDE_BIN ?? 'claude';
   const args = claudeArgs(opts);
@@ -193,7 +254,10 @@ export async function callClaude(
   let costUsd = 0;
   let error = '';
   let raw = '';
-  for (let attempt = 1; attempt <= 2; attempt++) {
+  let attempt = 0;
+  while (attempt < 2) {
+    if (attempt > 0 && shouldStop()) break;
+    attempt++;
     const r = await runner(bin, args, { input, env: childEnvVars, cwd: opts.cwd, timeoutMs: opts.timeoutMs });
     raw = r.stdout;
     if (r.timedOut) {
@@ -218,5 +282,5 @@ export async function callClaude(
       error = `${(e as Error).message}${r.stderr.trim() ? ` (${r.stderr.trim().slice(0, 300)})` : ''}`;
     }
   }
-  return { ok: false, error, usage, costUsd, attempts: 2, raw };
+  return { ok: false, error, usage, costUsd, attempts: attempt, raw };
 }

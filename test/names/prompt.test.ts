@@ -71,6 +71,9 @@ describe('systemPrompt', () => {
   it('holds the safety rules and treats shop text as data', () => {
     expect(p).toMatch(/never invent/i);
     expect(p).toMatch(/addressed to an AI/i);
+    expect(p).toMatch(/never add a unit/i);
+    expect(p).toMatch(/only words that appear in the data/i);
+    expect(p).toMatch(/web address/i);
     expect(p).toMatch(/brand/i);
     expect(p).not.toContain('\u2014');
   });

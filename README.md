@@ -162,9 +162,10 @@ To switch on: set the repository variable `SCRAPE_DUE_ENABLED` to `true`.
 `pnpm normalise-names` sends batches of one site category's product groups to Claude Code (`claude -p`, on the
 owner's own Claude login, never an API key and never `--bare`) and gets back a clean name, a variant label and the
 category's attributes (`config/attribute-schemas.json`). Every answer is checked in code (`src/names/check.ts`: the
-brand and every number and model token must survive); a failed check is stored as rejected and the site keeps the
+brand, every number with its unit and every model code must survive, and no word or number may be invented); a failed check is stored as rejected and the site keeps the
 shop's title. Claude runs with tools off, no MCP servers, no user or project settings (so no hooks or plugins), no
-session saved, in an empty temp folder; shop text is passed as data.
+session saved, in an empty temp folder with an allowlisted environment (no API keys, tokens or database URLs); shop
+text is passed as data. A run that writes to the database needs `--pilot` or `--max-batches`.
 
 ```bash
 pnpm normalise-names --model haiku --pilot --dry-run             # 500 groups spread over categories and shops, no writes

@@ -7,7 +7,11 @@ import { renderCsv, writeReport, type ReportRow, type RunSummary } from '../../s
 const summary: RunSummary = {
   runId: '12', model: 'haiku', effort: 'low', categories: ['laptops', 'toys'], pilot: true, dryRun: true,
   batches: 2, groups: 3, accepted: 2, rejected: 1, failedBatches: 0,
-  inputTokens: 1000, outputTokens: 500, cacheReadTokens: 100, cacheWriteTokens: 50, costUsd: 0.0123, wallSeconds: 42.5,
+  inputTokens: 1000, outputTokens: 500, cacheReadTokens: 100, cacheWriteTokens: 50, thinkingTokens: 300, costUsd: 0.0123, wallSeconds: 42.5,
+  batchStats: [
+    { index: 1, category: 'laptops', items: 1, accepted: 1, rejected: 0, failed: false, inputTokens: 600, outputTokens: 300, cacheReadTokens: 0, cacheWriteTokens: 50, thinkingTokens: 250, costUsd: 0.0081, seconds: 12.25 },
+    { index: 2, category: 'toys', items: 2, accepted: 1, rejected: 1, failed: true, inputTokens: 400, outputTokens: 200, cacheReadTokens: 100, cacheWriteTokens: 0, thinkingTokens: 50, costUsd: 0.0042, seconds: 30.25 },
+  ],
 };
 
 const rows: ReportRow[] = [
@@ -39,6 +43,11 @@ describe('writeReport', () => {
     expect(html).toContain('0.41'); // cost per 100 groups
     expect(html).toContain('lost tokens: 42115');
     expect(html).toContain('ram_gb: 16');
+    // per-batch usage table
+    expect(html).toContain('<h2>Batches</h2>');
+    expect(html).toContain('<td>1</td><td>laptops</td><td>1</td><td>1</td><td>0</td><td>600</td><td>0 / 50</td><td>300</td><td>250</td><td>$0.0081</td><td>12.3</td>');
+    expect(html).toContain('<tr class="failed"><td>2</td>');
+    expect(html).toContain('<dt>Thinking tokens</dt><dd>300</dd>');
     expect(html).not.toContain('\u2014');
 
     const csv = await readFile(files.csv, 'utf8');

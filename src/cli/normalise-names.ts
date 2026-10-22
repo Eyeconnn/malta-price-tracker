@@ -3,7 +3,8 @@
 // Sends batches of one site category's product groups to Claude Code (claude -p, on the owner's own login) for clean
 // names and the category's attributes, checks every answer (src/names/check.ts) and writes a report to out/names/.
 // Reads with DASHBOARD_DATABASE_URL (read-only role). Without --dry-run, writes product_names and name_runs with
-// DATABASE_URL. Ctrl+C stops after the running batches; a second Ctrl+C quits at once.
+// DATABASE_URL; such a run needs --pilot or --max-batches. Ctrl+C stops after the running batches; a second Ctrl+C
+// quits at once and kills the running claude processes with everything they started.
 import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
@@ -13,9 +14,10 @@ import { closeDb, db } from '../db.js';
 import { env } from '../env.js';
 import { SITE_CATEGORIES } from '../site/categories.js';
 import { checkBatch } from '../names/check.js';
-import { addUsage, callClaude, EFFORT_LEVELS, NO_USAGE, type Effort, type Usage } from '../names/claude.js';
+import { addUsage, callClaude, killAllChildren, NO_USAGE, spawnRunner, type Usage } from '../names/claude.js';
+import { checkRunScope, parseEffort } from '../names/options.js';
 import { makeBatches, systemPrompt, userMessage, type Batch } from '../names/prompt.js';
-import { writeReport, type ReportRow } from '../names/report.js';
+import { writeReport, type BatchStat, type ReportRow } from '../names/report.js';
 import { answerJsonSchema, loadAttributeSchemas } from '../names/schema.js';
 import { changedGroups, loadGroups, pilotSample } from '../names/select.js';
 import { finishRun, saveResults, startRun } from '../names/store.js';
@@ -66,17 +68,14 @@ async function main() {
   const model = values.model?.trim();
   if (!model) throw new Error('--model is required (for example haiku, sonnet, opus)');
   if (!/^[A-Za-z0-9._\-[\]]+$/.test(model)) throw new Error(`--model has unexpected characters: ${model}`);
-  const effortRaw = values.effort?.trim();
-  if (effortRaw !== undefined && !(EFFORT_LEVELS as readonly string[]).includes(effortRaw)) {
-    throw new Error(`--effort must be one of ${EFFORT_LEVELS.join(', ')}, got ${effortRaw}`);
-  }
-  const effort = effortRaw as Effort | undefined;
+  const effort = parseEffort(values.effort);
   const pilot = values.pilot;
   const dryRun = values['dry-run'];
   const limit = intOption('limit', values.limit, 1, 100000);
   const batchSize = intOption('batch-size', values['batch-size'], 1, 100);
   const parallel = intOption('parallel', values.parallel, 1, MAX_PARALLEL);
-  const maxBatches = values['max-batches'] === undefined ? Infinity : intOption('max-batches', values['max-batches'], 1, 100000);
+  const maxBatches = values['max-batches'] === undefined ? undefined : intOption('max-batches', values['max-batches'], 1, 100000);
+  checkRunScope({ dryRun, pilot, maxBatches });
   const timeoutMs = intOption('timeout', values.timeout, 10, 3600) * 1000;
   const slugs = SITE_CATEGORIES.map((c) => c.slug as string);
   const categories = values.category ?? [];
@@ -92,7 +91,7 @@ async function main() {
   }
   const candidates = changedGroups(groupsAll);
   const chosen = pilot ? pilotSample(candidates, limit, values.seed) : candidates;
-  const batches = interleave(makeBatches(chosen, batchSize)).slice(0, maxBatches);
+  const batches = interleave(makeBatches(chosen, batchSize)).slice(0, maxBatches ?? Infinity);
   const runCats = [...new Set(batches.map((b) => b.category))];
   const groupCount = batches.reduce((n, b) => n + b.items.length, 0);
   console.log(
@@ -121,8 +120,13 @@ async function main() {
   if (values['save-raw']) await mkdir(rawDir, { recursive: true });
 
   let stopping = false;
+  // a second Ctrl+C or any exit kills the running claude processes and everything they started
+  process.on('exit', () => killAllChildren(true));
   process.on('SIGINT', () => {
-    if (stopping) process.exit(130);
+    if (stopping) {
+      killAllChildren(true);
+      process.exit(130);
+    }
     stopping = true;
     console.log('normalise-names: stopping after the running batches (Ctrl+C again to quit now)');
   });
@@ -136,11 +140,17 @@ async function main() {
   let failedBatches = 0;
   let done = 0;
   let next = 0;
+  const batchStats: BatchStat[] = [];
 
   async function runBatch(index: number, batch: Batch) {
     const t0 = Date.now();
     const cat = perCategory.get(batch.category)!;
-    const call = await callClaude({ model: model!, effort, ...cat, mcpConfigFile, cwd: childCwd, timeoutMs }, userMessage(batch));
+    const call = await callClaude({ model: model!, effort, ...cat, mcpConfigFile, cwd: childCwd, timeoutMs }, userMessage(batch), spawnRunner, process.env, () => stopping);
+    const stat: BatchStat = {
+      index: index + 1, category: batch.category, items: batch.items.length, accepted: 0, rejected: 0, failed: !call.ok,
+      ...call.usage, costUsd: call.costUsd, seconds: (Date.now() - t0) / 1000,
+    };
+    batchStats.push(stat);
     usage = addUsage(usage, call.usage);
     costUsd += call.costUsd;
     if (values['save-raw']) await writeFile(path.join(rawDir, `batch-${index + 1}.json`), call.raw, 'utf8');
@@ -159,6 +169,8 @@ async function main() {
     const ok = results.filter((r) => r.status === 'ok').length;
     accepted += ok;
     rejected += results.length - ok;
+    stat.accepted = ok;
+    stat.rejected = results.length - ok;
     for (const r of results) {
       rows.push({
         category: batch.category, shop: r.item.group.shopSlug, sourceTitle: r.item.group.title, name: r.proposedName,
@@ -197,7 +209,7 @@ async function main() {
   rows.sort((a, b) => a.category.localeCompare(b.category) || a.shop.localeCompare(b.shop) || a.sourceTitle.localeCompare(b.sourceTitle));
   const summary = {
     runId, model, effort: effort ?? null, categories: runCats, pilot, dryRun, batches: done, groups: items, accepted, rejected, failedBatches,
-    ...usage, costUsd, wallSeconds,
+    ...usage, costUsd, wallSeconds, batchStats: [...batchStats].sort((a, b) => a.index - b.index),
   };
   const files = await writeReport(OUT_DIR, summary, rows);
   if (rw) {

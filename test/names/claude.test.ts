@@ -1,6 +1,8 @@
 import { readFile } from 'node:fs/promises';
 import { describe, expect, it } from 'vitest';
-import { callClaude, childEnv, claudeArgs, EFFORT_LEVELS, parseClaudeOutput, type Runner } from '../../src/names/claude.js';
+import {
+  callClaude, childEnv, claudeArgs, EFFORT_LEVELS, killAllChildren, killTreeCommand, liveChildren, parseClaudeOutput, spawnRunner, type Runner,
+} from '../../src/names/claude.js';
 
 const opts = {
   model: 'haiku',
@@ -53,24 +55,70 @@ describe('claudeArgs', () => {
   });
 });
 
-describe('childEnv', () => {
-  it('drops ANTHROPIC_API_KEY and the project secrets, keeps the rest', () => {
+describe('childEnv (allowlist)', () => {
+  it('passes only the allowlisted system variables and the owner login', () => {
     const env = childEnv({
-      PATH: 'p', USERPROFILE: 'u', ANTHROPIC_API_KEY: 'k', DATABASE_URL: 'd', DASHBOARD_DATABASE_URL: 'd2',
-      R2_SECRET_ACCESS_KEY: 's', ADMIN_PASSWORD: 'a', IP_SALT: 'i', RESEND_API_KEY: 'r',
+      PATH: 'p', Path: 'p2', PATHEXT: '.EXE', SystemRoot: 'C:/Windows', windir: 'C:/Windows', COMSPEC: 'cmd', TEMP: 't', TMP: 't',
+      USERPROFILE: 'u', HOME: 'h', HOMEDRIVE: 'C:', HOMEPATH: '/u', APPDATA: 'a', LOCALAPPDATA: 'l', PROGRAMDATA: 'pd',
+      ProgramFiles: 'pf', 'ProgramFiles(x86)': 'pf86', ProgramW6432: 'pw', USERNAME: 'n', OS: 'Windows_NT',
+      PROCESSOR_ARCHITECTURE: 'AMD64', NUMBER_OF_PROCESSORS: '8', LANG: 'en', LC_ALL: 'C',
+      CLAUDE_CODE_OAUTH_TOKEN: 'owner', CLAUDE_CODE_GIT_BASH_PATH: 'C:/git/bash.exe', CLAUDE_CONFIG_DIR: 'C:/c',
+      HTTPS_PROXY: 'http://proxy:8080', NODE_EXTRA_CA_CERTS: 'ca.pem',
     });
-    expect(env).toEqual({ PATH: 'p', USERPROFILE: 'u' });
+    expect(Object.keys(env).sort()).toEqual([
+      'APPDATA', 'CLAUDE_CODE_GIT_BASH_PATH', 'CLAUDE_CODE_OAUTH_TOKEN', 'CLAUDE_CONFIG_DIR', 'COMSPEC', 'HOME', 'HOMEDRIVE',
+      'HOMEPATH', 'HTTPS_PROXY', 'LANG', 'LC_ALL', 'LOCALAPPDATA', 'NODE_EXTRA_CA_CERTS', 'NUMBER_OF_PROCESSORS', 'OS', 'PATH',
+      'PATHEXT', 'PROCESSOR_ARCHITECTURE', 'PROGRAMDATA', 'Path', 'ProgramFiles', 'ProgramFiles(x86)', 'ProgramW6432',
+      'SystemRoot', 'TEMP', 'TMP', 'USERNAME', 'USERPROFILE', 'windir',
+    ].sort());
   });
 
-  it('drops what would make the child bare, use another endpoint or join a host session', () => {
+  it('drops secrets, tokens and anything that would make the child bare or use another endpoint', () => {
     const env = childEnv({
-      PATH: 'p', CLAUDE_CODE_SIMPLE: '1', CLAUDECODE: '1', CLAUDE_CODE_SESSION_ID: 's', CLAUDE_CODE_MESSAGING_TOKEN: 't',
-      CLAUDE_CODE_ENTRYPOINT: 'e', CLAUDE_AGENT_SDK_VERSION: 'v', CLAUDE_PID: '1', CLAUDE_EFFORT: 'low',
-      ANTHROPIC_BASE_URL: 'http://127.0.0.1:1', ANTHROPIC_AUTH_TOKEN: 'a', CLAUDE_CODE_USE_BEDROCK: '1',
-      CLAUDE_CODE_OAUTH_TOKEN: 'owner', CLAUDE_CODE_GIT_BASH_PATH: 'C:/git/bash.exe', CLAUDE_CONFIG_DIR: 'C:/c',
+      PATH: 'p', DATABASE_URL: 'd', DASHBOARD_DATABASE_URL: 'd2', GITHUB_TOKEN: 'g', GITHUB_PAT_TOKEN: 'g2', GH_TOKEN: 'g3',
+      ANTHROPIC_API_KEY: 'k', ANTHROPIC_AUTH_TOKEN: 'a', ANTHROPIC_BASE_URL: 'http://127.0.0.1:1', ANTHROPIC_MODEL: 'm',
+      CLAUDE_CODE_SIMPLE: '1', CLAUDECODE: '1', CLAUDE_CODE_SESSION_ID: 's', CLAUDE_CODE_USE_BEDROCK: '1',
+      R2_SECRET_ACCESS_KEY: 's', ADMIN_PASSWORD: 'a', IP_SALT: 'i', AWS_SECRET_ACCESS_KEY: 'x', SOMETHING_ELSE: 'y',
     });
-    expect(env).toEqual({ PATH: 'p', CLAUDE_CODE_OAUTH_TOKEN: 'owner', CLAUDE_CODE_GIT_BASH_PATH: 'C:/git/bash.exe', CLAUDE_CONFIG_DIR: 'C:/c' });
+    expect(env).toEqual({ PATH: 'p' });
+    for (const k of Object.keys(env)) expect(k).not.toMatch(/^ANTHROPIC_|DATABASE_URL|^GITHUB_|TOKEN$/);
   });
+});
+
+describe('killTreeCommand', () => {
+  it('kills the whole tree with taskkill on Windows and the process group elsewhere', () => {
+    expect(killTreeCommand(1234, 'win32')).toEqual({ cmd: 'taskkill', args: ['/PID', '1234', '/T', '/F'] });
+    expect(killTreeCommand(1234, 'linux')).toEqual({ group: -1234 });
+  });
+});
+
+describe('spawnRunner', () => {
+  const node = process.execPath;
+  const hang = "setInterval(() => {}, 1000)";
+  const withGrandchild = `require('child_process').spawn(process.execPath, ['-e', '${hang}'], { stdio: 'inherit' }); ${hang}`;
+
+  it('on timeout kills the child and its children and settles even when they held the pipes', async () => {
+    const t0 = Date.now();
+    const r = await spawnRunner(node, ['-e', withGrandchild], { input: '', env: process.env, cwd: process.cwd(), timeoutMs: 500 });
+    expect(r.timedOut).toBe(true);
+    expect(Date.now() - t0).toBeLessThan(9000);
+    expect(liveChildren()).toBe(0);
+  }, 15000);
+
+  it('tracks live children and killAllChildren ends them', async () => {
+    const p = spawnRunner(node, ['-e', withGrandchild], { input: '', env: process.env, cwd: process.cwd(), timeoutMs: 60000 });
+    await new Promise((res) => setTimeout(res, 300));
+    expect(liveChildren()).toBe(1);
+    killAllChildren();
+    const r = await p;
+    expect(r.code === null || r.code !== 0).toBe(true);
+    expect(liveChildren()).toBe(0);
+  }, 15000);
+
+  it('returns stdout of a normal run', async () => {
+    const r = await spawnRunner(node, ['-e', "process.stdin.on('data', (d) => process.stdout.write(String(d).toUpperCase()))"], { input: 'abc', env: process.env, cwd: process.cwd(), timeoutMs: 10000 });
+    expect(r).toMatchObject({ code: 0, stdout: 'ABC', timedOut: false });
+  }, 15000);
 });
 
 describe('parseClaudeOutput', () => {
@@ -82,6 +130,7 @@ describe('parseClaudeOutput', () => {
     for (const it of out.items) expect(typeof it.display_name).toBe('string');
     expect(r.usage.inputTokens + r.usage.cacheReadTokens + r.usage.cacheWriteTokens).toBeGreaterThan(0);
     expect(r.usage.outputTokens).toBeGreaterThan(0);
+    expect(r.usage.thinkingTokens).toBe(2412);
     expect(r.costUsd).toBeGreaterThan(0);
   });
 
@@ -115,7 +164,7 @@ describe('callClaude', () => {
     expect(seen[0].input).toBe('batch text');
     expect(seen[0].env.ANTHROPIC_API_KEY).toBeUndefined();
     expect(seen[0].env.PATH).toBe('p');
-    expect(r.usage).toEqual({ inputTokens: 10, outputTokens: 5, cacheReadTokens: 2, cacheWriteTokens: 3 });
+    expect(r.usage).toEqual({ inputTokens: 10, outputTokens: 5, cacheReadTokens: 2, cacheWriteTokens: 3, thinkingTokens: 0 });
     expect(r.costUsd).toBeCloseTo(0.01);
   });
 
@@ -140,6 +189,18 @@ describe('callClaude', () => {
     expect(r.ok).toBe(false);
     expect(n).toBe(2);
     expect(r.error).toContain('bad flag');
+  });
+
+  it('does not retry once the run is stopping', async () => {
+    let n = 0;
+    const runner: Runner = async () => {
+      n++;
+      return { code: 1, stdout: '', stderr: 'boom', timedOut: false };
+    };
+    const r = await callClaude(opts, 'x', runner, {}, () => true);
+    expect(r.ok).toBe(false);
+    expect(n).toBe(1);
+    expect(r.attempts).toBe(1);
   });
 
   it('reports a timeout', async () => {

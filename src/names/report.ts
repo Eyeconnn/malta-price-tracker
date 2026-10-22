@@ -19,9 +19,28 @@ export type RunSummary = {
   outputTokens: number;
   cacheReadTokens: number;
   cacheWriteTokens: number;
+  thinkingTokens: number;
   /** total_cost_usd as Claude Code reports it (API prices; on a plan it is what the run would have cost) */
   costUsd: number;
   wallSeconds: number;
+  /** usage per batch, in the order they ran */
+  batchStats: BatchStat[];
+};
+
+export type BatchStat = {
+  index: number;
+  category: string;
+  items: number;
+  accepted: number;
+  rejected: number;
+  failed: boolean;
+  inputTokens: number;
+  outputTokens: number;
+  cacheReadTokens: number;
+  cacheWriteTokens: number;
+  thinkingTokens: number;
+  costUsd: number;
+  seconds: number;
 };
 
 export type ReportRow = {
@@ -65,11 +84,24 @@ export function renderHtml(s: RunSummary, rows: ReportRow[]): string {
     ['Batches', `${int(s.batches)} (${int(s.failedBatches)} failed)`],
     ['Input tokens', int(s.inputTokens)],
     ['Output tokens', int(s.outputTokens)],
+    ['Thinking tokens', int(s.thinkingTokens)],
     ['Cache read / write tokens', `${int(s.cacheReadTokens)} / ${int(s.cacheWriteTokens)}`],
     ['Reported cost', usd(s.costUsd)],
     ['Cost per 100 groups', usd(costPer100(s))],
     ['Wall time', `${s.wallSeconds.toFixed(1)} s`],
   ];
+  const batchRows = s.batchStats
+    .map(
+      (b) => `<tr class="${b.failed ? 'failed' : 'ok'}"><td>${b.index}</td><td>${esc(b.category)}</td><td>${int(b.items)}</td><td>${int(b.accepted)}</td>` +
+        `<td>${int(b.rejected)}</td><td>${int(b.inputTokens)}</td><td>${int(b.cacheReadTokens)} / ${int(b.cacheWriteTokens)}</td><td>${int(b.outputTokens)}</td>` +
+        `<td>${int(b.thinkingTokens)}</td><td>${usd(b.costUsd)}</td><td>${b.seconds.toFixed(1)}</td></tr>`,
+    )
+    .join('\n');
+  const batchTable = `<h2>Batches</h2>
+<table><thead><tr><th>#</th><th>Category</th><th>Items</th><th>Accepted</th><th>Rejected</th><th>Input tokens</th><th>Cache read / write</th><th>Output tokens</th><th>Thinking tokens</th><th>Reported cost</th><th>Seconds</th></tr></thead>
+<tbody>
+${batchRows}
+</tbody></table>`;
   const cats = [...new Set(rows.map((r) => r.category))].sort();
   const sections = cats.map((cat) => {
     const list = rows.filter((r) => r.category === cat);
@@ -105,6 +137,7 @@ small { font-weight: normal; color: #666; }
 </style></head><body>
 <h1>Name normaliser run ${esc(s.runId)}</h1>
 <dl>${facts.map(([k, v]) => `<dt>${esc(k)}</dt><dd>${esc(v)}</dd>`).join('')}</dl>
+${batchTable}
 ${sections.join('\n')}
 </body></html>
 `;

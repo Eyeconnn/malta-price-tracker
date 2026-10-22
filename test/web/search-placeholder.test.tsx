@@ -46,7 +46,13 @@ function record(ms: number) {
   return { hook, seen };
 }
 
+/** Inside the first example's typing (gap, then a few letters): never the empty gap or the hold/erase phases. */
+const TYPING_WINDOW_FAST = FAST.gapMs + FAST.typeMs * 3;
+const TYPING_WINDOW = TYPING.gapMs + TYPING.typeMs * 3;
+
 beforeEach(() => {
+  // a fixed example order: the first example is the first laptops one, so every sample instant is predictable
+  vi.spyOn(Math, 'random').mockReturnValue(0);
   vi.useFakeTimers();
   setMedia(false);
   setVisibility('visible');
@@ -54,6 +60,7 @@ beforeEach(() => {
 afterEach(() => {
   cleanup();
   vi.useRealTimers();
+  vi.restoreAllMocks();
 });
 
 describe('useTypingPlaceholder', () => {
@@ -87,7 +94,7 @@ describe('useTypingPlaceholder', () => {
   });
 
   it('shows nothing and holds no timer while inactive, and starts again from empty', () => {
-    const { hook } = record(300);
+    const { hook } = record(TYPING_WINDOW_FAST);
     expect(hook.result.current.text).not.toBe('');
     hook.rerender({ on: false });
     expect(hook.result.current.text).toBe('');
@@ -112,7 +119,8 @@ describe('useTypingPlaceholder', () => {
   });
 
   it('pauses while the tab is hidden and goes on when it is visible again', () => {
-    const { hook } = record(300);
+    const { hook } = record(TYPING_WINDOW_FAST);
+    expect(hook.result.current.text).not.toBe('');
     act(() => setVisibility('hidden'));
     expect(vi.getTimerCount()).toBe(0);
     const frozen = hook.result.current.text;
@@ -158,7 +166,7 @@ describe('SearchBox with the typing placeholder', () => {
   it('types into an aria-hidden overlay and keeps a stable accessible name', () => {
     const { input } = renderBox();
     expect(input.getAttribute('placeholder')).toBeNull();
-    tick(TYPING.gapMs + TYPING.typeMs * 40);
+    tick(TYPING_WINDOW);
     const el = overlay()!;
     expect(el.getAttribute('aria-hidden')).toBe('true');
     expect(el.textContent!.length).toBeGreaterThan(0);
