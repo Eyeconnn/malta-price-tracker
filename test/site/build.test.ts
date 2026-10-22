@@ -281,7 +281,8 @@ describe.skipIf(!process.env.SITE_BUILD_TEST_DB)('site-build on PGlite', () => {
     expect(lenovo.image_url).toBe('https://lenovoshop.test/p1.jpg');
     expect(lenovo.bf_status).toBe('marked');
     expect(lenovo.updated_at.getTime()).toBe(NOW.getTime());
-    expect(lenovo.match_confirmed).toBe(true);
+    // Ruling R50: the row joined a canonical group (it had none), so the old confirmation is dropped
+    expect(lenovo.match_confirmed).toBe(false);
 
     const kettle = find(rows, ids.a, 'K1')!;
     expect(kettle.verdict).toBe('none');
@@ -328,7 +329,18 @@ describe.skipIf(!process.env.SITE_BUILD_TEST_DB)('site-build on PGlite', () => {
     expect(a.grade).toBe('F');
   }, 60_000);
 
-  it('clears a match that no longer holds and keeps match_confirmed', async () => {
+  it('keeps a match confirmation while the row stays in the same canonical group (R50)', async () => {
+    await sql`update site_products set match_confirmed = true where shop_id in (${Number(ids.a)}, ${Number(ids.b)}) and group_key in ('P1', 'B1')`;
+    const before = await rowsOf();
+    await buildSiteProducts(sql, DEFAULT_SETTINGS, new Date(NOW.getTime() + HOUR / 2));
+    const rows = await rowsOf();
+    for (const [shop, key] of [[ids.a, 'P1'], [ids.b, 'B1']] as const) {
+      expect(find(rows, shop, key)!.canonical_id).toBe(find(before, shop, key)!.canonical_id);
+      expect(find(rows, shop, key)!.match_confirmed).toBe(true);
+    }
+  }, 60_000);
+
+  it('clears a match that no longer holds, and its confirmation with it (R50)', async () => {
     await sql`update products set gtin = '4006381333931' where id = ${ids.b1}`;
     const res = await buildSiteProducts(sql, DEFAULT_SETTINGS, new Date(NOW.getTime() + HOUR));
     expect(res.products).toBe(3);
@@ -336,11 +348,12 @@ describe.skipIf(!process.env.SITE_BUILD_TEST_DB)('site-build on PGlite', () => {
     const lenovo = find(rows, ids.a, 'P1')!;
     expect(lenovo.canonical_id).toBeNull();
     expect(lenovo.match_method).toBeNull();
-    expect(lenovo.match_confirmed).toBe(true);
+    expect(lenovo.match_confirmed).toBe(false);
     expect(find(rows, ids.b, 'B1')!.canonical_id).toBeNull();
-    // second run adds a second verdicts row for the avoid group
+    expect(find(rows, ids.b, 'B1')!.match_confirmed).toBe(false);
+    // each run (three so far) adds a verdicts row for the avoid group
     const [{ n }] = await sql`select count(*)::int as n from verdicts`;
-    expect(n).toBe(2);
+    expect(n).toBe(3);
   }, 60_000);
 
   it('builds only the named shop with { shop }', async () => {

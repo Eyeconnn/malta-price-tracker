@@ -175,7 +175,7 @@ describe('admin reports, shops and matches', () => {
   it('renders visitor text as text, links the target and sends the chosen status with the note', async () => {
     const fetch = mockApi({
       'GET /api/admin/reports': () => json({ items: [report], total: 1, page: 1, pageSize: 50 }),
-      'PATCH /api/admin/reports/7': () => json({ report: { ...report, status: 'fixed' } }),
+      'PATCH /api/admin/reports/7': () => json({ report: { ...report, status: 'fixed', adminNote: 'Corrected.' } }),
     });
     renderAt('/admin/reports');
     const item = (await screen.findByText('Lenovo IdeaPad')).closest('li')!;
@@ -187,9 +187,42 @@ describe('admin reports, shops and matches', () => {
     fireEvent.click(within(item).getByRole('button', { name: 'Mark fixed' }));
     await waitFor(() => expect(calls(fetch, 'PATCH', '/api/admin/reports/7')).toHaveLength(1));
     expect(bodyOf(calls(fetch, 'PATCH', '/api/admin/reports/7')[0]!)).toEqual({ status: 'fixed', adminNote: 'Corrected.' });
-    // the list reloads
-    await waitFor(() => expect(calls(fetch, 'GET', '/api/admin/reports')).toHaveLength(2));
     expect(new URL(String(calls(fetch, 'GET', '/api/admin/reports')[0]![0]), 'http://localhost').search).toBe('?status=open&page=1');
+    // the last open report leaves the list; focus goes to the list heading
+    expect(await screen.findByText('Report 7 marked fixed and moved to the Fixed list.')).toBeTruthy();
+    await waitFor(() => expect(document.activeElement).toBe(screen.getByRole('heading', { name: 'Open reports: 0' })));
+  });
+
+  it('a status change leaves the other reports mounted: their typed notes survive and focus moves to the next one', async () => {
+    const second: AdminReport = { ...report, id: 8, target: { link: '/p/2', label: 'Samsung Tab' }, message: 'Other' };
+    const third: AdminReport = { ...report, id: 9, target: { link: '/p/3', label: 'Kettle' }, message: 'Third' };
+    const fetch = mockApi({
+      'GET /api/admin/reports': () => json({ items: [report, second, third], total: 3, page: 1, pageSize: 50 }),
+      'PATCH /api/admin/reports/7': () => json({ report: { ...report, status: 'kept' } }),
+      'PATCH /api/admin/reports/8': () => json({ report: { ...second, adminNote: 'Checked.' } }),
+    });
+    renderAt('/admin/reports');
+    const item8 = (await screen.findByText('Samsung Tab')).closest('li')!;
+    const item9 = screen.getByText('Kettle').closest('li')!;
+    fireEvent.change(within(item9).getByRole('textbox', { name: 'Admin note (optional)' }), { target: { value: 'Half typed' } });
+
+    // saving a note keeps the report in place
+    fireEvent.change(within(item8).getByRole('textbox', { name: 'Admin note (optional)' }), { target: { value: 'Checked.' } });
+    fireEvent.click(within(item8).getByRole('button', { name: 'Save note' }));
+    await within(item8).findByText('Note saved.');
+    expect(bodyOf(calls(fetch, 'PATCH', '/api/admin/reports/8')[0]!)).toEqual({ status: 'open', adminNote: 'Checked.' });
+
+    const item7 = screen.getByText('Lenovo IdeaPad').closest('li')!;
+    fireEvent.click(within(item7).getByRole('button', { name: 'Keep as is' }));
+    expect(await screen.findByText('Report 7 marked kept and moved to the Kept list.')).toBeTruthy();
+    expect(screen.queryByText('Lenovo IdeaPad')).toBeNull();
+    expect(screen.getByRole('heading', { name: 'Open reports: 2' })).toBeTruthy();
+    // no reload, the same elements, nothing typed is lost
+    expect(calls(fetch, 'GET', '/api/admin/reports')).toHaveLength(1);
+    expect(screen.getByText('Samsung Tab').closest('li')).toBe(item8);
+    expect((within(item9).getByRole('textbox', { name: 'Admin note (optional)' }) as HTMLTextAreaElement).value).toBe('Half typed');
+    expect((within(item8).getByRole('textbox', { name: 'Admin note (optional)' }) as HTMLTextAreaElement).value).toBe('Checked.');
+    await waitFor(() => expect(document.activeElement).toBe(item8));
   });
 
   it('switches a shop hidden', async () => {

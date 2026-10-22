@@ -506,6 +506,12 @@ describe('admin store on PGlite as site_admin', () => {
     expect(await store.confirmMatch(999, true)).toBeNull();
   });
 
+  it('confirms only title-matched rows: a GTIN row is not found and stays unchanged', async () => {
+    expect(await store.confirmMatch(5, true)).toBeNull();
+    const { rows } = await pg.query<{ match_confirmed: boolean }>('select match_confirmed from site_products where id = 5');
+    expect(rows[0]!.match_confirmed).toBe(false);
+  });
+
   it('lists the most common products.category_path among site_products in category other', async () => {
     expect(await store.unmappedCategories()).toEqual([
       { path: 'Gadgets > Misc', count: 2 },

@@ -129,6 +129,7 @@ export interface AdminStore {
   setShopHidden(slug: string, hidden: boolean): Promise<{ slug: string; hidden: boolean } | null>;
   /** canonical groups matched by title; pendingOnly: only groups with an unconfirmed member */
   matches(pendingOnly: boolean, limit: number, offset: number): Promise<{ groups: MatchGroup[]; total: number }>;
+  /** title-matched rows only; null for any other row (Ruling R50: a confirmation belongs to the row in its group) */
   confirmMatch(siteProductId: number, confirmed: boolean): Promise<{ id: number; confirmed: boolean } | null>;
   /** the 50 most common shop category paths (products.category_path) among site_products in category 'other' */
   unmappedCategories(): Promise<UnmappedCategory[]>;
@@ -273,7 +274,7 @@ export function createAdminStore(db: AdminRunner): AdminStore {
     },
 
     async confirmMatch(siteProductId, confirmed) {
-      const rows = await db.query('update site_products set match_confirmed = $2::boolean where id = $1::bigint returning id, match_confirmed', [
+      const rows = await db.query(`update site_products set match_confirmed = $2::boolean where id = $1::bigint and match_method = 'title' returning id, match_confirmed`, [
         siteProductId,
         confirmed,
       ]);

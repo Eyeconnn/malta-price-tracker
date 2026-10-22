@@ -270,8 +270,10 @@ type CanonRow = MatchInput & { brand: string | null; canonicalId: string | null;
 
 /**
  * Canonical ids across shops: assignMatches over every site_products row, one canonical_products row per match
- * key (upserted by match_key). Rows no longer matched lose canonical_id and match_method; match_confirmed is
- * never touched. Returns the number of matched rows per method.
+ * key (upserted by match_key). Rows no longer matched lose canonical_id and match_method. A confirmation
+ * belongs to a (row, canonical group) pair (Ruling R50): a row whose canonical_id or match_method changes
+ * (also to or from null) loses match_confirmed in the same statement; rows that keep both keep it.
+ * Returns the number of matched rows per method.
  */
 export async function assignCanonicalIds(sql: postgres.Sql): Promise<Record<string, number>> {
   const rows = (
@@ -323,7 +325,7 @@ export async function assignCanonicalIds(sql: postgres.Sql): Promise<Record<stri
   for (let i = 0; i < changed.length; i += WRITE_BATCH) {
     const part = changed.slice(i, i + WRITE_BATCH);
     await sql`
-      update site_products sp set canonical_id = t.cid, match_method = t.method
+      update site_products sp set canonical_id = t.cid, match_method = t.method, match_confirmed = false
       from unnest(${part.map((c) => c.id)}::bigint[], ${part.map((c) => c.cid)}::bigint[], ${part.map((c) => c.method)}::text[])
         as t(id, cid, method)
       where sp.id = t.id`;
