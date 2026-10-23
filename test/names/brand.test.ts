@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { basicBrandStatus, brandStatus, brandStats, distributorBrands, shopKeys, type BrandContext, type BrandRow, type ShopIdentity } from '../../src/names/brand.js';
+import { basicBrandStatus, brandStatus, brandStats, distributorBrands, shopKeys, titleMaker, type BrandContext, type BrandRow, type ShopIdentity } from '../../src/names/brand.js';
 
 // Real shops and brand values from the pilot sample (out/names/dry-20261022-222157-haiku.csv and the database).
 const SHOPS: ShopIdentity[] = [
@@ -145,5 +145,57 @@ describe('brandStatus: which brand values name the maker', () => {
     expect(basicBrandStatus('Sterling Holdings')).toBe('unreliable');
     expect(basicBrandStatus('Lenovo')).toBe('reliable');
     expect(basicBrandStatus('8325181')).toBe('none');
+  });
+});
+
+// Distributors the first rule missed in the rerun out/names/dry-20261023-073704-haiku.csv (Toytastic): their titles
+// start with makers that no shop has as a brand value (Avent, Lansinoh, Woomax, Winfun), but those words start titles
+// under two or more brand values of the catalogue and almost never stand anywhere else in a title.
+describe('distributors whose titles name makers outside the brand column (Alfred Gera, IK, Colorbaby)', () => {
+  const T = shop('toytastic');
+  const E = shop('eurosport');
+  const KLIKK = 40;
+  const shops: ShopIdentity[] = [...SHOPS, { id: KLIKK, slug: 'klikk', name: 'Klikk', baseUrl: 'https://www.klikk.com.mt' }];
+  const data: BrandRow[] = [
+    ...rows(T, 'Alfred Gera', ['Munchkin Miracle Trainer Cup 6m+', 'Avent Natural Glass 120ml Bottle', 'Avent Responsive Natural 260ml White Koala Bottle', 'Avent Responsive Natural Air Free 125ml', 'Angelcare Dress Up Nappy Bin', 'Angelcare Soft-Touch Bath Support Grey', 'Avent Bendi Straw Cup 300ml Green/Pink']),
+    ...rows(T, 'IK', ['TOYZ Beetle Ride On Push Car Green/Blue/Purple/Pink', 'Sensillo Jersey Waterproof 60x120 Fitted Sheet White/Grey', 'Lansinoh Lanolin Nipple Cream \u2013 40ML/10ML', 'Fridamom Postpartum Peri Intimate Wash', 'TOYZ Mercedes C Class Black/White/Blue/Red', 'Avent Sterilizer & Dryer', 'Lansinoh Breast Pads 60pcs', "Mom's Stroller Bag Carmen Beige"]),
+    ...rows(T, 'babyimports', ['Lansinoh Nipple Shields', 'Tommee Tippee Closer To Nature Complete Feeding Set White', 'Munchkin Click Lock Bowls', 'Munchkin White Hot Spoons', 'Lansinoh Postpartum Wash Bottle', 'Fridamom Nipple Balm', 'Fridamom Peri Bottle']),
+    ...rows(T, 'Colorbaby', ['Spidey Amazing Friends Bucket Set', 'Woomax Wooden Kitchen With Accessories 57X30X85', 'Woomax Disney Mickey & Minnie Magnetic Wooden Maze 22x22cm', 'Winfun Pop UP Monkey Camera', 'Paw Patrol My First Laptop', 'Aqua World Unicorn Water Gun 35cm']),
+    ...rows(T, 'Cousins', ['Winfun Newborn Gift Toy Set 4pc', 'Winfun Baby Phone', 'Clementoni Baby Fun Vehicles', 'Water And Sand Game Table']),
+    ...rows(T, 'Small Foot', ['Woomax Electric Supermarket With Lights And Sound', 'Small-Foot Children\'s Play Kitchen Gourmet Pink', 'Small-Foot Guitar "Sound"']),
+    // real makers: shoe model lines of one brand (Hoka) and a product line under a maker that other shops' titles name (Samsung)
+    ...rows(E, 'Hoka', ['Clifton 11 Gtx Running Shoes', 'Tecton X 2 Running Shoes', 'Clifton 11 Running Shoes', 'Ora Recovery Slides 3', 'Bondi 9 Running Shoes (Wide Fit)', 'Mach 7 Running Shoes', 'Bondi 9 Running Shoes']),
+    ...rows(shop('epic'), 'Samsung', ['Galaxy S25 Ultra', 'Galaxy A56 5G', 'Galaxy Tab S10', 'Galaxy Watch 8', 'Galaxy Buds 3 Pro']),
+    ...rows(KLIKK, 'Samsung', ['Samsung Galaxy S25 Ultra 256GB', 'Samsung Galaxy Tab S10 128GB', 'Samsung Galaxy A56 5G 128GB']),
+    ...rows(KLIKK, 'Galaxy Cases', ['Galaxy S25 Clear Case']),
+  ];
+  const ctx: BrandContext = { shops, ...brandStats(data, shops) };
+
+  it('flags Alfred Gera, IK and Colorbaby at Toytastic', () => {
+    expect(brandStatus('Alfred Gera', T, ctx).status).toBe('unreliable');
+    expect(brandStatus('IK', T, ctx).status).toBe('unreliable');
+    expect(brandStatus('Colorbaby', T, ctx).status).toBe('unreliable');
+  });
+
+  it('keeps Hoka and Samsung reliable (model lines; a maker other shops name in their titles)', () => {
+    expect(brandStatus('Hoka', E, ctx).status).toBe('reliable');
+    expect(brandStatus('Samsung', shop('epic'), ctx).status).toBe('reliable');
+  });
+});
+
+describe('titleMaker: a maker the title starts with, which the name must keep', () => {
+  const data: BrandRow[] = [
+    { shopId: 1, brand: 'Therabody', title: 'Therabody TheraFace PRO 6-in-1 Facial Health Device - Black' },
+    { shopId: 1, brand: 'Theragun', title: 'Theragun Prime G5 Muscle Stimulator' },
+    { shopId: 1, brand: 'Paw Patrol', title: 'Paw Patrol Lookout Tower' },
+    { shopId: 1, brand: 'Kids', title: 'Kids Beauty Vanity Table' },
+  ];
+  const ctx: BrandContext = { shops: SHOPS, ...brandStats(data, SHOPS) };
+
+  it('finds the first word or the first two words when they are a brand that its own titles carry', () => {
+    expect(titleMaker('Therabody TheraCup (Single)', ctx)).toBe('Therabody');
+    expect(titleMaker('Paw Patrol My First Laptop', ctx)).toBe('Paw Patrol');
+    expect(titleMaker('Kids Beauty Vanity Table + Stool White', ctx)).toBeNull();
+    expect(titleMaker('Angelcare Dress Up Nappy Bin', ctx)).toBeNull();
   });
 });

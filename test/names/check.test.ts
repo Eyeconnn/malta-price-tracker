@@ -275,6 +275,38 @@ describe('checkName: spelling variants, joined and split words, symbols', () => 
   });
 });
 
+// Rejects of the rerun out/names/dry-20261023-073704-haiku.csv (490 of 500 accepted).
+describe('checkName: rerun rejects of 2026-10-23', () => {
+  const ok = (r: ReturnType<typeof checkName>) => expect(r).toEqual({ ok: true });
+
+  it('treats +, & and and as the same word, and lets the variant label join values with and', () => {
+    ok(checkName({ title: 'Kids Beauty Vanity Table + Stool White', brand: 'Small Foot', brandStatus: 'reliable' }, name('Small Foot Kids Beauty Vanity Table and Stool', {}, 'White')));
+    ok(checkName({ title: 'Philips SHC5200M2 Headphones & Transmitter', brand: 'Philips' }, name('Philips SHC5200M2 Headphones Plus Transmitter')));
+    // iPad Pro M4: "and" came from the label joining the two sizes of the variants
+    const ipad = { title: 'iPad Pro M4', brand: 'Apple', brandStatus: 'reliable' as const, variantTitles: ['Storage: 256GB, Size: 11\u2033', 'Storage: 256GB, Size: 13\u2033'] };
+    ok(checkName(ipad, name('Apple iPad Pro M4', {}, '256GB, 11" and 13"')));
+    expect(checkName(ipad, name('Apple iPad Pro M4 and Pencil', {}, '256GB')).ok).toBe(false);
+  });
+
+  it('still rejects a lost set number or product code (LEGO 77247, 40922, LeapFrog 19348, JBL T500WHT)', () => {
+    expect(reasonOf(checkName({ title: 'LEGO SPEED CHAMPIONS KICK SAUBER F1 TEAM C44 RACE CAR 77247', brand: null }, name('LEGO Speed Champions Kick Sauber F1 Team C44 Race Car')))).toContain('77247');
+    expect(reasonOf(checkName({ title: 'Lego 40922 Lilo and Stitch Angel', brand: null }, name('LEGO Lilo and Stitch Angel')))).toContain('40922');
+    expect(reasonOf(checkName({ title: "19348   LEAPFROG Number Lovin' Oven - Pink", brand: 'Leapfrog' }, name("LeapFrog Number Lovin' Oven", {}, 'Pink')))).toContain('19348');
+    expect(reasonOf(checkName({ title: 'JBL Tune 500 Wired Headphones + Mic White \u2013 T500WHT', brand: 'JBL' }, name('JBL Tune 500 Wired Headphones + Mic', {}, 'White')))).toContain('t500wht');
+    ok(checkName({ title: 'LEGO SPEED CHAMPIONS KICK SAUBER F1 TEAM C44 RACE CAR 77247', brand: null }, name('LEGO Speed Champions 77247 Kick Sauber F1 Team C44 Race Car')));
+  });
+
+  it('keeps the maker the title starts with: no swap for the brand field (Therabody TheraCup, brand Theragun)', () => {
+    const src = { title: 'Therabody TheraCup (Single)', brand: 'Theragun', brandStatus: 'reliable' as const, titleBrand: 'Therabody' };
+    const swap = checkName(src, name('Theragun TheraCup'));
+    expect(swap.ok).toBe(false);
+    expect(reasonOf(swap)).toContain('title brand Therabody dropped');
+    // the title's maker wins, so the brand field's value is not required then
+    ok(checkName(src, name('Therabody TheraCup', {}, 'Single')));
+    ok(checkName({ title: 'Paw Patrol My First Laptop', brand: 'Colorbaby', brandStatus: 'unreliable', titleBrand: 'Paw Patrol', variantTitles: ['Chase', 'Marshall'] }, name('Paw Patrol My First Laptop', {}, 'Chase, Marshall')));
+  });
+});
+
 describe('checkAttrs', () => {
   it('drops keys outside the category schema and records them', () => {
     const r = checkAttrs({ ram_gb: 16, flavour: 'mint' }, laptops);
@@ -364,5 +396,11 @@ describe('checkBatch', () => {
     expect(r.results[0].dropped).toEqual(['brand (unreliable brand, not the maker)']);
     expect(r.results[1].status).toBe('rejected');
     expect(r.results[1].proposedLabel).toBe('tezenismalta.com');
+  });
+
+  it('passes the title maker of the group to the name check', () => {
+    const b: Batch = { category: 'beauty-health', items: [{ key: '1', group: group({ category: 'beauty-health', title: 'Therabody TheraCup (Single)', brand: 'Theragun', brandStatus: 'reliable', titleBrand: 'Therabody' }) }] };
+    const r = checkBatch(b, { items: [{ key: '1', display_name: 'Theragun TheraCup', variant_label: 'Single', attrs: {} }] }, schemas['beauty-health']);
+    expect(r.results[0].reason).toBe('title brand Therabody dropped');
   });
 });

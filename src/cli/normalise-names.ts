@@ -1,6 +1,8 @@
 // pnpm normalise-names --model haiku [--effort low] [--pilot] [--limit 500] [--sample-from out/names/<run>.csv]
-//   [--category laptops ...] [--batch-size 40] [--parallel 2] [--max-batches N] [--dry-run] [--seed pilot] [--timeout 300]
-//   [--save-raw]
+//   [--category laptops ...] [--batch-size 40] [--parallel 2] [--max-batches N] [--max-cost 5] [--dry-run] [--seed pilot]
+//   [--timeout 300] [--save-raw]
+// --max-cost <usd> starts no new batch once the summed cost Claude Code reports reaches it (running batches finish);
+// with --max-batches it bounds the nightly run (scripts/run-names-nightly.ps1). Batches take turns across categories.
 // Sends batches of one site category's product groups to Claude Code (claude -p, on the owner's own login) for clean
 // names and the category's attributes, checks every answer (src/names/check.ts) and writes a report to out/names/.
 // Reads with DASHBOARD_DATABASE_URL (read-only role). Without --dry-run, writes product_names and name_runs with
@@ -17,11 +19,11 @@ import postgres from 'postgres';
 import { closeDb, db } from '../db.js';
 import { env } from '../env.js';
 import { SITE_CATEGORIES } from '../site/categories.js';
-import { brandStatus, loadBrandContext } from '../names/brand.js';
+import { brandStatus, loadBrandContext, titleMaker } from '../names/brand.js';
 import { checkBatch } from '../names/check.js';
 import { addUsage, callClaude, killAllChildren, NO_USAGE, spawnRunner, type Usage } from '../names/claude.js';
-import { checkRunScope, parseEffort } from '../names/options.js';
-import { makeBatches, systemPrompt, userMessage, type Batch } from '../names/prompt.js';
+import { budgetReached, checkRunScope, parseEffort, parseMaxCost } from '../names/options.js';
+import { interleaveBatches, makeBatches, systemPrompt, userMessage, type Batch } from '../names/prompt.js';
 import { writeReport, type BatchStat, type ReportRow } from '../names/report.js';
 import { answerJsonSchema, loadAttributeSchemas } from '../names/schema.js';
 import { pickSample, readSampleCsv } from '../names/sample.js';
@@ -39,6 +41,7 @@ const { values } = parseArgs({
     'batch-size': { type: 'string', default: '40' },
     parallel: { type: 'string', default: '2' },
     'max-batches': { type: 'string' },
+    'max-cost': { type: 'string' },
     'dry-run': { type: 'boolean', default: false },
     seed: { type: 'string', default: 'pilot' },
     timeout: { type: 'string', default: '300' },
@@ -55,19 +58,6 @@ function intOption(name: string, raw: string | undefined, min: number, max: numb
   return n;
 }
 
-/** Batches interleaved across categories, so a --max-batches cap keeps the spread. */
-function interleave(batches: Batch[]): Batch[] {
-  const byCat = new Map<string, Batch[]>();
-  for (const b of batches) {
-    const list = byCat.get(b.category);
-    if (list) list.push(b);
-    else byCat.set(b.category, [b]);
-  }
-  const lists = [...byCat.values()];
-  const out: Batch[] = [];
-  for (let i = 0; out.length < batches.length; i++) for (const l of lists) if (i < l.length) out.push(l[i]);
-  return out;
-}
 
 /** The report columns that identify a group and its brand. */
 const ids = (g: GroupInput) => ({ shopId: g.shopId, groupKey: g.groupKey, brand: g.brand, brandStatus: g.brandStatus });
@@ -87,6 +77,7 @@ async function main() {
   const batchSize = intOption('batch-size', values['batch-size'], 1, 100);
   const parallel = intOption('parallel', values.parallel, 1, MAX_PARALLEL);
   const maxBatches = values['max-batches'] === undefined ? undefined : intOption('max-batches', values['max-batches'], 1, 100000);
+  const maxCost = parseMaxCost(values['max-cost']);
   checkRunScope({ dryRun, pilot, maxBatches });
   const timeoutMs = intOption('timeout', values.timeout, 10, 3600) * 1000;
   const slugs = SITE_CATEGORIES.map((c) => c.slug as string);
@@ -125,13 +116,14 @@ async function main() {
     const v = brandStatus(g.brand, g.shopId, brandCtx);
     g.brandStatus = v.status;
     g.brandNote = v.why;
+    g.titleBrand = titleMaker(g.title, brandCtx);
   }
-  const batches = interleave(makeBatches(chosen, batchSize)).slice(0, maxBatches ?? Infinity);
+  const batches = interleaveBatches(makeBatches(chosen, batchSize)).slice(0, maxBatches ?? Infinity);
   const runCats = [...new Set(batches.map((b) => b.category))];
   const groupCount = batches.reduce((n, b) => n + b.items.length, 0);
   console.log(
     `normalise-names: ${groupsAll.length} fresh groups, ${candidates.length} new or changed; ` +
-      `${groupCount} groups in ${batches.length} batches (${runCats.join(', ') || 'none'}), model ${model}, effort ${effort ?? 'CLI default'}` +
+      `${groupCount} groups in ${batches.length} batches (${runCats.join(', ') || 'none'}), model ${model}, effort ${effort ?? 'CLI default'}${maxCost !== undefined ? `, max cost $${maxCost}` : ''}` +
       `${pilot ? ', pilot' : ''}${dryRun ? ', dry run (no database writes)' : ''}`,
   );
   if (batches.length === 0) return;
@@ -175,6 +167,7 @@ async function main() {
   let failedBatches = 0;
   let done = 0;
   let next = 0;
+  let budgetStop = false;
   const batchStats: BatchStat[] = [];
 
   async function runBatch(index: number, batch: Batch) {
@@ -228,6 +221,11 @@ async function main() {
 
   async function worker() {
     while (!stopping && next < batches.length) {
+      if (budgetReached(costUsd, maxCost)) {
+        if (!budgetStop) console.log(`normalise-names: reported cost $${costUsd.toFixed(4)} reached --max-cost $${maxCost}; no new batches`);
+        budgetStop = true;
+        break;
+      }
       const i = next++;
       try {
         await runBatch(i, batches[i]);
@@ -258,7 +256,7 @@ async function main() {
   }
   const per100 = items > 0 ? (costUsd / items) * 100 : 0;
   console.log(
-    `normalise-names: run ${runId} ${stopping ? 'stopped' : 'done'}: ${items} groups, ${accepted} accepted, ${rejected} rejected, ` +
+    `normalise-names: run ${runId} ${stopping ? 'stopped' : budgetStop ? 'stopped at --max-cost' : 'done'}: ${items} groups, ${accepted} accepted, ${rejected} rejected, ` +
       `${failedBatches} failed batches; tokens ${usage.inputTokens} in, ${usage.cacheReadTokens} cache read, ` +
       `${usage.cacheWriteTokens} cache write, ${usage.outputTokens} out; reported cost $${costUsd.toFixed(4)} ` +
       `($${per100.toFixed(4)} per 100 groups); ${wallSeconds.toFixed(1)}s`,

@@ -15,3 +15,17 @@ export function parseEffort(raw: string | undefined): Effort | undefined {
   if (!(EFFORT_LEVELS as readonly string[]).includes(v)) throw new Error(`--effort must be one of ${EFFORT_LEVELS.join(', ')}, got ${v}`);
   return v as Effort;
 }
+
+/** --max-cost: a positive number of dollars (the cost Claude Code reports), undefined for no cap. */
+export function parseMaxCost(raw: string | undefined): number | undefined {
+  if (raw === undefined) return undefined;
+  const v = raw.trim();
+  const n = /^\d+(?:\.\d+)?$/.test(v) ? Number(v) : Number.NaN;
+  if (!Number.isFinite(n) || n <= 0) throw new Error(`--max-cost needs a positive number of dollars, got ${raw}`);
+  return n;
+}
+
+/** Whether the summed reported cost has reached the --max-cost cap: then no new batch starts (running ones finish). */
+export function budgetReached(spentUsd: number, maxCostUsd: number | undefined): boolean {
+  return maxCostUsd !== undefined && spentUsd >= maxCostUsd;
+}

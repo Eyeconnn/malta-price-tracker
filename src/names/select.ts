@@ -28,6 +28,8 @@ export type GroupInput = {
   brandStatus?: BrandStatus;
   /** why the brand is unreliable or none */
   brandNote?: string | null;
+  /** the maker the title starts with (brand.ts titleMaker), which the clean name must keep */
+  titleBrand?: string | null;
 };
 
 /** Days a site_products row counts as fresh (Ruling R21, as FRESH_DAYS in src/site/build.ts). */

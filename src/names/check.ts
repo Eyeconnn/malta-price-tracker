@@ -8,7 +8,9 @@
 //   written together or apart, its first word when it has more (Adidas for Adidas Performance) or its initials (M&S
 //   for Marks & Spencer). A house brand (the shop sells only its own brand, as Calzedonia Malta) is not required and
 //   may be added without its company and place words (Calzedonia). An unreliable brand (the shop's own name, a
-//   domain, a company, a distributor) is not required, and the name may contain it only when the title has it;
+//   domain, a company, a distributor) is not required, and the name may contain it only when the title has it. A
+//   maker the title starts with (a brand of the catalogue whose own titles carry it, as Therabody) must stay in the
+//   name, and the brand field's value is then not required (no swap of Therabody for Theragun);
 // - it invents no words: every word of 3+ letters is in the shop data (title, variant titles, reliable brand, MPN;
 //   case, accents, trademark signs and UK/US spelling ignored: colour = color, grey = gray, aluminium = aluminum,
 //   centre = center, litre = liter, metre = meter) or is a unit word (inch, litre, watt, SSD, ...). Words joined or
@@ -53,6 +55,9 @@ const WEB_ENDING = /\.(?:com|mt|net|org|eu|uk|shop|store|online|info|biz|io|co|d
 
 /** Words of 3+ letters a name may use without the shop data having them: unit words only. */
 const ALPHA_ALLOW = new Set(['inch', 'inches', 'ssd', 'hdd', 'emmc', 'liter', 'liters', 'ltr', 'meter', 'meters', 'watt', 'watts', 'mah', 'ghz', 'mhz', 'khz', 'pcs']);
+
+/** Words the variant label may use to join its values. */
+const LABEL_JOINERS = new Set(['and']);
 
 const BARCODE = /^\d{8,}$/;
 const PERCENT = /(\d+(?:\.\d+)?)\s*%/g;
@@ -121,6 +126,8 @@ export type NameSource = {
   brand: string | null;
   /** from src/names/brand.ts; when missing, the brand is judged by its own text only (basicBrandStatus) */
   brandStatus?: BrandStatus;
+  /** the maker the title starts with (brand.ts titleMaker), which the name must keep */
+  titleBrand?: string | null;
   variantTitles?: string[];
   mpn?: string | null;
 };
@@ -186,8 +193,15 @@ export function checkName(source: NameSource, a: NameAnswer): NameCheck {
 
   const title = stripNoise(prep(source.title));
   const status = source.brandStatus ?? basicBrandStatus(source.brand);
-  if (source.brand && status === 'reliable' && !hasBrand(nameToks, source.brand)) return { ok: false, reason: `brand ${source.brand} missing` };
-  if (source.brand && status === 'unreliable' && !hasBrand(tokens(title), source.brand) && (hasBrand(nameToks, source.brand) || hasBrand(labelToks, source.brand))) {
+  const titleToks = tokens(title);
+  const titleBrand = source.titleBrand ?? null;
+  if (titleBrand && hasBrand(titleToks, titleBrand) && !hasBrand([...nameToks, ...labelToks], titleBrand)) {
+    return { ok: false, reason: `title brand ${titleBrand} dropped` };
+  }
+  // when the title starts with another maker, that maker is the brand of the name (Therabody, not Theragun)
+  const otherTitleMaker = !!titleBrand && !!source.brand && compact(titleBrand) !== compact(source.brand) && !hasBrand(titleToks, source.brand);
+  if (source.brand && status === 'reliable' && !otherTitleMaker && !hasBrand(nameToks, source.brand)) return { ok: false, reason: `brand ${source.brand} missing` };
+  if (source.brand && status === 'unreliable' && !hasBrand(titleToks, source.brand) && (hasBrand(nameToks, source.brand) || hasBrand(labelToks, source.brand))) {
     return { ok: false, reason: `unreliable brand ${source.brand} added (shop name, distributor or company, not in the title)` };
   }
 
@@ -204,8 +218,11 @@ export function checkName(source: NameSource, a: NameAnswer): NameCheck {
     }
   }
   const rawData = dataTexts.join(' ');
-  if (rawData.includes('&')) vocab.add('and');
-  if (rawData.includes('+')) vocab.add('plus');
+  // & and + read as "and" or "plus"
+  if (/[&+]/.test(rawData)) {
+    vocab.add('and');
+    vocab.add('plus');
+  }
   if (/\bw\//i.test(rawData)) vocab.add('with');
 
   /** Indexes of tokens that are shop data written apart (WiFi for Wi-Fi) or together (Hotpoint Ariston for HOTPOINTARISTON). */
@@ -226,6 +243,8 @@ export function checkName(source: NameSource, a: NameAnswer): NameCheck {
   for (const list of [nameToks, labelToks]) {
     const ok = joined(list);
     list.forEach((t, i) => {
+      // the variant label may join its values with "and" (256GB, 11" and 13")
+      if (list === labelToks && LABEL_JOINERS.has(t)) return;
       if (isNew(t) && !ok.has(i) && !invented.includes(t)) invented.push(t);
     });
   }
@@ -367,7 +386,7 @@ export function checkBatch(batch: Batch, output: unknown, schema: CategorySchema
       delete attrs.brand;
       dropped.push('brand (unreliable brand, not the maker)');
     }
-    const check = checkName({ title: g.title, brand: g.brand, brandStatus, variantTitles: g.variantTitles, mpn: g.mpn }, { display_name: name, variant_label: label, attrs });
+    const check = checkName({ title: g.title, brand: g.brand, brandStatus, titleBrand: g.titleBrand, variantTitles: g.variantTitles, mpn: g.mpn }, { display_name: name, variant_label: label, attrs });
     if (!check.ok) return reject(check.reason, name, dropped, label);
     return { item, status: 'ok', reason: null, displayName: name, variantLabel: label, attrs, dropped, proposedName: name, proposedLabel: label };
   });

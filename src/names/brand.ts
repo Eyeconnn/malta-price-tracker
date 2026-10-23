@@ -36,7 +36,13 @@ export type BrandVerdict = { status: BrandStatus; why: string | null; name?: str
 export type ShopIdentity = { id: number; slug: string; name: string; baseUrl: string | null };
 export type BrandRow = { shopId: number; brand: string | null; title: string };
 /** All tracked shops; per shop the keys (compact brand values) found to be distributors; the shops of one house brand. */
-export type BrandContext = { shops: ShopIdentity[]; distributors: Map<number, Set<string>>; houseShops?: Set<number> };
+export type BrandContext = {
+  shops: ShopIdentity[];
+  distributors: Map<number, Set<string>>;
+  houseShops?: Set<number>;
+  /** compact brand values that are makers: reliable by their text and carried by at least one of their own titles */
+  makers?: Set<string>;
+};
 
 /** Brand values shops use when there is no brand. */
 const PLACEHOLDER_BRANDS = new Set(['generic', 'unbranded', 'nobrand', 'none', 'na', 'other', 'others', 'unknown', 'default', 'oem', 'various', 'model']);
@@ -55,6 +61,14 @@ const NOT_A_MAKER = new Set(['kids', 'kid', 'baby', 'mini', 'classic', 'basic', 
 const MIN_GROUPS = 5;
 const MAX_IN_TITLE = 0.1;
 const MIN_OTHER_MAKER = 0.5;
+/** With two or more different makers among the title starts, this share is enough. */
+const MIN_OTHER_MAKERS = 0.4;
+/** A brand whose own titles carry it this often across the catalogue is a maker everywhere (Apple, Samsung). */
+const CONFIRMED_IN_TITLE = 0.2;
+/** A title-start word is a maker name when it starts this many titles, stands first in this share of the titles that
+ *  have it, and starts titles under two or more brand values (Avent, Lansinoh, Woomax). */
+const MAKER_WORD_MIN = 3;
+const MAKER_WORD_LEAD = 0.8;
 /** Share of a shop's branded groups whose brand is the shop's own name for the shop to sell one house brand. */
 const MIN_HOUSE_SHARE = 0.8;
 
@@ -150,7 +164,7 @@ export function brandStatus(brand: string | null | undefined, shopId: number, ct
 }
 
 /** The distributor statistic (rule 4 at the top of this file) and the shops that sell one house brand. */
-export function brandStats(rows: BrandRow[], shops: ShopIdentity[]): { distributors: Map<number, Set<string>>; houseShops: Set<number> } {
+export function brandStats(rows: BrandRow[], shops: ShopIdentity[]): { distributors: Map<number, Set<string>>; houseShops: Set<number>; makers: Set<string> } {
   const byId = new Map(shops.map((s) => [s.id, s]));
   const branded = new Map<number, { all: number; own: number }>();
   for (const r of rows) {
@@ -161,7 +175,29 @@ export function brandStats(rows: BrandRow[], shops: ShopIdentity[]): { distribut
     branded.set(r.shopId, e);
   }
   const houseShops = new Set([...branded].filter(([, e]) => e.own >= MIN_HOUSE_SHARE * e.all).map(([id]) => id));
-  return { distributors: distributorBrands(rows, shops), houseShops };
+  const makers = new Set<string>();
+  for (const r of rows) {
+    if (basicVerdict(r.brand).status !== 'reliable') continue;
+    const key = compact(r.brand!);
+    if (key.length >= 3 && !NOT_A_MAKER.has(key) && !makers.has(key) && hasBrand(tokens(prep(r.title)), r.brand!)) makers.add(key);
+  }
+  return { distributors: distributorBrands(rows, shops), houseShops, makers };
+}
+
+/**
+ * The maker a title starts with (its first word, or first two words written together), when that is a brand of the
+ * catalogue that its own titles carry (Therabody in "Therabody TheraCup"). The clean name must keep it, so a model
+ * cannot swap it for the brand field's value (Theragun). Returns the words as the title writes them, or null.
+ */
+export function titleMaker(title: string, ctx: BrandContext): string | null {
+  if (!ctx.makers || ctx.makers.size === 0) return null;
+  const words = title.trim().split(/\s+/).filter((w) => /\p{L}/u.test(w));
+  for (const n of [2, 1]) {
+    if (words.length < n) continue;
+    const key = compact(words.slice(0, n).join(' '));
+    if (key.length >= 3 && ctx.makers.has(key)) return words.slice(0, n).join(' ').replace(/[^\p{L}\p{N}'&.\s-]+$/u, '');
+  }
+  return null;
 }
 
 /** Per shop, the compact brand values that are distributors (rule 4 at the top of this file). */
@@ -180,6 +216,31 @@ export function distributorBrands(rows: BrandRow[], shops: ShopIdentity[]): Map<
   const initials = new Map(shops.map((s) => [s.id, shopInitials(s)]));
   const ownKeys = new Map(shops.map((s) => [s.id, new Set(shopKeys(s))]));
 
+  // catalogue-wide: how often each brand's own titles carry it, and how each word stands in titles
+  const confirmed = new Map<string, { n: number; inTitle: number }>();
+  const leadCount = new Map<string, number>();
+  const anyCount = new Map<string, number>();
+  const leadBrands = new Map<string, Set<string>>();
+  for (const r of rows) {
+    if (basicVerdict(r.brand).status === 'none') continue;
+    const key = compact(r.brand!);
+    const toks = tokens(prep(r.title)).filter((x) => /\p{L}/u.test(x));
+    const c = confirmed.get(key) ?? { n: 0, inTitle: 0 };
+    c.n++;
+    if (hasBrand(toks, r.brand!)) c.inTitle++;
+    confirmed.set(key, c);
+    for (const w of new Set(toks)) anyCount.set(w, (anyCount.get(w) ?? 0) + 1);
+    if (toks.length > 0) {
+      leadCount.set(toks[0], (leadCount.get(toks[0]) ?? 0) + 1);
+      const b = leadBrands.get(toks[0]) ?? new Set<string>();
+      b.add(key);
+      leadBrands.set(toks[0], b);
+    }
+  }
+  const makerWord = (w: string) =>
+    /^\p{L}{3,}$/u.test(w) && !NOT_A_MAKER.has(w) && (leadCount.get(w) ?? 0) >= MAKER_WORD_MIN &&
+    (leadCount.get(w) ?? 0) >= MAKER_WORD_LEAD * (anyCount.get(w) ?? 0) && (leadBrands.get(w)?.size ?? 0) >= 2;
+
   const out = new Map<number, Set<string>>();
   for (const { shopId, key, brand, titles } of byShopBrand.values()) {
     if (titles.length < MIN_GROUPS) continue;
@@ -195,18 +256,23 @@ export function distributorBrands(rows: BrandRow[], shops: ShopIdentity[]): Map<
       set.add(key);
       continue;
     }
+    // a brand its own titles carry often across the catalogue is a maker, whatever this shop does
+    const conf = confirmed.get(key);
+    if (conf && conf.inTitle >= CONFIRMED_IN_TITLE * conf.n) continue;
     const label = initials.get(shopId) ?? null;
     const own = ownKeys.get(shopId) ?? new Set<string>();
     let other = 0;
+    const makersSeen = new Set<string>();
     for (const l of toks) {
       if (l.length === 0) continue;
       const lead1 = l[0];
       const lead2 = l.length > 1 ? l[0] + l[1] : '';
-      const maker = (lead1 !== key && known.has(lead1)) || (lead2 !== '' && lead2 !== key && known.has(lead2));
+      const maker = (lead1 !== key && (known.has(lead1) || makerWord(lead1))) || (lead2 !== '' && lead2 !== key && known.has(lead2));
       const shopLabel = lead1 === label || own.has(lead1);
+      if (maker) makersSeen.add(lead1);
       if (maker || shopLabel) other++;
     }
-    if (other >= MIN_OTHER_MAKER * titles.length) {
+    if (other >= MIN_OTHER_MAKER * titles.length || (makersSeen.size >= 2 && other >= MIN_OTHER_MAKERS * titles.length)) {
       let set = out.get(shopId);
       if (!set) out.set(shopId, (set = new Set()));
       set.add(key);

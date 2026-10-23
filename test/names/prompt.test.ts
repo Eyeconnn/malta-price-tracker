@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { SITE_CATEGORIES } from '../../src/site/categories.js';
-import { makeBatches, systemPrompt, userMessage } from '../../src/names/prompt.js';
+import { interleaveBatches, makeBatches, systemPrompt, userMessage } from '../../src/names/prompt.js';
 import { answerJsonSchema, loadAttributeSchemas } from '../../src/names/schema.js';
 import type { GroupInput } from '../../src/names/select.js';
 
@@ -31,6 +31,20 @@ describe('attribute schemas', () => {
     const attrs = js.properties.items.items.properties.attrs;
     expect(Object.keys(attrs.properties).sort()).toEqual(Object.keys(schemas.laptops).sort());
     expect(attrs.additionalProperties).toBe(false);
+  });
+});
+
+describe('interleaveBatches', () => {
+  it('takes one batch of each category in turn, so a capped night covers every category', () => {
+    const groups = [
+      ...Array.from({ length: 7 }, (_, i) => group({ category: 'toys', groupKey: `t${i}` })),
+      ...Array.from({ length: 2 }, (_, i) => group({ category: 'drinks', groupKey: `d${i}` })),
+      group({ category: 'laptops', groupKey: 'l0' }),
+    ];
+    const order = interleaveBatches(makeBatches(groups, 2)).map((b) => b.category);
+    expect(order).toEqual(['laptops', 'toys', 'drinks', 'toys', 'toys', 'toys']);
+    // still one category per batch
+    expect(interleaveBatches(makeBatches(groups, 2)).every((b) => new Set(b.items.map((i) => i.group.category)).size === 1)).toBe(true);
   });
 });
 
@@ -76,6 +90,13 @@ describe('systemPrompt', () => {
     expect(p).toMatch(/web address/i);
     expect(p).toMatch(/brand/i);
     expect(p).not.toContain('\u2014');
+  });
+
+  it('says to keep set numbers, model numbers and product codes, and never to swap the maker the title names', () => {
+    expect(p).toMatch(/always keep set numbers, model numbers and product codes/i);
+    for (const code of ['77247', '40922', '19348', 'T500WHT']) expect(p).toContain(code);
+    expect(p).toMatch(/never replace it with another brand/i);
+    expect(p).toContain('Therabody');
   });
 });
 

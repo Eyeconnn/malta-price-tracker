@@ -182,7 +182,30 @@ default 300), `--dry-run`, `--save-raw` (keeps each batch's raw JSON). Each run 
 and `.csv` (names before and after, attributes, rejects, tokens and the cost Claude Code reports, which on a plan is
 what the run would have cost at API prices). Reads use `DASHBOARD_DATABASE_URL`; without `--dry-run` the results go
 to `product_names` and `name_runs` (migration 007) through `DATABASE_URL`. A group is only sent again when its title
-or variant titles change. Ctrl+C stops after the running batches.
+or variant titles change. Ctrl+C stops after the running batches. `--max-cost <usd>` starts no new batch once the
+summed reported cost reaches it (running batches finish). Batches take turns across categories, so a capped run covers
+every category.
+
+### Nightly run
+
+The Windows task `MTP Name Normaliser` (daily 05:00, after the 02:30 scrape, hidden, at most 4 hours, no second copy
+while one runs; installed by `scripts/install-tasks.ps1`) runs `scripts/run-names-nightly.ps1` from the main checkout:
+
+```bash
+pnpm normalise-names --model haiku --effort low --max-batches 400 --max-cost 5 --parallel 3
+```
+
+It names the new or changed groups of the whole catalogue, at most 400 batches (about 16,000 groups) and about 5
+dollars of reported cost per night (on the owner's plan this is usage, not a bill), and writes `product_names` and
+`name_runs`; the next night continues with what is left. To change the caps, edit that line in
+`scripts/run-names-nightly.ps1` (no reinstall needed); to stop it, disable or unregister the task. The log is
+`out/names/nightly-YYYY-MM-DD.log`, the report `out/names/<run id>-haiku.html`. Progress:
+
+```sql
+select status, count(*) from product_names group by 1;
+select id, started_at, finished_at, batches, items, accepted, rejected, failed_batches, reported_cost_usd
+from name_runs order by id desc limit 10;
+```
 
 ## Public site (web/)
 
