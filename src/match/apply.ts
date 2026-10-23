@@ -23,11 +23,15 @@ export type CurrentListing = {
   priceCents?: number | null;
 };
 
-export type Resolved = { clusters: number[][]; read: number; used: number; stale: number; vetoed: number };
+/**
+ * clusters: the judged clusters of two or more after today's veto. groups (for the merge pass, src/match/merge.ts):
+ * every cluster with the key of the judgement it came from, also the listings a judgement left alone (clusters of one).
+ */
+export type Resolved = { clusters: number[][]; read: number; used: number; stale: number; vetoed: number; groups: { key: string; ids: number[] }[] };
 
 /** current: today's listings by member ref (shop id and group key). */
 export function resolveJudgements(judgements: StoredJudgement[], current: Map<string, CurrentListing>): Resolved {
-  const out: Resolved = { clusters: [], read: judgements.length, used: 0, stale: 0, vetoed: 0 };
+  const out: Resolved = { clusters: [], read: judgements.length, used: 0, stale: 0, vetoed: 0, groups: [] };
   const claimed = new Set<string>();
   const order = [...judgements].sort((a, b) => b.judgedAt.getTime() - a.judgedAt.getTime() || b.id - a.id);
   for (const j of order) {
@@ -53,9 +57,16 @@ export function resolveJudgements(judgements: StoredJudgement[], current: Map<st
     const veto = applyVeto(list.map(vetoListing), clusters);
     out.used++;
     out.vetoed += veto.vetoed.length;
-    for (const c of veto.clusters) out.clusters.push(c.map((i) => list[i].id));
+    const inCluster = new Set<number>();
+    for (const c of veto.clusters) {
+      out.clusters.push(c.map((i) => list[i].id));
+      out.groups.push({ key: j.key, ids: c.map((i) => list[i].id) });
+      for (const i of c) inCluster.add(i);
+    }
     refs.forEach((r, i) => {
-      if (free(i)) claimed.add(r);
+      if (!free(i)) return;
+      claimed.add(r);
+      if (!inCluster.has(i)) out.groups.push({ key: j.key, ids: [list[i].id] });
     });
   }
   return out;
@@ -79,7 +90,7 @@ export type BuildRow = {
  */
 export async function judgedClusters(sql: postgres.Sql, rows: BuildRow[]): Promise<Resolved> {
   const judgements = await loadJudgements(sql);
-  if (judgements.length === 0) return { clusters: [], read: 0, used: 0, stale: 0, vetoed: 0 };
+  if (judgements.length === 0) return { clusters: [], read: 0, used: 0, stale: 0, vetoed: 0, groups: [] };
   const byRef = new Map(rows.map((r) => [memberRef(r), r]));
   const wanted = new Map<string, BuildRow>();
   for (const j of judgements) {

@@ -771,3 +771,33 @@ export function applyVeto(listings: VetoListing[], clusters: number[][]): VetoRe
   }
   return { clusters: out, vetoed };
 }
+
+/** Years printed in titles (2025 edition, iPhone (2025)): no identity. */
+const isYear = (n: number) => Number.isInteger(n) && n >= 1990 && n <= 2035;
+
+/** Storage in GB as one value: 1TB, 1000GB and 1024GB are one size. */
+function storageValue(gb: number): number {
+  if (gb < 1000) return gb;
+  const tb = Math.round(gb / 1024);
+  return tb > 0 && Math.abs(gb - tb * 1024) <= 0.03 * gb ? tb * 1024 : gb;
+}
+
+/**
+ * What names one model in a title, for the judge's splitting and merge pass (src/match/candidates.ts, merge.ts):
+ * numbers (numbers with a unit, storage as its largest value so 12GB of RAM next to 512GB of storage is left out,
+ * and bare model numbers, years left out) and model words (Pro, Max, Ultra). Colour words are never part of it.
+ */
+export function identityOf(title: string, category: string): { numbers: string[]; models: string[] } {
+  const numbers = new Set<string>();
+  for (const [cls, values] of quantities([title])) {
+    if (cls === 'gb') numbers.add(`gb${storageValue(Math.max(...values))}`);
+    else for (const v of values) numbers.add(`${cls}${v}`);
+  }
+  for (const n of bareNumbers([title], category)) if (!isYear(n)) numbers.add(`n${n}`);
+  return { numbers: [...numbers].sort(), models: [...modelWords([title], category)].sort() };
+}
+
+/** The colour words of a title (Deep Blue is blue, Cosmic Orange is orange). */
+export function colourWords(title: string): string[] {
+  return [...new Set(words(title).filter((w) => COLOURS.has(w)))].sort();
+}

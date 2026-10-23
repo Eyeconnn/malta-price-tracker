@@ -2,9 +2,9 @@
 // applied to the clusters Claude called the same (veto.ts), and a judgement row per valid answer.
 import type { Listing } from './candidates.js';
 import { normText } from './fingerprint.js';
-import { readAnswers, type JudgeBatch } from './judge.js';
+import { expandVerdict, readAnswers, type JudgeBatch } from './judge.js';
 import type { JudgeGroupRow } from './report.js';
-import type { JudgementRow } from './store.js';
+import type { JudgementRow, StoredMember } from './store.js';
 import { applyVeto, type VetoListing } from './veto.js';
 
 export const vetoListing = (l: Pick<Listing, 'title' | 'variantTitles' | 'brand' | 'category' | 'categoryPath' | 'gtin' | 'mpn' | 'shopId'> & { priceCents?: number | null }): VetoListing => ({
@@ -12,7 +12,14 @@ export const vetoListing = (l: Pick<Listing, 'title' | 'variantTitles' | 'brand'
   shopId: l.shopId, priceCents: l.priceCents,
 });
 
-const listingRows = (members: Listing[]) => members.map((m) => ({ shop: m.shopSlug, shopId: m.shopId, groupKey: m.groupKey, title: m.title, priceCents: m.priceCents }));
+/** The members as stored: shop, group key, site_products id, and the title and variant titles Claude's judgement read. */
+export const storedMembers = (members: Listing[]): StoredMember[] =>
+  members.map((m) => ({
+    shop_id: m.shopId, group_key: m.groupKey, site_product_id: m.id, title: normText(m.title),
+    variants: [...new Set(m.variantTitles.map(normText).filter((v) => v !== ''))].sort(),
+  }));
+
+export const listingRows = (members: Listing[]) => members.map((m) => ({ shop: m.shopSlug, shopId: m.shopId, groupKey: m.groupKey, title: m.title, priceCents: m.priceCents }));
 
 export type Settled = { rows: JudgeGroupRow[]; judgements: JudgementRow[]; judged: number; rejected: number; matched: number; vetoes: number };
 
@@ -29,21 +36,20 @@ export function settleBatch(batch: JudgeBatch, output: unknown, ctx: { model: st
       out.rows.push({ ...base, status: 'rejected', reason: a.reason, clusters: null, apart: [], vetoed: [], final: [] });
       return;
     }
-    const veto = applyVeto(c.members.map(vetoListing), a.verdict.clusters);
+    // a family shown through representatives: each one's cluster takes the listings attached to it
+    const verdict = expandVerdict(c, a.verdict);
+    const veto = applyVeto(c.members.map(vetoListing), verdict.clusters);
     out.judged++;
     out.vetoes += veto.vetoed.length;
     if (veto.clusters.length > 0) out.matched++;
-    out.rows.push({ ...base, status: 'ok', reason: null, clusters: a.verdict.clusters, apart: a.verdict.apart, vetoed: veto.vetoed, final: veto.clusters });
+    out.rows.push({ ...base, status: 'ok', reason: null, clusters: verdict.clusters, apart: verdict.apart, vetoed: veto.vetoed, final: veto.clusters });
     out.judgements.push({
       key: c.key,
       fingerprint: c.fingerprint,
       model: ctx.model,
       effort: ctx.effort,
-      members: c.members.map((m) => ({
-        shop_id: m.shopId, group_key: m.groupKey, site_product_id: m.id, title: normText(m.title),
-        variants: [...new Set(m.variantTitles.map(normText).filter((v) => v !== ''))].sort(),
-      })),
-      verdict: { clusters: a.verdict.clusters, apart: a.verdict.apart, vetoed: veto.vetoed, final: veto.clusters },
+      members: storedMembers(c.members),
+      verdict: { clusters: verdict.clusters, apart: verdict.apart, vetoed: veto.vetoed, final: veto.clusters },
     });
   });
   return out;

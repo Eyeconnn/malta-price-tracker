@@ -17,6 +17,8 @@ export type StoredVerdict = {
   vetoed: { a: number; b: number; reasons: string[] }[];
   /** the clusters of two or more after the veto */
   final: number[][];
+  /** a merge-pass judgement (key "m..."): the judgements its clusters came from (src/match/merge.ts) */
+  merge?: { sources: string[] };
 };
 export type JudgementRow = { key: string; members: StoredMember[]; fingerprint: string; verdict: StoredVerdict; model: string; effort: string | null };
 export type StoredJudgement = JudgementRow & { id: number; judgedAt: Date };
@@ -79,8 +81,10 @@ export async function finishJudgeRun(sql: postgres.Sql, runId: number, t: JudgeT
 /**
  * Upserts judgements by candidate key, and deletes older judgements of other candidate keys that share a listing
  * with them (the group the listing belongs to changed), in one transaction. Returns how many were saved and removed.
+ * opts.merge: merge-pass judgements (src/match/merge.ts) delete only older merge judgements (keys "m..."); the chunk
+ * judgements they cover stay for their other listings, and the newer merge judgement wins at the site build.
  */
-export async function saveJudgements(sql: postgres.Sql, runId: number, rows: JudgementRow[]): Promise<{ saved: number; superseded: number }> {
+export async function saveJudgements(sql: postgres.Sql, runId: number, rows: JudgementRow[], opts: { merge?: boolean } = {}): Promise<{ saved: number; superseded: number }> {
   if (rows.length === 0) return { saved: 0, superseded: 0 };
   const keys = rows.map((r) => r.key);
   const refs = [...new Set(rows.flatMap((r) => r.members.map((m) => memberRef({ shopId: m.shop_id, groupKey: m.group_key }))))];
@@ -97,6 +101,7 @@ export async function saveJudgements(sql: postgres.Sql, runId: number, rows: Jud
     const res = await tx`
       delete from match_judgements j
       where not (j.candidate_key = any(${keys}::text[]))
+        ${opts.merge === true ? tx`and j.candidate_key like 'm%'` : tx``}
         and exists (
           select 1 from jsonb_array_elements(j.members) m
           where (m ->> 'shop_id') || '|' || (m ->> 'group_key') = any(${refs}::text[]))`;
