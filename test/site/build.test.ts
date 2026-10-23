@@ -217,6 +217,11 @@ describe.skipIf(!process.env.SITE_BUILD_TEST_DB)('site-build on PGlite', () => {
           insert into products ${sql({ shop_id: shopId, last_seen: new Date(NOW.getTime() - HOUR), ...p } as Record<string, postgres.ParameterOrJSON<never>>)}
           returning id`
       )[0].id;
+    // stored copies: the 8GB variant's picture, and a full-size original of the old pipeline (never shown)
+    const image = async (url: string, key: string) =>
+      (await sql<{ id: string }[]>`insert into images (source_url, r2_key, sha256) values (${url}, ${key}, ${'e'.repeat(64)}) returning id`)[0].id;
+    ids.img8 = await image('https://lenovoshop.test/p1.jpg', `img/${'1'.repeat(64)}.webp`);
+    ids.legacy = await image('https://lenovoshop.test/k1.jpg', `images/${'2'.repeat(64)}.jpg`);
     ids.v16 = await product(a, {
       external_id: 'P1-16',
       parent_external_id: 'P1',
@@ -236,13 +241,17 @@ describe.skipIf(!process.env.SITE_BUILD_TEST_DB)('site-build on PGlite', () => {
       category_path: 'Computers > Laptops',
       url: 'https://lenovoshop.test/p1?v=8',
       image_url: 'https://lenovoshop.test/p1.jpg',
+      image_id: ids.img8,
     });
     ids.mid = await product(a, { external_id: 'MID', title: 'Seen 5 days ago', last_seen: new Date(NOW.getTime() - 5 * DAY) });
     ids.old = await product(a, { external_id: 'OLD', title: 'Seen 10 days ago', last_seen: new Date(NOW.getTime() - 10 * DAY) });
     ids.b1 = await product(b, { external_id: 'B1', title: 'Lenovo IdeaPad Slim 5 16GB', gtin: '5901234123457' });
     // a none group with two variants shows its cheapest in-stock variant
     ids.k1 = await product(a, { external_id: 'K1-L', parent_external_id: 'K1', title: 'Kettle', variant_title: 'Large', url: 'https://lenovoshop.test/k1?v=l' });
-    ids.k2 = await product(a, { external_id: 'K1-S', parent_external_id: 'K1', title: 'Kettle', variant_title: 'Small', url: 'https://lenovoshop.test/k1?v=s' });
+    ids.k2 = await product(a, {
+      external_id: 'K1-S', parent_external_id: 'K1', title: 'Kettle', variant_title: 'Small', url: 'https://lenovoshop.test/k1?v=s',
+      image_url: 'https://lenovoshop.test/k1.jpg', image_id: ids.legacy,
+    });
     ids.c1 = await product(c, { external_id: 'C1', title: 'Hidden shop product', gtin: '4006381333931' });
 
     type O = { product_id: string; observed_at: Date; price_cents: number; was_price_cents: number | null; in_stock: boolean; bf_marked: boolean | null };
@@ -284,6 +293,7 @@ describe.skipIf(!process.env.SITE_BUILD_TEST_DB)('site-build on PGlite', () => {
     gtin: string | null;
     url: string | null;
     image_url: string | null;
+    image_key: string | null;
     price_cents: number | null;
     was_price_cents: number | null;
     in_stock: boolean | null;
@@ -320,6 +330,8 @@ describe.skipIf(!process.env.SITE_BUILD_TEST_DB)('site-build on PGlite', () => {
     expect(lenovo.url).toBe('https://lenovoshop.test/p1?v=16');
     // the 16GB has no picture of its own: the representative's is used
     expect(lenovo.image_url).toBe('https://lenovoshop.test/p1.jpg');
+    // and our stored copy of it is the group's photo
+    expect(lenovo.image_key).toBe(`img/${'1'.repeat(64)}.webp`);
     expect(lenovo.bf_status).toBe('marked');
     expect(lenovo.updated_at.getTime()).toBe(NOW.getTime());
     // Ruling R50: the row joined a canonical group (it had none), so the old confirmation is dropped
@@ -331,6 +343,8 @@ describe.skipIf(!process.env.SITE_BUILD_TEST_DB)('site-build on PGlite', () => {
     expect(kettle.price_cents).toBe(3500);
     expect(kettle.url).toBe('https://lenovoshop.test/k1?v=s');
     expect(kettle.variant_count).toBe(2);
+    // a full-size original stored by the old pipeline is not a photo
+    expect(kettle.image_key).toBeNull();
 
     const other = find(rows, ids.b, 'B1')!;
     expect(other.verdict).toBe('insufficient');

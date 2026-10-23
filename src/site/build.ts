@@ -15,6 +15,8 @@ const SEEN_DAYS = 3;
 /** Groups with no variant seen within this many days are deleted. */
 const KEEP_DAYS = 7;
 const GROUP_BATCH = 2000;
+/** The R2 key of a stored small copy (src/pipeline/photo.ts isPhotoKey). */
+const PHOTO_KEY_RE = '^img/[0-9a-f]{64}[.]webp$';
 const WRITE_BATCH = 5000;
 
 export type ProductRow = {
@@ -28,6 +30,8 @@ export type ProductRow = {
   category_path: string | null;
   tags: string[] | null;
   image_url: string | null;
+  /** R2 key of the stored small copy of this variant's picture (img/<sha256>.webp), null when none */
+  image_key?: string | null;
   bf_status: string | null;
 };
 
@@ -50,6 +54,7 @@ type GroupRow = {
   brand: string | null;
   url: string | null;
   image_url: string | null;
+  image_key: string | null;
   category: string;
   variant_count: number;
   rep_product_id: string;
@@ -145,6 +150,8 @@ function buildGroup(groupKey: string, vs: VariantResult[], shop: Shop, settings:
     url: s.url,
     // a variant without its own picture falls back to the representative's
     image_url: s.image_url ?? p.image_url,
+    // our stored copy in the same order (shown variant, then the representative), then any variant's
+    image_key: s.image_key ?? p.image_key ?? vs.find((v) => v.product.image_key)?.product.image_key ?? null,
     category: categorize({ categoryPath: p.category_path, tags: p.tags ?? [], title, shopCategory: shop.category }, settings.categoryOverrides),
     variant_count: vs.length,
     rep_product_id: s.id,
@@ -188,20 +195,20 @@ async function writeGroups(sql: postgres.Sql, shopId: number, groups: GroupRow[]
   if (groups.length === 0) return;
   const col = <K extends keyof GroupRow>(k: K) => groups.map((g) => g[k]);
   await sql`
-    insert into site_products (shop_id, group_key, title, brand, url, image_url, category, variant_count, rep_product_id,
+    insert into site_products (shop_id, group_key, title, brand, url, image_url, image_key, category, variant_count, rep_product_id,
       gtin, mpn, price_cents, was_price_cents, in_stock, bf_status, verdict, reason, facts, updated_at)
-    select ${shopId}, t.group_key, t.title, t.brand, t.url, t.image_url, t.category, t.variant_count, t.rep_product_id,
+    select ${shopId}, t.group_key, t.title, t.brand, t.url, t.image_url, t.image_key, t.category, t.variant_count, t.rep_product_id,
       t.gtin, t.mpn, t.price_cents, t.was_price_cents, t.in_stock::boolean, t.bf_status, t.verdict, t.reason, t.facts::jsonb, ${now}
     from unnest(
       ${col('group_key')}::text[], ${col('title')}::text[], ${col('brand')}::text[], ${col('url')}::text[],
-      ${col('image_url')}::text[], ${col('category')}::text[], ${col('variant_count')}::int[], ${col('rep_product_id')}::bigint[],
+      ${col('image_url')}::text[], ${col('image_key')}::text[], ${col('category')}::text[], ${col('variant_count')}::int[], ${col('rep_product_id')}::bigint[],
       ${col('gtin')}::text[], ${col('mpn')}::text[], ${col('price_cents')}::int[], ${col('was_price_cents')}::int[],
       ${col('in_stock').map(boolText)}::text[], ${col('bf_status')}::text[], ${col('verdict')}::text[], ${col('reason')}::text[],
       ${groups.map((g) => JSON.stringify(g.facts))}::text[]
-    ) as t(group_key, title, brand, url, image_url, category, variant_count, rep_product_id, gtin, mpn, price_cents,
+    ) as t(group_key, title, brand, url, image_url, image_key, category, variant_count, rep_product_id, gtin, mpn, price_cents,
       was_price_cents, in_stock, bf_status, verdict, reason, facts)
     on conflict (shop_id, group_key) do update set
-      title = excluded.title, brand = excluded.brand, url = excluded.url, image_url = excluded.image_url,
+      title = excluded.title, brand = excluded.brand, url = excluded.url, image_url = excluded.image_url, image_key = excluded.image_key,
       category = excluded.category, variant_count = excluded.variant_count, rep_product_id = excluded.rep_product_id,
       gtin = excluded.gtin, mpn = excluded.mpn, price_cents = excluded.price_cents, was_price_cents = excluded.was_price_cents,
       in_stock = excluded.in_stock, bf_status = excluded.bf_status, verdict = excluded.verdict, reason = excluded.reason,
@@ -234,11 +241,13 @@ export async function buildShop(sql: postgres.Sql, shop: Shop, settings: SiteSet
   const obsSince = new Date(now.getTime() - (t.baselineDays + t.raiseWindowDays + 2) * DAY_MS);
 
   const products = await sql<ProductRow[]>`
-    select id, coalesce(parent_external_id, external_id) as group_key, url, gtin, mpn, brand, title, category_path, tags,
-      image_url, bf_status
-    from products
-    where shop_id = ${shop.id} and last_seen > ${seenSince}
-    order by group_key, id`;
+    select p.id, coalesce(p.parent_external_id, p.external_id) as group_key, p.url, p.gtin, p.mpn, p.brand, p.title,
+      p.category_path, p.tags, p.image_url, p.bf_status,
+      -- only small copies (photo.ts); a full-size original of the old pipeline is never shown
+      case when i.r2_key ~ ${PHOTO_KEY_RE} then i.r2_key end as image_key
+    from products p left join images i on i.id = p.image_id
+    where p.shop_id = ${shop.id} and p.last_seen > ${seenSince}
+    order by group_key, p.id`;
 
   const groups = new Map<string, ProductRow[]>();
   for (const p of products) {
