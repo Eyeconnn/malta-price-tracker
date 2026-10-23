@@ -74,15 +74,33 @@ export const rowIndex = (r: DayRow) => dayIndex(r.day);
 
 /**
  * The latest day whose price differs from the day before, when it is within the last `withinDays`
- * days of the history; null otherwise.
+ * days of `today` (default: the latest row's day); null otherwise.
  */
-export function recentChange(rows: readonly DayRow[], withinDays: number): { row: DayRow; from: number } | null {
+export function recentChange(rows: readonly DayRow[], withinDays: number, today?: string): { row: DayRow; from: number } | null {
   const latest = rows.at(-1);
   if (!latest) return null;
+  const anchor = dayIndex(today ?? latest.day);
   for (let i = rows.length - 1; i > 0; i--) {
     const r = rows[i]!;
-    if (dayIndex(latest.day) - dayIndex(r.day) >= withinDays) return null;
+    if (anchor - dayIndex(r.day) >= withinDays) return null;
     if (r.change && r.change.cents !== 0) return { row: r, from: r.price! - r.change.cents };
   }
   return null;
+}
+
+/**
+ * The lowest price among EVERY reading of variant `productId` on the `days` Malta days ending `today`
+ * (today counts as one), not only the last reading of each day. null when no reading shows a price.
+ */
+export function lowestInLastDays(history: readonly HistoryObs[], productId: number, today: string, days: number): number | null {
+  const to = dayIndex(today);
+  let low: number | null = null;
+  for (const h of history) {
+    if (h.productId !== productId || !positive(h.price)) continue;
+    const t = new Date(h.at);
+    if (Number.isNaN(t.getTime())) continue;
+    const i = dayIndex(maltaDay(t));
+    if (i > to - days && i <= to && (low === null || h.price < low)) low = h.price;
+  }
+  return low;
 }

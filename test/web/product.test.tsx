@@ -159,8 +159,12 @@ beforeEach(() => {
   localStorage.clear();
   setMedia();
   vi.stubGlobal('ResizeObserver', FakeResizeObserver);
+  // a fixed clock: 23 Oct 2026, 10:00 Malta. Only Date is faked, so timers and testing-library keep working.
+  vi.useFakeTimers({ toFake: ['Date'] });
+  vi.setSystemTime(new Date('2026-10-23T08:00:00.000Z'));
 });
 afterEach(() => {
+  vi.useRealTimers();
   cleanup();
   vi.unstubAllGlobals();
 });
@@ -323,7 +327,7 @@ describe('product page, Simple', () => {
   });
 
   it('shows no shop link when the address is missing or not a web address', async () => {
-    for (const url of [null, 'javascript:alert(1)', 'ftp://atoz.example/p/7', 'not a url']) {
+    for (const url of [null, 'javascript:alert(1)', 'ftp://atoz.example/p/7', 'not a url', 'https://user:secret@atoz.example/p/7', 'https://user@atoz.example/p/7']) {
       const data = lenovo();
       data.product = { ...data.product, url };
       await openLenovo(data);
@@ -388,7 +392,9 @@ describe('product page, Simple, variants', () => {
     expect(screen.queryByText(/Cheaper at/)).toBeNull();
     // the shop link and the other shops stay
     expect(screen.getByRole('link', { name: /^View on AtoZ Electronics/ })).toBeTruthy();
-    expect(screen.getByRole('region', { name: 'Other shops' })).toBeTruthy();
+    // the other shops' prices are for the verdict's variant, and the heading says so
+    expect(screen.getByRole('region', { name: 'Other shops (for 16GB)' })).toBeTruthy();
+    expect(screen.queryByRole('region', { name: 'Other shops' })).toBeNull();
   });
 
   it('says the deal check is for the verdict variant, with a button that switches back to everything as before', async () => {
@@ -456,9 +462,9 @@ describe('product page, Simple, variants', () => {
     expect(live.getAttribute('aria-live')).toBe('polite');
     expect(live.textContent).toBe('');
     choose(/8GB/);
-    expect(live.textContent).toBe('8GB: €599.00');
+    expect(live.textContent).toBe('8GB: €599.00. Deal check not shown for this variant.');
     fireEvent.click(screen.getByRole('button', { name: 'Choose 16GB' }));
-    expect(live.textContent).toBe('16GB: €799.00');
+    expect(live.textContent).toBe('16GB: €799.00. Deal check shown.');
   });
 
   it('keeps the chosen variant when switching to Advanced and back', async () => {
@@ -475,6 +481,122 @@ describe('product page, Simple, variants', () => {
     expect(within(picker()).getByRole('radio', { name: /8GB/ }).getAttribute('aria-checked')).toBe('true');
     expect(screen.getByText(checkLine)).toBeTruthy();
   }, 30_000);
+});
+
+describe("product page, Simple, a variant's facts from every reading", () => {
+  const choose8 = () => fireEvent.click(within(screen.getByRole('radiogroup', { name: 'Variant' })).getByRole('radio', { name: /8GB/ }));
+  const withSmall = (extra: HistoryObs[], keep: (h: HistoryObs) => boolean = () => true) => {
+    const data = lenovo();
+    data.history = [...lenovoHistory, ...smallHistory.filter(keep), ...extra].sort((a, b) => a.at.localeCompare(b.at) || a.productId - b.productId);
+    return data;
+  };
+  const lowest = () => screen.getByText('Lowest price in the last 30 days').parentElement?.textContent;
+
+  it('takes the lowest of every reading, not the last of each day', async () => {
+    // 22 Oct: €499.00 in the morning, €599.00 in the evening
+    await openLenovo(withSmall([{ ...obs(SMALL, '2026-10-22', 49900, null, false), at: '2026-10-22T06:00:00.000Z' }]));
+    choose8();
+    expect(lowest()).toMatch(/€499\.00/);
+    expect(within(screen.getByRole('article')).getAllByText('€599.00').length).toBeGreaterThan(0);
+  });
+
+  it('counts an earlier reading on a day whose last reading hid the price', async () => {
+    const data = withSmall([{ ...obs(SMALL, '2026-10-22', 54900, null, false), at: '2026-10-22T06:00:00.000Z' }], (h) => !h.at.startsWith('2026-10-22'));
+    data.history.push(obs(SMALL, '2026-10-22', null, null, false));
+    const { container } = await openLenovo(data);
+    choose8();
+    expect(lowest()).toMatch(/€549\.00/);
+    expect(within(screen.getByRole('article')).getAllByText('Price not shown by the shop').length).toBeGreaterThan(0);
+    expect(container.textContent).not.toMatch(/€0\.00/);
+  });
+
+  it('counts the 30th Malta day back (24 Sep) and not the 31st (23 Sep), counting from today', async () => {
+    await openLenovo(withSmall([obs(SMALL, '2026-09-24', 39900, null, false)]));
+    choose8();
+    expect(lowest()).toMatch(/€399\.00/);
+    cleanup();
+    await openLenovo(withSmall([obs(SMALL, '2026-09-23', 39900, null, false)]));
+    choose8();
+    expect(lowest()).toMatch(/€599\.00/);
+  });
+
+  it('says "Not known yet" when no reading falls in the last 30 days', async () => {
+    await openLenovo(withSmall([], () => false));
+    choose8();
+    expect(lowest()).toMatch(/Not known yet/);
+  });
+
+  it('says when a variant was last seen instead of showing an old price as current', async () => {
+    const data = lenovo();
+    data.history = [...lenovoHistory, ...daysFrom('2026-09-01', 10).map((d) => obs(SMALL, d, 59900, 64900, true))];
+    await openLenovo(data);
+    choose8();
+    const article = screen.getByRole('article');
+    expect(within(article).getByText('Last seen on 10 Sep')).toBeTruthy();
+    expect(within(article).queryByText('Black Friday')).toBeNull();
+    expect(lowest()).toMatch(/Not known yet/);
+    expect(screen.getByRole('status').textContent).toMatch(/^8GB: last seen on 10 Sep/);
+    // the price line itself no longer shows €599.00 (only the picker button does)
+    expect(within(article).getAllByText('€599.00')).toHaveLength(1);
+  });
+
+  it("counts a price change from today, not from the variant's latest day", async () => {
+    // 10 Oct is the latest day: 9 days after the rise on 1 Oct, but 22 days before today
+    const data = lenovo({ raiseWindowDays: 14 });
+    data.history = [
+      ...lenovoHistory,
+      ...daysFrom('2026-09-20', 11).map((d) => obs(SMALL, d, 64900, null, false)),
+      ...daysFrom('2026-10-01', 10).map((d) => obs(SMALL, d, 59900, null, false)),
+    ];
+    await openLenovo(data);
+    choose8();
+    expect(screen.queryByText(/Price changed/)).toBeNull();
+    cleanup();
+    await openLenovo(lenovo({ raiseWindowDays: 30, history: data.history }));
+    choose8();
+    expect(screen.getByText('Price changed from €649.00 to €599.00 on 1 Oct')).toBeTruthy();
+  });
+});
+
+describe('product page, Simple, verdicts without a variant to hide', () => {
+  const choose8 = () => fireEvent.click(within(screen.getByRole('radiogroup', { name: 'Variant' })).getByRole('radio', { name: /8GB/ }));
+
+  it('keeps the whole card when the product has no verdict variant (productId null)', async () => {
+    const data = lenovo();
+    data.product = { ...data.product, productId: null };
+    await openLenovo(data);
+    choose8();
+    expect(screen.getByText(/Price went from/)).toBeTruthy();
+    expect(screen.queryByText(/Our deal check is for/)).toBeNull();
+    expect(screen.queryByText('Lowest price in the last 30 days')).toBeNull();
+  });
+
+  it('keeps the whole card when the verdict variant is not among the variants', async () => {
+    const data = lenovo();
+    data.variants = [data.variants[1]!, { id: 72, title: 'Lenovo V15 G5', variantTitle: '32GB', priceCents: 99900, inStock: true }];
+    await openLenovo(data);
+    choose8();
+    expect(screen.getByText(/Price went from/)).toBeTruthy();
+    expect(screen.getByRole('list', { name: 'Price facts' })).toBeTruthy();
+    expect(screen.queryByText(/Our deal check is for/)).toBeNull();
+  });
+});
+
+describe('product page, card details', () => {
+  it('reserves room for the tag only while the tag is shown', async () => {
+    await openLenovo();
+    const article = screen.getByRole('article');
+    expect(article.querySelector('.pr-24')).not.toBeNull();
+    fireEvent.click(within(screen.getByRole('radiogroup', { name: 'Variant' })).getByRole('radio', { name: /8GB/ }));
+    expect(article.querySelector('.pr-24')).toBeNull();
+  });
+
+  it('says out of stock for the verdict variant too', async () => {
+    const data = lenovo();
+    data.product = { ...data.product, inStock: false };
+    await openLenovo(data);
+    expect(within(screen.getByRole('article')).getByText('Out of stock')).toBeTruthy();
+  });
 });
 
 describe('product page, Advanced', () => {

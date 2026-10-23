@@ -14,10 +14,10 @@ import { Button } from '@/components/ui/button';
 import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group';
 import { ApiError, api, type Card, type HistoryObs, type Label, type OtherShop, type ProductResponse, type Variant, useApi } from '@/lib/api';
 import { formatDay, formatEuro, signedPct } from '@/lib/format';
-import { type DayRow, dayRows, lastDays, recentChange } from '@/lib/history';
+import { type DayRow, dayRows, lastDays, lowestInLastDays, recentChange } from '@/lib/history';
 import { useMediaQuery } from '@/lib/useMediaQuery';
 import { cn } from '@/lib/utils';
-import type { VerdictFacts } from '../../../src/site/verdict.js';
+import { maltaDay, type VerdictFacts } from '../../../src/site/verdict.js';
 
 // Recharts is only downloaded when an Advanced product page shows the chart.
 const PriceChart = lazy(() => import('@/components/site/PriceChart'));
@@ -144,11 +144,11 @@ function NumbersPanel({ facts, judged }: { facts: VerdictFacts; judged: boolean 
 }
 
 /** Simple: exactly matched other shops only (a title-only match is never shown here). */
-function OtherShops({ others }: { others: OtherShop[] }) {
+function OtherShops({ others, forVariant }: { others: OtherShop[]; forVariant?: string }) {
   const exact = others.filter((o) => !o.possible);
   if (exact.length === 0) return null;
   return (
-    <Section title="Other shops">
+    <Section title={forVariant ? `Other shops (for ${forVariant})` : 'Other shops'}>
       <ul className="m-0 flex list-none flex-col p-0">
         {exact.map((o) => (
           <li key={o.id} className="border-t border-line first:border-t-0">
@@ -389,11 +389,17 @@ function webAddress(url: string | null): string | null {
   if (!url) return null;
   try {
     const u = new URL(url);
-    return u.protocol === 'https:' || u.protocol === 'http:' ? u.href : null;
+    // an address with a user name or password is not a plain product link
+    return (u.protocol === 'https:' || u.protocol === 'http:') && !u.username && !u.password ? u.href : null;
   } catch {
     return null;
   }
 }
+
+/** The days the lowest-price fact looks back, today included. */
+const LOW_DAYS = 30;
+const DAY_MS = 86_400_000;
+const dayNumber = (day: string) => Math.round(Date.parse(`${day}T00:00:00Z`) / DAY_MS);
 
 /** What the Simple card shows for a variant the verdict is not about: plain facts from that variant's own history. */
 type VariantView = {
@@ -401,26 +407,31 @@ type VariantView = {
   wasCents: number | null;
   inStock: boolean | null;
   bf: boolean;
-  /** the lowest price on its tracked days in the last 30 days; null when none shown a price */
+  /** the Malta day of its newest reading when that is older than the last 30 days: it is not current */
+  lastSeen: string | null;
+  /** the lowest of every reading in the last 30 Malta days, today included; null when none */
   lowest30: number | null;
   change: ReturnType<typeof recentChange>;
 };
 
-function variantView(data: ProductResponse, id: number): VariantView {
+function variantView(data: ProductResponse, id: number, now: Date): VariantView {
   let latest: HistoryObs | undefined;
   for (const h of data.history) {
     if (h.productId === id && (!latest || Date.parse(h.at) >= Date.parse(latest.at))) latest = h;
   }
   const v = data.variants.find((x) => x.id === id);
+  const today = maltaDay(now);
   const rows = dayRows(data.history, id, null);
-  const prices = lastDays(rows, 30).flatMap((r) => (r.price === null ? [] : [r.price]));
+  const lastDay = rows.at(-1)?.day;
+  const stale = lastDay !== undefined && dayNumber(today) - dayNumber(lastDay) >= LOW_DAYS;
   return {
     priceCents: latest ? (positive(latest.price) ? latest.price : null) : positive(v?.priceCents) ? v.priceCents : null,
     wasCents: latest && positive(latest.was) ? latest.was : null,
     inStock: latest?.inStock ?? v?.inStock ?? null,
     bf: latest?.bf === true,
-    lowest30: prices.length > 0 ? Math.min(...prices) : null,
-    change: finite(data.raiseWindowDays) ? recentChange(rows, data.raiseWindowDays) : null,
+    lastSeen: stale ? lastDay : null,
+    lowest30: lowestInLastDays(data.history, id, today, LOW_DAYS),
+    change: !stale && finite(data.raiseWindowDays) ? recentChange(rows, data.raiseWindowDays, today) : null,
   };
 }
 
@@ -462,9 +473,10 @@ function ProductContent({ data }: { data: ProductResponse }) {
 
   // Simple shows the chosen variant's own data when the verdict is about another one (R44: only the
   // verdict's variant is judged), so the tag, reason, alarm, three numbers and CheaperBox are hidden then.
-  const other = !advanced && variant !== null && variant !== verdictId;
-  const own = useMemo(() => (other && variant !== null ? variantView(data, variant) : null), [other, variant, data]);
-  const verdictVariant = data.variants.find((v) => v.id === verdictId);
+  const verdictVariant = verdictId === null ? undefined : data.variants.find((v) => v.id === verdictId);
+  const other = !advanced && verdictVariant !== undefined && variant !== null && variant !== verdictId;
+  // the clock is read when the variant changes, not on every render
+  const own = useMemo(() => (other && variant !== null ? variantView(data, variant, new Date()) : null), [other, variant, data]);
   const alarm = avoid && card.bf && !other;
   const shownCard: Card = own ? { ...card, priceCents: own.priceCents, wasCents: own.wasCents } : card;
 
@@ -473,10 +485,12 @@ function ProductContent({ data }: { data: ProductResponse }) {
     setVariant(id);
     const v = data.variants.find((x) => x.id === id);
     if (!v) return;
-    const view = id === verdictId ? null : variantView(data, id);
-    const price = euroOr(view ? view.priceCents : card.priceCents, NO_PRICE);
-    const stock = (view ? view.inStock : v.inStock) === false ? ', out of stock' : '';
-    setAnnouncement(`${variantName(v)}: ${price}${stock}`);
+    const view = verdictVariant && id !== verdictId ? variantView(data, id, new Date()) : null;
+    const price = view?.lastSeen ? `last seen on ${formatDay(view.lastSeen)}` : euroOr(view ? view.priceCents : card.priceCents, NO_PRICE);
+    const stock = !view?.lastSeen && (view ? view.inStock : product.inStock) === false ? ', out of stock' : '';
+    // the deal check follows the verdict's variant only: say when it goes and when it comes back
+    const check = advanced || !verdictVariant ? '' : id === verdictId ? '. Deal check shown.' : '. Deal check not shown for this variant.';
+    setAnnouncement(`${variantName(v)}: ${price}${stock}${check}`);
   };
 
   // The insufficient case with a price is "not enough history"; without a price the reason says so.
@@ -496,7 +510,7 @@ function ProductContent({ data }: { data: ProductResponse }) {
         className={cn('glass overflow-hidden', alarm && 'border-2 border-bad')}
       >
         {alarm && <AlarmBanner card={card} />}
-        <div className={cn('relative flex flex-col gap-2 p-4', tag && 'pr-24')}>
+        <div className={cn('relative flex flex-col gap-2 p-4', tag && !other && 'pr-24')}>
           {tag && !other && (
             <div className="absolute top-2 right-4">
               <PriceTag {...tag} />
@@ -515,7 +529,11 @@ function ProductContent({ data }: { data: ProductResponse }) {
             {product.title}
           </h1>
           {/* min-h keeps the line as tall as the big price, so "Price not shown" does not shift the card */}
-          <PriceLine card={shownCard} className="min-h-9 [&>span:first-child]:text-3xl" />
+          {own?.lastSeen ? (
+            <p className="min-h-9 text-lg font-semibold">Last seen on {formatDay(own.lastSeen)}</p>
+          ) : (
+            <PriceLine card={shownCard} className="min-h-9 [&>span:first-child]:text-3xl" />
+          )}
           {/* announced politely when the variant changes; always rendered so the change is heard */}
           <p role="status" aria-live="polite" className="sr-only">
             {announcement}
@@ -523,9 +541,9 @@ function ProductContent({ data }: { data: ProductResponse }) {
           {!advanced && data.variants.length > 1 && variant !== null && (
             <VariantPicker inline variants={data.variants} value={variant} verdictId={verdictId} onChange={choose} />
           )}
-          {(own ? own.bf : card.bf && !alarm) && <BlackFridayMark />}
+          {(own ? own.bf && !own.lastSeen : card.bf && !alarm) && <BlackFridayMark />}
           {fact && <p className="font-semibold text-bad">{fact}</p>}
-          {own?.inStock === false && <p className="text-sm text-muted-foreground">Out of stock</p>}
+          {(own ? own.inStock === false && !own.lastSeen : product.inStock === false) && <p className="text-sm text-muted-foreground">Out of stock</p>}
           {own ? own.change && <PriceChangeLine change={own.change} /> : change && <PriceChangeLine change={change} />}
           {own && (
             <p className="text-sm">
@@ -571,7 +589,7 @@ function ProductContent({ data }: { data: ProductResponse }) {
       {data.cheaper && !other && <CheaperBox cheaper={data.cheaper} ownCents={card.priceCents} />}
 
       {!advanced && !other && facts && !tooNew && <ThreeNumbers facts={facts} />}
-      {!advanced && <OtherShops others={data.others} />}
+      {!advanced && <OtherShops others={data.others} forVariant={other && verdictVariant ? variantName(verdictVariant) : undefined} />}
 
       {advanced && (
         <>
