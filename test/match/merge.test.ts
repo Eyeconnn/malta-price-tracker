@@ -217,6 +217,20 @@ describe('merge pass', () => {
     expect(mergePass(after.stored, p, () => 'same', 3).candidates).toHaveLength(0);
   });
 
+  it('merges the live listings although the colours one shop lists on their own carry their own part numbers', () => {
+    const { p } = liveSplit();
+    const mpn: Record<string, string> = { 'APPLE IPHONE 17 PRO 512GB ORANGE': 'MG8M4', 'APPLE IPHONE 17 PRO 512GB DEEP BLUE': 'MG8N4', 'APPLE IPHONE 17 PRO 512GB SILVER': 'MG8K4-E' };
+    const withMpn = p.map((l) => (mpn[l.title] ? { ...l, mpn: mpn[l.title] } : l));
+    const rows: JudgementRow[] = [];
+    for (const part of [withMpn.slice(0, 5).concat(withMpn[8]), withMpn.slice(5, 8).concat(withMpn.slice(9))]) {
+      const bt = makeJudgeBatches([buildCandidates(part)[0]])[0];
+      rows.push(...settleBatch(bt, claude(bt, () => 'same'), ctx).judgements);
+    }
+    const stored = overlayJudgements([], rows, new Date(1), false);
+    const after = mergePass(stored, withMpn, () => 'same');
+    expect(productsOf(products(after.stored, withMpn), withMpn).size).toBe(1);
+  });
+
   it('keeps the clusters apart when Claude says different, and does not ask again', () => {
     const { p, stored } = liveSplit();
     const before = productsOf(products(stored, p), p).size;

@@ -29,6 +29,28 @@ const IGNORE = new Set(
 // Model words must agree between two titles (also kept by the name normaliser, src/names/check.ts).
 export const MODEL = new Set('pro max plus mini ultra air lite se fe neo slim xl xs'.split(' '));
 
+/** Colour words (of IGNORE): a colour option, not part of a product's name. */
+const COLOUR_WORDS = new Set(
+  ('black white silver grey gray blue red green pink purple gold yellow orange beige brown navy titanium natural desert midnight starlight ' +
+    'graphite space sage mist lavender cream rose violet teal mint coral obsidian porcelain').split(' '),
+);
+
+/**
+ * Two listings at one shop whose titles name different colours and are otherwise the same words (a colour word and
+ * the word before it left out: Deep Blue, Cosmic Orange): colour options the shop lists on their own, which may each
+ * carry their own barcode or part number (one per colour).
+ */
+export function colourSiblings(x: { shopId?: number; title: string }, y: { shopId?: number; title: string }): boolean {
+  if (x.shopId === undefined || x.shopId !== y.shopId) return false;
+  const split = (t: string) => (t || '').slice(0, MAX_TITLE_CHARS).toLowerCase().replace(/[^a-z0-9]+/g, ' ').split(' ').filter((w) => w !== '');
+  const colours = (ws: string[]) => [...new Set(ws.filter((w) => COLOUR_WORDS.has(w)))].sort().join(' ');
+  const rest = (ws: string[]) =>
+    ws.filter((w, i) => !COLOUR_WORDS.has(w) && !(COLOUR_WORDS.has(ws[i + 1] ?? '') && !/\d/.test(w) && !MODEL.has(w))).join(' ');
+  const a = split(x.title);
+  const b = split(y.title);
+  return colours(a) !== '' && colours(b) !== '' && colours(a) !== colours(b) && rest(a) === rest(b);
+}
+
 /** Titles are cut to this many characters before tokenising, so a huge shop title cannot blow up the work. */
 const MAX_TITLE_CHARS = 300;
 
@@ -374,14 +396,15 @@ function matchByName(items: MatchInput[], out: Map<number, Match>): void {
  */
 function matchByJudged(items: MatchInput[], clusters: number[][], out: Map<number, Match>): void {
   const byId = new Map(items.map((it) => [it.id, it]));
-  // two valid barcodes at two shops, or two part numbers, are two products whatever the judgement says (review C3)
+  // two valid barcodes at two shops, or two part numbers, are two products whatever the judgement says (review C3);
+  // the colours one shop lists on their own may each have their own part number (colourSiblings)
   const conflict = (x: MatchInput, y: MatchInput) => {
     const gx = gtinKey(x.gtin);
     const gy = gtinKey(y.gtin);
     if (gx !== null && gy !== null && gx !== gy && x.shopId !== y.shopId) return true;
     const px = mpnIdentity(x.mpn);
     const py = mpnIdentity(y.mpn);
-    return px !== null && py !== null && px !== py;
+    return px !== null && py !== null && px !== py && !colourSiblings(x, y);
   };
   const lists: number[][] = [];
   /** clusters the barcodes split: their free listings join no code group (which part they belong to is unknown) */

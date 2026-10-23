@@ -10,7 +10,7 @@
 // helpers of the name checks. Pure: the judge run and the site build both call it.
 import { bundleWords, canonText, PRICE_INCLUDES } from '../names/canon-text.js';
 import { conditions, inRun, packCounts, prep, quantityClass, QUANTITY, tokens, UNIT } from '../names/text.js';
-import { COLOUR_SUFFIX, gtinIdentity, guardOf, MODEL, mpnIdentity } from '../site/matching.js';
+import { COLOUR_SUFFIX, colourSiblings, gtinIdentity, guardOf, MODEL, mpnIdentity } from '../site/matching.js';
 
 export type VetoListing = {
   title: string;
@@ -606,7 +606,8 @@ export function vetoReasons(a: VetoListing, b: VetoListing): string[] {
   if (ga && gb && ga !== gb && (a.shopId === undefined || b.shopId === undefined || a.shopId !== b.shopId)) add(`barcode ${ga} vs ${gb}`);
   const pa = mpnIdentity(a.mpn);
   const pb = mpnIdentity(b.mpn);
-  if (pa && pb && pa !== pb) add(`part number ${pa} vs ${pb}`);
+  // the colours one shop lists on their own may each have their own part number (Apple: one per colour)
+  if (pa && pb && pa !== pb && !colourSiblings(a, b)) add(`part number ${pa} vs ${pb}`);
 
   const qa = quantities(xa);
   const qb = quantities(xb);

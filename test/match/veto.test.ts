@@ -188,6 +188,14 @@ describe('veto: barcodes, part numbers and prices', () => {
     expectVetoed(v('laptops', 'Lenovo IdeaPad Slim 3', 'Lenovo', { mpn: '82XM00ABUK' }), v('laptops', 'Lenovo IdeaPad Slim 3', 'Lenovo', { mpn: '83ER0012UK' }));
     expectKept([v('tv-audio', 'JBL Tune 500 White', 'JBL', { mpn: 'JBLT500WHT' }), v('tv-audio', 'JBL Tune 500 Black', 'JBL', { mpn: 'JBLT500BLK' })]);
   });
+  it('keeps the colours one shop lists on their own with a part number each, only when the titles differ in colour alone', () => {
+    const ip = (title: string, mpn: string, shopId = 4) => v('phones', title, null, { mpn, shopId });
+    expectKept([ip('APPLE IPHONE 17 PRO 512GB ORANGE', 'MG8M4'), ip('APPLE IPHONE 17 PRO 512GB DEEP BLUE', 'MG8N4')]);
+    // at two shops, with a title that says more than the colour, or with no colour in one title, two part numbers are two products
+    expectVetoed(ip('APPLE IPHONE 17 PRO 512GB ORANGE', 'MG8M4', 4), ip('APPLE IPHONE 17 PRO 512GB DEEP BLUE', 'MG8N4', 5));
+    expectVetoed(ip('APPLE IPHONE 17 PRO 512GB ORANGE', 'MG8M4'), ip('APPLE IPHONE 17 PRO 512GB DEEP BLUE ESIM', 'MG8N4'));
+    expectVetoed(v('tv-audio', 'Sony Bravia 55 inch TV', 'Sony', { mpn: 'KD55X80L', shopId: 1 }), v('tv-audio', 'Sony Bravia 55 inch TV Black', 'Sony', { mpn: 'KD55X85L', shopId: 1 }));
+  });
   it('vetoes a price more than 3 times another of the same condition', () => {
     expectVetoed(v('tv-audio', 'Sony WH-1000XM5', 'Sony', { priceCents: 9000 }), v('tv-audio', 'Sony WH-1000XM5', 'Sony', { priceCents: 30000 }));
     expectKept([v('tv-audio', 'Sony WH-1000XM5', 'Sony', { priceCents: 25000 }), v('tv-audio', 'Sony WH-1000XM5', 'Sony', { priceCents: 34900 })]);

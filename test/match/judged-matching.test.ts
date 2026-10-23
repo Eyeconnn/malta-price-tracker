@@ -64,6 +64,15 @@ describe('assignMatches with judged clusters: barcodes and part numbers (review 
     expect(assignMatches([m(1, 1, null, '82XM00ABUK'), m(2, 2, null, '83ER0012UK')], { judged: [[1, 2]] }).size).toBe(0);
     expect(assignMatches([m(1, 1, null, 'T500WHT'), m(2, 2, null, 'T500BLK')], { judged: [[1, 2]] }).get(1)?.method).toBe('judged');
   });
+  it('groups the colours one shop lists with a part number each, with another shop\'s listing (live iPhone 17 Pro)', () => {
+    const ip = (id: number, shopId: number, title: string, mpn: string | null): MatchInput => ({ id, shopId, gtin: null, mpn, title });
+    const items = [ip(1, 4, 'APPLE IPHONE 17 PRO 512GB ORANGE', 'MG8M4'), ip(2, 4, 'APPLE IPHONE 17 PRO 512GB DEEP BLUE', 'MG8N4'), ip(3, 6, 'Apple iPhone 17 Pro 512GB Silver', null)];
+    const r = assignMatches(items, { judged: [[1, 2, 3]] });
+    expect(new Set([1, 2, 3].map((id) => r.get(id)?.key))).toEqual(new Set(['judged:1']));
+    // at two shops two part numbers stay two products
+    const two = assignMatches([ip(1, 4, 'APPLE IPHONE 17 PRO 512GB ORANGE', 'MG8M4'), ip(2, 5, 'APPLE IPHONE 17 PRO 512GB DEEP BLUE', 'MG8N4')], { judged: [[1, 2]] });
+    expect([...two.values()].some((x) => x.method === 'judged')).toBe(false);
+  });
 });
 
 describe('assignMatches with judged clusters: re-review G4, G5, G7', () => {
