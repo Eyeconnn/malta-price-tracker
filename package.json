@@ -17,6 +17,7 @@
     "snapshot": "tsx src/cli/snapshot.ts",
     "site-build": "tsx src/cli/site-build.ts",
     "normalise-names": "tsx src/cli/normalise-names.ts",
+    "judge-matches": "tsx src/cli/judge-matches.ts",
     "probe": "tsx src/cli/probe.ts",
     "shop-requests": "tsx src/cli/shop-requests.ts",
     "export-shops": "tsx src/cli/export-shops.ts",
