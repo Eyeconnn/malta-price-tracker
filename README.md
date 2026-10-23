@@ -279,8 +279,10 @@ exactly the same product, so a product page can show every seller's price (desig
 3. **Veto** (`src/match/veto.ts`): a "same" is overruled in code when the listings disagree on a number with a unit,
    a model code, model words (Pro, Plus, Ultra), condition, money, pack or piece count (variant titles included),
    audience or gender (also from the shop's category path), platform, edition, format, bundle words, OS or Windows
-   version and edition, storage type, SIM, region (plug, version, voltage), material, size words, the variety of a
-   drink, food or toiletry, the brand or the category.
+   version and edition, storage type, SIM, region (plug, version, import, NTSC, voltage), material, size words, the
+   variety of a drink, food or toiletry, accessory or part words (case, refill, replacement heads), barcodes (two
+   shops) and part numbers, a price more than 3 times another, the brand or the category. Every fact is read from the
+   title and every variant title; the shop's category path adds gender, children's audience, accessory and model words.
 4. **Storage**: `match_judgements` (one row per candidate group: members, fingerprint of their titles and variant
    titles, verdict, model, time) and `judge_runs` (migration 013). A group is judged again only when a member's title
    or variant titles change or another listing joins it.
