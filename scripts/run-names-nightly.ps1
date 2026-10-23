@@ -14,10 +14,10 @@ New-Item -ItemType Directory -Force -Path (Join-Path $repo 'out\names') | Out-Nu
 $log = Join-Path $repo ("out\names\nightly-" + (Get-Date -Format 'yyyy-MM-dd') + '.log')
 
 "=== start $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')" *>> $log
-pnpm normalise-names --model haiku --effort low --max-batches 400 --max-cost 5 --parallel 3 *>> $log
+pnpm normalise-names --model haiku --effort high --max-batches 400 --max-cost 5 --parallel 3 *>> $log
 $code = $LASTEXITCODE
 "=== names exit $code; judging $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')" *>> $log
-pnpm judge-matches --model haiku --effort low --max-batches 200 --max-cost 1 --parallel 3 *>> $log
+pnpm judge-matches --model haiku --effort high --max-batches 200 --max-cost 1 --parallel 3 *>> $log
 $judge = $LASTEXITCODE
 if ($code -eq 0) { $code = $judge }
 "=== end $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss') exit $code" *>> $log
