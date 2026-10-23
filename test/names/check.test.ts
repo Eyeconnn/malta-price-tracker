@@ -470,12 +470,12 @@ describe('checkBatch', () => {
   it('builds the canonical name from the fields with the pattern, ignoring the canonical_name text Claude wrote', () => {
     const out = {
       items: [
-        { key: '1', display_name: LENOVO_NAME, variant_label: null, canonical_name: 'anything Claude likes', attrs: { ...LENOVO_ATTRS, model: 'ThinkBook 16 G6' } },
+        { key: '1', display_name: LENOVO_NAME, variant_label: null, canonical_name: 'anything Claude likes', attrs: { ...LENOVO_ATTRS, model: 'ThinkBook 16 G6 IRL' } },
         { key: '2', display_name: 'Acer Aspire 5 A515', variant_label: 'Silver', canonical_name: 'acer aspire 5 a515', attrs: { brand: 'Acer' } },
       ],
     };
     const r = checkBatch(batch, out, laptops);
-    expect(r.results[0]).toMatchObject({ status: 'ok', canonicalName: 'lenovo thinkbook16g6 intelcorei5 16gbram 512gb 16in', canonicalReason: null, proposedCanonical: 'anything Claude likes' });
+    expect(r.results[0]).toMatchObject({ status: 'ok', canonicalName: 'lenovo thinkbook16g6irl i5 16gbram 512gb 16in', canonicalReason: null, proposedCanonical: 'anything Claude likes' });
     // the display name is accepted, but without a product line there is no canonical name: it never name-matches
     expect(r.results[1]).toMatchObject({ status: 'ok', canonicalName: null, canonicalReason: 'no product line or model' });
   });

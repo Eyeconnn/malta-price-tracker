@@ -1,13 +1,14 @@
 // Groups "the same product" across shops: same barcode, else same part number, else the same canonical name
 // (design "Update 23 Oct: match by canonical normalised names"), else similar titles. The title rule is ported from
 // dashboard/src/page.ts (tokens and sameProduct).
-import { conditions, moneyValues } from '../names/text.js';
+import { canonText, gpuMemory } from '../names/canon-text.js';
+import { conditions, moneyValues, prep } from '../names/text.js';
 import { cleanGtin } from '../util/normalise.js';
 import { nameTokens } from './identity.js';
 
 /**
  * A listing's checked canonical name (product_names.canonical_name) and the category it was made for: names match
- * within one category. guard: condition, money and audience read from the shop's texts, a second check.
+ * within one category. guard: the distinguishing words of the shop's title (guardOf), a second check.
  */
 export type NameMatch = { canonical: string; category: string; guard: string };
 
@@ -213,19 +214,58 @@ function matchByTitle(items: MatchInput[], out: Map<number, Match>): void {
 
 /**
  * The name rule's view of a listing: its checked canonical name (src/names/canonical.ts) and category, and a second
- * guard read from the shop's own texts: the condition (new when none), the values with a currency and the
- * children's audience they name. Null without a canonical name: such a listing never name-matches.
+ * guard read from the shop's own title (never from Claude's fields): condition, values with a currency, and the
+ * gender, children's audience, platform, fragrance concentration, edition, format, bundle and pack words it names,
+ * and the GPU memory it states (guardOf). Listings whose guards differ are never one product. Null without a
+ * canonical name: such a listing never name-matches.
  */
 export function nameMatch(canonical: string | null, category: string | null, texts: { title?: string; displayName?: string | null; variantLabel?: string | null } = {}): NameMatch | null {
   if (!canonical || canonical.trim() === '') return null;
-  const all = [texts.displayName ?? '', texts.variantLabel ?? '', texts.title ?? ''].join(' \n ');
-  const audience = [...new Set(nameTokens(all).filter((t) => AUDIENCE.has(t)))].sort();
-  const guard = [conditions(all).join(',') || 'new', moneyValues(all).join(',') || 'none', audience.join(',') || 'adult'].join('|');
-  return { canonical: canonical.trim(), category: category ?? '', guard };
+  return { canonical: canonical.trim(), category: category ?? '', guard: guardOf(texts.title ?? '', category ?? '') };
 }
 
-/** A children's audience word of a shop title. */
-const AUDIENCE = new Set(['kids', 'kid', 'junior', 'boys', 'girls', 'toddler', 'youth']);
+/** Each guard word class: the words it reads (a title token) and the one spelling each counts as. */
+const GUARD: Record<string, Record<string, string>> = {
+  gender: { men: 'men', mens: 'men', man: 'men', homme: 'men', women: 'women', womens: 'women', woman: 'women', ladies: 'women', femme: 'women', unisex: 'unisex' },
+  audience: {
+    kids: 'kids', kid: 'kids', children: 'kids', child: 'kids', childrens: 'kids', junior: 'junior', jr: 'junior', boys: 'boys', boy: 'boys', girls: 'girls',
+    girl: 'girls', toddler: 'toddler', toddlers: 'toddler', youth: 'youth', baby: 'baby', gs: 'gs', ps: 'ps', td: 'td',
+  },
+  platform: { switch: 'switch', xbox: 'xbox', xboxone: 'xboxone', seriesx: 'seriesx', seriess: 'seriess', ps4: 'ps4', ps5: 'ps5', pc: 'pc', playstation: 'playstation' },
+  concentration: { edt: 'edt', edp: 'edp', edc: 'edc', parfum: 'parfum', cologne: 'edc', elixir: 'elixir', extrait: 'extrait' },
+  edition: { ultimate: 'ultimate', premium: 'premium', deluxe: 'deluxe', dayone: 'dayone', collector: 'collector', collectors: 'collector', signature: 'signature', limited: 'limited', goty: 'goty' },
+  format: { hardback: 'hardback', hardcover: 'hardback', paperback: 'paperback', digital: 'digital', disc: 'disc', kindle: 'kindle' },
+  pack: { monthly: 'monthly', box: 'box', jumbo: 'jumbo', mega: 'mega', value: 'value', bulk: 'bulk', multipack: 'multipack' },
+};
+/** Edition words that are colours or plain words elsewhere: only games read them (FC 25 Gold, DualSense Edge). */
+const GAME_EDITION: Record<string, string> = { gold: 'gold', standard: 'standard', edge: 'edge' };
+
+/** The second guard of a title (see nameMatch), as one string. */
+export function guardOf(title: string, category: string): string {
+  const plain = canonText(title)
+    .replace(/\bxbox\s+one\b/g, ' xboxone ')
+    .replace(/\bseries\s+([xs])\b/g, ' series$1 ')
+    .replace(/\bday\s+one\b/g, ' dayone ')
+    .replace(/\bgame\s+of\s+the\s+year\b/g, ' goty ');
+  const toks = nameTokens(plain);
+  const words = (map: Record<string, string>) => [...new Set(toks.flatMap((t) => (Object.hasOwn(map, t) ? [map[t]] : [])))].sort().join(',');
+  const edition = [words(GUARD.edition), category === 'gaming' ? words(GAME_EDITION) : ''].filter((x) => x !== '').join(',');
+  // a bundle: "&", "and", "with <item>", a spaced + item, multipack or bundle (Copilot+ PC is a label, see canonText)
+  const bundle = /&|\band\b|\bwith\s+[\p{L}\p{N}]|(?:^|\s)\+\s*[\p{L}\p{N}]|\bmultipack\b|\bbundle\b/u.test(plain) ? 'bundle' : '';
+  return [
+    conditions(title).join(',') || 'new',
+    moneyValues(title).join(',') || 'none',
+    words(GUARD.gender),
+    words(GUARD.audience),
+    words(GUARD.platform),
+    words(GUARD.concentration),
+    edition,
+    words(GUARD.format),
+    bundle,
+    words(GUARD.pack),
+    gpuMemory(prep(title)).join(','),
+  ].join('|');
+}
 
 /** A canonical name shared by more listings than this is too generic to trust ("giftcard"): left alone. */
 const NAME_BUCKET_MAX = 200;

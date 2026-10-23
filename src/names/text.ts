@@ -158,3 +158,12 @@ export function quantityClass(t: string): { cls: string; value: number } | null 
   const s = scale[unit];
   return s ? { cls: s[0], value: Math.round(n * s[1] * 100) / 100 } : { cls: unit, value: n };
 }
+
+/** A prepped text without its condition words and values with a currency (they are checked as such). */
+export function withoutConditionsAndMoney(t: string): string {
+  let s = t;
+  for (const [, re] of CONDITIONS) s = s.replace(new RegExp(re.source, 'g'), ' ');
+  s = s.replace(/\bgrade[\s-]?[abc]\b/g, ' ').replace(/\bcondition\b/g, ' ');
+  for (const re of MONEY) s = s.replace(new RegExp(re.source, 'g'), ' ');
+  return s;
+}

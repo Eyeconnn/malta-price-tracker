@@ -32,7 +32,7 @@
     },
     "phones": {
       "identity": ["storage_gb", "ram_gb", "screen_in", "network"],
-      "canonical": ["brand", "model|line", "storage_gb"],
+      "canonical": ["brand", "model|line", "storage_gb", "ram_gb", "network"],
       "brand": { "type": "text", "meaning": "maker" },
       "model": { "type": "text", "meaning": "model name and number, without storage or colour" },
       "device_type": { "type": "enum", "values": [ "phone", "tablet", "smartwatch", "e-reader", "accessory" ], "meaning": "kind of device" },
@@ -45,12 +45,13 @@
     },
     "tv-audio": {
       "identity": ["screen_in", "resolution"],
-      "canonical": ["brand", "model|line", "screen_in"],
+      "canonical": ["brand", "model|line", "screen_in", "channels"],
       "brand": { "type": "text", "meaning": "maker" },
       "model": { "type": "text", "meaning": "model code or name" },
       "device_type": { "type": "enum", "values": [ "tv", "soundbar", "headphones", "earbuds", "speaker", "projector", "home cinema", "hi-fi", "accessory", "other" ], "meaning": "kind of product" },
       "screen_in": { "type": "number", "unit": "inch", "min": 10, "max": 120, "meaning": "screen diagonal (TVs only)" },
       "resolution": { "type": "enum", "values": [ "HD", "Full HD", "4K", "8K" ], "meaning": "screen resolution (UHD is 4K)" },
+      "channels": { "type": "text", "meaning": "audio channels of a soundbar or speaker system, for example 2.1, 5.1" },
       "panel": { "type": "enum", "values": [ "LED", "QLED", "Neo QLED", "OLED", "QD-OLED", "Mini LED", "NanoCell", "LCD" ], "meaning": "screen technology" },
       "smart_os": { "type": "enum", "values": [ "Google TV", "Android TV", "Tizen", "webOS", "Roku", "Fire TV", "VIDAA", "Titan OS", "other" ], "meaning": "smart TV system" },
       "hdr": { "type": "text", "meaning": "HDR formats named by the shop, for example HDR10, Dolby Vision" },
@@ -61,7 +62,7 @@
     },
     "gaming": {
       "identity": ["platform", "edition", "storage_gb"],
-      "canonical": ["line", "platform", "storage_gb"],
+      "canonical": ["brand", "line", "platform", "storage_gb"],
       "brand": { "type": "text", "meaning": "maker or publisher" },
       "platform": { "type": "enum", "values": [ "PS5", "PS4", "Xbox Series X|S", "Xbox One", "Nintendo Switch", "Nintendo Switch 2", "PC", "multi" ], "meaning": "platform the product is for" },
       "product_type": { "type": "enum", "values": [ "console", "game", "controller", "headset", "accessory", "gift card", "chair", "other" ], "meaning": "kind of product" },
@@ -87,7 +88,7 @@
     },
     "toys": {
       "identity": ["model", "pieces"],
-      "canonical": ["brand", "model", "line"],
+      "canonical": ["brand", "model|line"],
       "brand": { "type": "text", "meaning": "maker, for example LEGO" },
       "model": { "type": "text", "meaning": "set or item number, for example 42115" },
       "theme": { "type": "text", "meaning": "toy line or licence, for example Star Wars, Technic" },
@@ -98,9 +99,10 @@
     },
     "baby": {
       "identity": ["pack_count"],
-      "canonical": ["brand", "line"],
+      "canonical": ["brand", "line", "nappy_size"],
       "brand": { "type": "text", "meaning": "maker" },
       "product_type": { "type": "text", "meaning": "kind of product, for example pram, car seat, nappies" },
+      "nappy_size": { "type": "text", "meaning": "the size of this listing when it is sold as one size, for example Size 4 of nappies" },
       "age_min_months": { "type": "number", "unit": "months", "min": 0, "max": 72, "meaning": "minimum age" },
       "age_max_months": { "type": "number", "unit": "months", "min": 0, "max": 144, "meaning": "maximum age" },
       "max_weight_kg": { "type": "number", "unit": "kg", "min": 1, "max": 50, "meaning": "maximum child weight" },
@@ -132,7 +134,7 @@
       "spf": { "type": "number", "unit": "SPF", "min": 1, "max": 100, "meaning": "sun protection factor" },
       "scent": { "type": "text", "meaning": "scent or flavour when named" },
       "colour": { "type": "enum", "list": "colours", "multi": true, "meaning": "colours the group comes in" },
-      "concentration": { "type": "text", "meaning": "fragrance concentration, for example Eau de Parfum, Eau de Toilette, Parfum" }
+      "concentration": { "type": "enum", "values": ["EDT", "EDP", "Parfum", "EDC", "Elixir", "Extrait"], "meaning": "fragrance concentration (Eau de Toilette is EDT, Eau de Parfum is EDP, Eau de Cologne is EDC)" }
     },
     "home-kitchen": {
       "identity": ["capacity_l", "diameter_cm", "pieces", "width_cm", "height_cm", "depth_cm"],

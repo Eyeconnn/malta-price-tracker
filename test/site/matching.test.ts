@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { assignMatches, nameMatch, sameTitle, titleTokens, type MatchInput } from '../../src/site/matching.js';
+import { assignMatches, guardOf, nameMatch, sameTitle, titleTokens, type MatchInput } from '../../src/site/matching.js';
 
 function item(id: number, shopId: number, title: string, over: Partial<MatchInput> = {}): MatchInput {
   return { id, shopId, gtin: null, mpn: null, title, ...over };
@@ -315,5 +315,51 @@ describe('assignMatches by canonical name (design "Update 23 Oct")', () => {
     expect(m.get(5)?.key).toBe(m.get(8)?.key);
     expect(m.get(1)?.key).not.toBe(m.get(5)?.key);
     expect(m.size).toBe(items.length);
+  });
+});
+
+describe('the title guard of name matching (review of 013b134)', () => {
+  const differ = (a: string, b: string, category = 'other') => expect(guardOf(a, category), `${a} / ${b}`).not.toBe(guardOf(b, category));
+  const same = (a: string, b: string, category = 'other') => expect(guardOf(a, category), `${a} / ${b}`).toBe(guardOf(b, category));
+
+  it('tells gender, audience, platform, concentration, edition, format, bundle and pack words apart', () => {
+    differ('Nike Air Max 90 Mens', 'Nike Air Max 90 Womens');
+    differ('Nike Air Max 90 Unisex', 'Nike Air Max 90');
+    differ('Nike Air Max 90 GS', 'Nike Air Max 90');
+    differ('Kindle Paperwhite Kids', 'Kindle Paperwhite');
+    differ('EA FC 25 PS5', 'EA FC 25 PS4', 'gaming');
+    differ('EA FC 25 Xbox Series X', 'EA FC 25 Xbox One', 'gaming');
+    differ('Dior Sauvage Eau de Toilette', 'Dior Sauvage EDP');
+    differ('Dior Sauvage Elixir', 'Dior Sauvage Parfum');
+    differ('EA FC 25 Gold Edition', 'EA FC 25', 'gaming');
+    differ('Elden Ring Day One Edition', 'Elden Ring', 'gaming');
+    differ('Dune Hardback', 'Dune Paperback');
+    differ('Sony WH-1000XM5 with Case', 'Sony WH-1000XM5');
+    differ('Barbie & Ken', 'Barbie');
+    differ('PS5 + FC 25', 'PS5');
+    differ('Pampers Size 4 Monthly Box', 'Pampers Size 4');
+    // the GPU memory the shop states next to the GPU (the gpu field leaves it out)
+    differ('MSI Cyborg 15 RTX-5060-8GB 1TB SSD', 'MSI Cyborg 15 RTX 5060 16GB 1TB SSD', 'laptops');
+  });
+
+  it('reads the GPU memory however it is written, and Copilot+ without PC is no bundle', () => {
+    same('ASUS TUF A16 16GB, RTX5060-8GB, 1TB SSD', 'ASUS TUF A16 16GB RTX 5060 8GB 1TB SSD', 'laptops');
+    same('Lenovo IdeaPad Slim 5 Copilot + 16” Office Notebook', 'Lenovo IdeaPad Slim 5 16” Office Notebook', 'laptops');
+    same('ASUS Vivobook X1607 Copilot+ 16”', 'ASUS Vivobook X1607 16”', 'laptops');
+  });
+
+  it('treats one wording as one: Eau de Parfum is EDP, PlayStation 5 is PS5, Copilot+ PC is no bundle, gold is a colour outside games', () => {
+    same('Dior Sauvage Eau de Parfum 100ml', 'DIOR SAUVAGE EDP 100ML');
+    same('Sony PlayStation 5 Slim', 'Sony PS5 Slim', 'gaming');
+    same('Acer Swift Go 14 Copilot+ PC', 'Acer Swift Go 14 Copilot + PC');
+    same('Apple iPhone 15 128GB Gold', 'Apple iPhone 15 128GB Black', 'phones');
+  });
+
+  it('blocks a name match when the guards differ', () => {
+    const m = assignMatches([
+      item(1, 10, 'EA FC 25 Gold Edition PS5', { name: nameMatch('ea fc25 ps5', 'gaming', { title: 'EA FC 25 Gold Edition PS5' }) }),
+      item(2, 20, 'EA FC 25 PS5', { name: nameMatch('ea fc25 ps5', 'gaming', { title: 'EA FC 25 PS5' }) }),
+    ]);
+    expect(m.get(1)?.method).not.toBe('name');
   });
 });
