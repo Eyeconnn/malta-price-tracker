@@ -56,20 +56,27 @@ export function verdictNote(r: ProductResult): string {
   return [...verdictParts(r).map((p) => p.text), ...(r.bf ? ['Black Friday'] : [])].join(', ');
 }
 
+/** Our own stored photo copies only (the API gives /img/<sha256>.webp): the browser never contacts a shop. */
+const PHOTO = /^\/img\/[0-9a-f]{64}\.webp$/;
+
 /**
- * A product picture from a shop (http(s) only, checked by the API); hidden when it does not load. Decorative:
- * the product's name is always next to it.
+ * A product photo, our own small copy (at most 480 px). width and height keep its square box (object-contain)
+ * so nothing moves when it loads; loaded lazily, decoded off the main thread, alt text the clean product name.
+ * Without a photo (or when it does not load) a neutral placeholder of the same size.
  */
-export function ProductImage({ url, className }: { url: string | null; className?: string }) {
+export function ProductImage({ url, name, size, className }: { url: string | null; name: string; size: number; className?: string }) {
   const [failed, setFailed] = useState<string | null>(null);
-  if (!url || failed === url) return null;
+  if (!url || !PHOTO.test(url) || failed === url) {
+    return <span aria-hidden="true" data-photo-placeholder="" className={cn('block flex-none rounded-xl bg-secondary/60', className)} style={{ width: size, height: size }} />;
+  }
   return (
     <img
       src={url}
-      alt=""
+      alt={name}
+      width={size}
+      height={size}
       loading="lazy"
       decoding="async"
-      referrerPolicy="no-referrer"
       onError={() => setFailed(url)}
       className={cn('flex-none rounded-xl bg-popover object-contain', className)}
     />
