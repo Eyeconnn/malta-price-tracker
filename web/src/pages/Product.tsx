@@ -1,3 +1,4 @@
+import { ExternalLink } from 'lucide-react';
 import { lazy, type ReactNode, Suspense, useId, useMemo, useState } from 'react';
 import { Link, useParams } from 'react-router';
 import { CheaperBox } from '@/components/site/CheaperBox';
@@ -11,12 +12,12 @@ import { ReportButton } from '@/components/site/ReportButton';
 import { ShopBadge } from '@/components/site/ShopBadge';
 import { Button } from '@/components/ui/button';
 import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group';
-import { ApiError, api, type Card, type Label, type OtherShop, type ProductResponse, type Variant, useApi } from '@/lib/api';
+import { ApiError, api, type Card, type HistoryObs, type Label, type OtherShop, type ProductResponse, type Variant, useApi } from '@/lib/api';
 import { formatDay, formatEuro, signedPct } from '@/lib/format';
-import { type DayRow, dayRows, lastDays, recentChange } from '@/lib/history';
+import { type DayRow, dayRows, lastDays, lowestInLastDays, recentChange } from '@/lib/history';
 import { useMediaQuery } from '@/lib/useMediaQuery';
 import { cn } from '@/lib/utils';
-import type { VerdictFacts } from '../../../src/site/verdict.js';
+import { maltaDay, type VerdictFacts } from '../../../src/site/verdict.js';
 
 // Recharts is only downloaded when an Advanced product page shows the chart.
 const PriceChart = lazy(() => import('@/components/site/PriceChart'));
@@ -143,11 +144,11 @@ function NumbersPanel({ facts, judged }: { facts: VerdictFacts; judged: boolean 
 }
 
 /** Simple: exactly matched other shops only (a title-only match is never shown here). */
-function OtherShops({ others }: { others: OtherShop[] }) {
+function OtherShops({ others, forVariant }: { others: OtherShop[]; forVariant?: string }) {
   const exact = others.filter((o) => !o.possible);
   if (exact.length === 0) return null;
   return (
-    <Section title="Other shops">
+    <Section title={forVariant ? `Other shops (for ${forVariant})` : 'Other shops'}>
       <ul className="m-0 flex list-none flex-col p-0">
         {exact.map((o) => (
           <li key={o.id} className="border-t border-line first:border-t-0">
@@ -238,33 +239,61 @@ function Comparison({ others }: { others: OtherShop[] }) {
 }
 
 const TOGGLE =
-  'min-h-11 rounded-xl px-3 font-semibold text-muted-foreground hover:bg-secondary hover:text-ink data-[state=on]:bg-ink data-[state=on]:text-background data-[state=on]:hover:bg-ink data-[state=on]:hover:text-background';
+  'min-h-11 rounded-xl px-3 font-semibold text-muted-foreground hover:bg-secondary hover:text-ink motion-reduce:transition-none data-[state=on]:bg-ink data-[state=on]:text-background data-[state=on]:hover:bg-ink data-[state=on]:hover:text-background';
 
-/** Advanced: the variant the chart and day table show (default: the one the verdict is about). */
-function VariantPicker({ variants, value, verdictId, onChange }: { variants: Variant[]; value: number; verdictId: number | null; onChange: (id: number) => void }) {
+
+/** The variant radio group: Simple shows it inside the product card, Advanced in its own "Variants" section. */
+function VariantPicker({
+  variants,
+  value,
+  verdictId,
+  onChange,
+  priceText,
+  inline,
+}: {
+  variants: Variant[];
+  value: number;
+  verdictId: number | null;
+  onChange: (id: number) => void;
+  /** what a button says about the variant's price, from its own readings (never a stale price as current) */
+  priceText: (id: number) => string;
+  inline?: boolean;
+}) {
   const noteId = useId();
+  const labelId = useId();
+  const group = (
+    <ToggleGroup
+      type="single"
+      aria-label={inline ? undefined : 'Variant'}
+      aria-labelledby={inline ? labelId : undefined}
+      aria-describedby={inline ? undefined : noteId}
+      value={String(value)}
+      onValueChange={(v) => {
+        if (v) onChange(Number(v));
+      }}
+      className="glass w-full flex-wrap justify-start gap-1 rounded-2xl p-1"
+    >
+      {variants.map((v) => (
+        <ToggleGroupItem key={v.id} value={String(v.id)} className={cn(TOGGLE, 'h-auto flex-col items-start gap-0 py-1.5 text-left')}>
+          <span className="break-words whitespace-normal">{variantName(v)}</span>
+          <span className="text-xs font-normal tabular-nums">{priceText(v.id)}</span>
+        </ToggleGroupItem>
+      ))}
+    </ToggleGroup>
+  );
+  if (inline) {
+    return (
+      <div className="flex flex-col gap-1">
+        <p id={labelId} className="text-xs font-medium text-muted-foreground">
+          Variant
+        </p>
+        {group}
+      </div>
+    );
+  }
   return (
     <Section title="Variants">
-      <ToggleGroup
-        type="single"
-        aria-label="Variant"
-        aria-describedby={noteId}
-        value={String(value)}
-        onValueChange={(v) => {
-          if (v) onChange(Number(v));
-        }}
-        className="glass w-full flex-wrap justify-start gap-1 rounded-2xl p-1"
-      >
-        {variants.map((v) => (
-          <ToggleGroupItem key={v.id} value={String(v.id)} className={cn(TOGGLE, 'h-auto flex-col items-start gap-0 py-1.5 text-left')}>
-            <span className="break-words whitespace-normal">{variantName(v)}</span>
-            <span className="text-xs font-normal tabular-nums">
-              {euroOr(v.priceCents, NO_PRICE)}
-              {v.inStock === false && ', out of stock'}
-            </span>
-          </ToggleGroupItem>
-        ))}
-      </ToggleGroup>
+      {group}
       <p id={noteId} className="text-xs text-muted-foreground">
         The chart and the price by day show one variant at a time.
         {verdictId !== null && variants.some((v) => v.id === verdictId) && ` The verdict is about ${variantName(variants.find((v) => v.id === verdictId)!)}.`}
@@ -354,6 +383,74 @@ function History({ rows, judged, low30 }: { rows: DayRow[]; judged: boolean; low
   );
 }
 
+/** The shop's product link, only when it is an http(s) address (scraped data is untrusted). */
+function webAddress(url: string | null): string | null {
+  if (!url) return null;
+  try {
+    const u = new URL(url);
+    // an address with a user name or password is not a plain product link
+    return (u.protocol === 'https:' || u.protocol === 'http:') && !u.username && !u.password ? u.href : null;
+  } catch {
+    return null;
+  }
+}
+
+/** The days the lowest-price fact looks back, today included. */
+const LOW_DAYS = 30;
+const DAY_MS = 86_400_000;
+const dayNumber = (day: string) => Math.round(Date.parse(`${day}T00:00:00Z`) / DAY_MS);
+
+/** What the Simple card shows for a variant the verdict is not about: plain facts from that variant's own history. */
+type VariantView = {
+  priceCents: number | null;
+  wasCents: number | null;
+  inStock: boolean | null;
+  bf: boolean;
+  /** the Malta day of its newest reading when that is older than the last 30 days: it is not current */
+  lastSeen: string | null;
+  /** the lowest of every reading in the last 30 Malta days, today included; null when none */
+  lowest30: number | null;
+  change: ReturnType<typeof recentChange>;
+};
+
+function variantView(data: ProductResponse, id: number, now: Date): VariantView {
+  let latest: HistoryObs | undefined;
+  for (const h of data.history) {
+    if (h.productId === id && (!latest || Date.parse(h.at) >= Date.parse(latest.at))) latest = h;
+  }
+  const v = data.variants.find((x) => x.id === id);
+  const today = maltaDay(now);
+  const rows = dayRows(data.history, id, null);
+  const lastDay = rows.at(-1)?.day;
+  const stale = lastDay !== undefined && dayNumber(today) - dayNumber(lastDay) >= LOW_DAYS;
+  return {
+    priceCents: latest ? (positive(latest.price) ? latest.price : null) : positive(v?.priceCents) ? v.priceCents : null,
+    wasCents: latest && positive(latest.was) ? latest.was : null,
+    inStock: latest?.inStock ?? v?.inStock ?? null,
+    bf: latest?.bf === true,
+    lastSeen: stale ? lastDay : null,
+    lowest30: lowestInLastDays(data.history, id, today, LOW_DAYS),
+    change: !stale && finite(data.raiseWindowDays) ? recentChange(rows, data.raiseWindowDays, today) : null,
+  };
+}
+
+/** A variant button's price line: its newest reading (as the card), "Last seen" when stale, or no price. */
+function buttonPrice(data: ProductResponse, id: number, now: Date): string {
+  if (!data.history.some((h) => h.productId === id)) return NO_PRICE;
+  const view = variantView(data, id, now);
+  if (view.lastSeen) return `Last seen ${formatDay(view.lastSeen)}`;
+  return `${euroOr(view.priceCents, NO_PRICE)}${view.inStock === false ? ', out of stock' : ''}`;
+}
+
+function PriceChangeLine({ change }: { change: NonNullable<VariantView['change']> }) {
+  return (
+    <p className={cn('font-semibold', change.row.price! > change.from ? 'text-bad' : undefined)}>
+      Price changed from {formatEuro(change.from)} to {formatEuro(change.row.price!)} on {formatDay(change.row.day)}
+      {change.row.bf && ', while marked Black Friday'}
+    </p>
+  );
+}
+
 function ProductContent({ data }: { data: ProductResponse }) {
   const { mode } = useMode();
   const advanced = mode === 'advanced';
@@ -362,10 +459,11 @@ function ProductContent({ data }: { data: ProductResponse }) {
   const facts = verdict.facts;
   const card = productCard(data);
   const tag = tagProps(card);
+  const shopUrl = webAddress(product.url);
   const avoid = verdict.label === 'avoid';
-  const alarm = avoid && card.bf;
   const verdictId = product.productId;
   const [variant, setVariant] = useState<number | null>(() => defaultVariant(data));
+  const [announcement, setAnnouncement] = useState('');
 
   // Only a good / avoid verdict, on the variant it is about, answers "worth buying" (Ruling R44).
   const verdictJudged = verdict.label === 'good' || verdict.label === 'avoid';
@@ -380,10 +478,39 @@ function ProductContent({ data }: { data: ProductResponse }) {
     [data.history, variant, verdictId, verdictRows],
   );
 
+  // Simple shows the chosen variant's own data when the verdict is about another one (R44: only the
+  // verdict's variant is judged), so the tag, reason, alarm, three numbers and CheaperBox are hidden then.
+  const verdictVariant = verdictId === null ? undefined : data.variants.find((v) => v.id === verdictId);
+  const other = !advanced && verdictVariant !== undefined && variant !== null && variant !== verdictId;
+  // the clock is read when the variant changes, not on every render
+  const own = useMemo(() => (other && variant !== null ? variantView(data, variant, new Date()) : null), [other, variant, data]);
+  const alarm = avoid && card.bf && !other;
+  const shownCard: Card = own ? { ...card, priceCents: own.priceCents, wasCents: own.wasCents } : card;
+
+  // the picker's price lines; the clock is read when the data changes
+  const priceTexts = useMemo(() => {
+    const now = new Date();
+    return new Map(data.variants.map((v) => [v.id, buttonPrice(data, v.id, now)]));
+  }, [data]);
+  const priceText = (id: number) => priceTexts.get(id) ?? NO_PRICE;
+
+  /** Choose a variant and tell screen readers its price (a polite live region; nothing moves on screen). */
+  const choose = (id: number) => {
+    setVariant(id);
+    const v = data.variants.find((x) => x.id === id);
+    if (!v) return;
+    const view = verdictVariant && id !== verdictId ? variantView(data, id, new Date()) : null;
+    const price = view?.lastSeen ? `last seen on ${formatDay(view.lastSeen)}` : euroOr(view ? view.priceCents : card.priceCents, NO_PRICE);
+    const stock = !view?.lastSeen && (view ? view.inStock : product.inStock) === false ? ', out of stock' : '';
+    // the deal check follows the verdict's variant only: say when it goes and when it comes back
+    const check = advanced || !verdictVariant ? '' : id === verdictId ? '. Deal check shown.' : '. Deal check not shown for this variant.';
+    setAnnouncement(`${variantName(v)}: ${price}${stock}${check}`);
+  };
+
   // The insufficient case with a price is "not enough history"; without a price the reason says so.
   const tooNew = verdict.label === 'insufficient' && card.priceCents !== null;
   const trackedDays = finite(facts?.historyDays) ? facts.historyDays : verdictRows.length;
-  const fact = avoid ? avoidFact(card) : null;
+  const fact = avoid && !other ? avoidFact(card) : null;
   // a change is recent within the stored raise window (R43), as the verdict's own price-rise check
   const change =
     (avoid && avoidKind(card) === 'price') || !finite(data.raiseWindowDays) ? null : recentChange(verdictRows, data.raiseWindowDays);
@@ -392,13 +519,13 @@ function ProductContent({ data }: { data: ProductResponse }) {
     <div className="flex flex-col gap-4">
       <article
         aria-labelledby={titleId}
-        data-verdict={verdict.label}
+        data-verdict={other ? undefined : verdict.label}
         data-alarm={alarm ? 'true' : undefined}
         className={cn('glass overflow-hidden', alarm && 'border-2 border-bad')}
       >
         {alarm && <AlarmBanner card={card} />}
-        <div className={cn('relative flex flex-col gap-2 p-4', tag && 'pr-24')}>
-          {tag && (
+        <div className={cn('relative flex flex-col gap-2 p-4', tag && !other && 'pr-24')}>
+          {tag && !other && (
             <div className="absolute top-2 right-4">
               <PriceTag {...tag} />
             </div>
@@ -415,16 +542,51 @@ function ProductContent({ data }: { data: ProductResponse }) {
           <h1 id={titleId} className="text-xl leading-snug font-bold tracking-tight break-words sm:text-2xl">
             {product.title}
           </h1>
-          <PriceLine card={card} className="[&>span:first-child]:text-3xl" />
-          {card.bf && !alarm && <BlackFridayMark />}
+          {/* min-h keeps the line as tall as the big price, so "Price not shown" does not shift the card */}
+          {own?.lastSeen ? (
+            <p className="min-h-9 text-lg font-semibold">Last seen on {formatDay(own.lastSeen)}</p>
+          ) : (
+            <PriceLine card={shownCard} className="min-h-9 [&>span:first-child]:text-3xl" />
+          )}
+          {/* announced politely when the variant changes; always rendered so the change is heard */}
+          <p role="status" aria-live="polite" className="sr-only">
+            {announcement}
+          </p>
+          {!advanced && data.variants.length > 1 && variant !== null && (
+            <VariantPicker inline variants={data.variants} value={variant} verdictId={verdictId} onChange={choose} priceText={priceText} />
+          )}
+          {(own ? own.bf && !own.lastSeen : card.bf && !alarm) && <BlackFridayMark />}
           {fact && <p className="font-semibold text-bad">{fact}</p>}
-          {change && (
-            <p className={cn('font-semibold', change.row.price! > change.from ? 'text-bad' : undefined)}>
-              Price changed from {formatEuro(change.from)} to {formatEuro(change.row.price!)} on {formatDay(change.row.day)}
-              {change.row.bf && ', while marked Black Friday'}
+          {(own ? own.inStock === false && !own.lastSeen : product.inStock === false) && <p className="text-sm text-muted-foreground">Out of stock</p>}
+          {own ? own.change && <PriceChangeLine change={own.change} /> : change && <PriceChangeLine change={change} />}
+          {own && (
+            <p className="text-sm">
+              <span className="text-muted-foreground">Lowest price in the last 30 days</span>{' '}
+              <span className="font-semibold tabular-nums">{euroOr(own.lowest30, 'Not known yet')}</span>
             </p>
           )}
-          {tooNew ? (
+          {shopUrl && (
+            <a
+              href={shopUrl}
+              target="_blank"
+              rel="noopener noreferrer nofollow"
+              className="mt-1 inline-flex min-h-11 w-fit items-center gap-1.5 rounded-sm font-semibold text-accent outline-none hover:underline focus-visible:ring-[3px] focus-visible:ring-ring/50"
+            >
+              View on {product.shop}
+              <ExternalLink className="size-4" aria-hidden="true" />
+              <span className="sr-only"> (opens in a new tab)</span>
+            </a>
+          )}
+          {own ? (
+            verdictVariant && (
+              <div className="mt-1 flex flex-col items-start gap-2 rounded-xl bg-secondary p-3">
+                <p className="text-[15px]">{`Our deal check is for ${variantName(verdictVariant)}. Choose it to see the check.`}</p>
+                <Button variant="outline" className="min-h-11" onClick={() => choose(verdictVariant.id)}>
+                  {`Choose ${variantName(verdictVariant)}`}
+                </Button>
+              </div>
+            )
+          ) : tooNew ? (
             <div className="mt-1 flex flex-col gap-1 rounded-xl bg-secondary p-3">
               <p className="font-semibold">Not enough price history yet</p>
               <p className="text-sm">
@@ -438,15 +600,15 @@ function ProductContent({ data }: { data: ProductResponse }) {
         </div>
       </article>
 
-      {data.cheaper && <CheaperBox cheaper={data.cheaper} ownCents={card.priceCents} />}
+      {data.cheaper && !other && <CheaperBox cheaper={data.cheaper} ownCents={card.priceCents} />}
 
-      {!advanced && facts && !tooNew && <ThreeNumbers facts={facts} />}
-      {!advanced && <OtherShops others={data.others} />}
+      {!advanced && !other && facts && !tooNew && <ThreeNumbers facts={facts} />}
+      {!advanced && <OtherShops others={data.others} forVariant={other && verdictVariant ? variantName(verdictVariant) : undefined} />}
 
       {advanced && (
         <>
           {data.variants.length > 1 && variant !== null && (
-            <VariantPicker variants={data.variants} value={variant} verdictId={verdictId} onChange={setVariant} />
+            <VariantPicker variants={data.variants} value={variant} verdictId={verdictId} onChange={choose} priceText={priceText} />
           )}
           <History rows={rows} judged={judged} low30={judged ? (facts?.low30 ?? null) : null} />
           <div className="grid items-start gap-4 lg:grid-cols-2">
