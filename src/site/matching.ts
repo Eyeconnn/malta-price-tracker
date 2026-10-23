@@ -4,6 +4,7 @@
 import { bundleWords, canonText, gpuMemory, PRICE_INCLUDES } from '../names/canon-text.js';
 import { conditions, moneyValues, prep } from '../names/text.js';
 import { cleanGtin } from '../util/normalise.js';
+import { colourWordsIn, withoutColourWords } from '../names/colours.js';
 import { nameTokens } from './identity.js';
 
 /**
@@ -28,6 +29,41 @@ const IGNORE = new Set(
 );
 // Model words must agree between two titles (also kept by the name normaliser, src/names/check.ts).
 export const MODEL = new Set('pro max plus mini ultra air lite se fe neo slim xl xs'.split(' '));
+
+/**
+ * Two listings at one shop whose titles name different colours and are otherwise the same words (colour words and
+ * the colour modifier before each left out, src/names/colours.ts: Deep Blue, Cosmic Orange; any other word, such as
+ * Edge, Classic, Fold, eSIM, Left or Titanium, must be the same): colour options the shop lists on their own.
+ */
+export function colourSiblings(x: { shopId?: number; title: string }, y: { shopId?: number; title: string }): boolean {
+  if (x.shopId === undefined || x.shopId !== y.shopId) return false;
+  const split = (t: string) => (t || '').slice(0, MAX_TITLE_CHARS).toLowerCase().replace(/[^a-z0-9]+/g, ' ').split(' ').filter((w) => w !== '');
+  const a = split(x.title);
+  const b = split(y.title);
+  const ca = colourWordsIn(a).join(' ');
+  const cb = colourWordsIn(b).join(' ');
+  return ca !== '' && cb !== '' && ca !== cb && withoutColourWords(a).join(' ') === withoutColourWords(b).join(' ');
+}
+
+/**
+ * Two part numbers of one stem, as a maker numbers the colours of one model (MG8M4 and MG8N4, MFYP4 and MFYM4,
+ * SM-S931BZKD and SM-S931BLBD): the same length, the same first 3 characters, and at most a third of the characters
+ * (at least 2) different.
+ */
+export function sameStemParts(a: string | null, b: string | null): boolean {
+  if (a === null || b === null || a.length !== b.length || a.slice(0, 3) !== b.slice(0, 3)) return false;
+  let diff = 0;
+  for (let i = 0; i < a.length; i++) if (a[i] !== b[i]) diff++;
+  return diff <= Math.max(2, Math.floor(a.length / 3));
+}
+
+/**
+ * Two listings whose different part numbers do not make them two products: colour siblings at one shop
+ * (colourSiblings) whose part numbers share their stem (sameStemParts). Used by the judge's veto and judged matching.
+ */
+export function colourPartNumbers(x: { shopId?: number; title: string; mpn?: string | null }, y: { shopId?: number; title: string; mpn?: string | null }): boolean {
+  return colourSiblings(x, y) && sameStemParts(mpnIdentity(x.mpn), mpnIdentity(y.mpn));
+}
 
 /** Titles are cut to this many characters before tokenising, so a huge shop title cannot blow up the work. */
 const MAX_TITLE_CHARS = 300;
@@ -374,14 +410,15 @@ function matchByName(items: MatchInput[], out: Map<number, Match>): void {
  */
 function matchByJudged(items: MatchInput[], clusters: number[][], out: Map<number, Match>): void {
   const byId = new Map(items.map((it) => [it.id, it]));
-  // two valid barcodes at two shops, or two part numbers, are two products whatever the judgement says (review C3)
+  // two valid barcodes at two shops, or two part numbers, are two products whatever the judgement says (review C3);
+  // the colours one shop lists on their own may each have their own part number of one stem (colourPartNumbers)
   const conflict = (x: MatchInput, y: MatchInput) => {
     const gx = gtinKey(x.gtin);
     const gy = gtinKey(y.gtin);
     if (gx !== null && gy !== null && gx !== gy && x.shopId !== y.shopId) return true;
     const px = mpnIdentity(x.mpn);
     const py = mpnIdentity(y.mpn);
-    return px !== null && py !== null && px !== py;
+    return px !== null && py !== null && px !== py && !colourPartNumbers(x, y);
   };
   const lists: number[][] = [];
   /** clusters the barcodes split: their free listings join no code group (which part they belong to is unknown) */

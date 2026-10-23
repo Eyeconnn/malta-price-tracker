@@ -140,7 +140,7 @@ describe('splitGroup: a one-listing remainder joins its nearest group (review mi
     add('Sony WH-1000XM4 Headphones Silver', 'wh1000xm4');
     add('Sony WH-1000XM4 Headphones Blue edition', 'wh1000xm4b');
     const parts = splitGroup(list, (l) => codes.get(l.id)!);
-    expect(parts.map((p) => p.length).sort((a, b) => a - b)).toEqual([3, 10]);
-    expect(parts.find((p) => p.length === 3)!.every((m) => m.title.includes('WH-1000XM4'))).toBe(true);
+    expect(parts.map((p) => p.members.length).sort((a, b) => a - b)).toEqual([3, 10]);
+    expect(parts.find((p) => p.members.length === 3)!.members.every((m) => m.title.includes('WH-1000XM4'))).toBe(true);
   });
 });

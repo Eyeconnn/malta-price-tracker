@@ -6,6 +6,11 @@
 import type { Candidate, Listing } from './candidates.js';
 
 export type JudgeGroup = { id: string; candidate: Candidate };
+
+/** The listings Claude is shown of a candidate group: its representatives when it has them, else every member. */
+export function shownMembers(c: Candidate): Listing[] {
+  return c.reps ? c.reps.map((i) => c.members[i]) : c.members;
+}
 export type JudgeBatch = { groups: JudgeGroup[] };
 
 /** Variant titles sent per listing. */
@@ -19,18 +24,19 @@ export const DEFAULT_BATCH_LISTINGS = 120;
  * would pass maxListings listings (a group larger than that goes alone). Group ids are G1.. within each batch.
  */
 export function makeJudgeBatches(cands: Candidate[], batchSize = DEFAULT_BATCH_GROUPS, maxListings = DEFAULT_BATCH_LISTINGS): JudgeBatch[] {
-  const sorted = [...cands].sort((a, b) => b.members.length - a.members.length || (a.key < b.key ? -1 : 1));
+  const size = (c: Candidate) => shownMembers(c).length;
+  const sorted = [...cands].sort((a, b) => size(b) - size(a) || (a.key < b.key ? -1 : 1));
   const batches: Candidate[][] = [];
   let cur: Candidate[] = [];
   let listings = 0;
   for (const c of sorted) {
-    if (cur.length > 0 && (cur.length >= batchSize || listings + c.members.length > maxListings)) {
+    if (cur.length > 0 && (cur.length >= batchSize || listings + size(c) > maxListings)) {
       batches.push(cur);
       cur = [];
       listings = 0;
     }
     cur.push(c);
-    listings += c.members.length;
+    listings += size(c);
   }
   if (cur.length > 0) batches.push(cur);
   return batches.map((list) => ({ groups: list.map((candidate, i) => ({ id: `G${i + 1}`, candidate })) }));
@@ -77,7 +83,7 @@ function listingJson(l: Listing, id: string): Record<string, unknown> {
 
 /** The user message: a short header and one JSON line per group; listing ids are "1".."n" within the group. */
 export function judgeMessage(batch: JudgeBatch): string {
-  const lines = batch.groups.map((g) => JSON.stringify({ group: g.id, listings: g.candidate.members.map((m, i) => listingJson(m, String(i + 1))) }));
+  const lines = batch.groups.map((g) => JSON.stringify({ group: g.id, listings: shownMembers(g.candidate).map((m, i) => listingJson(m, String(i + 1))) }));
   return [`${batch.groups.length} candidate groups. One JSON object per line:`, ...lines].join('\n');
 }
 
@@ -113,7 +119,7 @@ export function judgeJsonSchema(): object {
   };
 }
 
-/** Claude's answer for one group, as indexes into the candidate's members. */
+/** Claude's answer for one group, as indexes into the listings it was shown (shownMembers). */
 export type Verdict = { clusters: number[][]; apart: { a: number; b: number; differences: string[] }[] };
 export type GroupAnswer = { ok: true; verdict: Verdict } | { ok: false; reason: string };
 
@@ -169,7 +175,24 @@ export function readAnswers(batch: JudgeBatch, output: unknown): Map<string, Gro
   const out = new Map<string, GroupAnswer>();
   for (const g of batch.groups) {
     const item = byGroup.get(g.id);
-    out.set(g.id, item ? readGroup(g.candidate.members.length, item) : { ok: false, reason: 'no answer for the group' });
+    out.set(g.id, item ? readGroup(shownMembers(g.candidate).length, item) : { ok: false, reason: 'no answer for the group' });
   }
   return out;
+}
+
+/**
+ * A verdict over the shown listings as indexes into all members: each representative's cluster takes the listings
+ * attached to it. A candidate without representatives is returned as it is.
+ */
+export function expandVerdict(c: Candidate, v: Verdict): Verdict {
+  if (!c.reps) return v;
+  const reps = c.reps;
+  const withAttached = (i: number) => [reps[i], ...(c.attached?.[i] ?? [])];
+  const covered = new Set<number>();
+  const clusters = v.clusters.map((cl) => cl.flatMap(withAttached).sort((a, b) => a - b));
+  for (const cl of clusters) for (const i of cl) covered.add(i);
+  // members neither shown nor attached are their own cluster, as Claude would leave an unknown listing
+  for (let i = 0; i < c.members.length; i++) if (!covered.has(i)) clusters.push([i]);
+  clusters.sort((a, b) => a[0] - b[0]);
+  return { clusters, apart: v.apart.map((d) => ({ ...d, a: reps[d.a], b: reps[d.b] })) };
 }

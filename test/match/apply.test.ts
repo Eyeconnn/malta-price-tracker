@@ -71,3 +71,24 @@ describe('resolveJudgements', () => {
     expect(resolveJudgements([j], byRef([{ ...a, priceCents: 79900 }, { ...b, priceCents: 2000 }]))).toMatchObject({ clusters: [], vetoed: 1 });
   });
 });
+
+describe('resolveJudgements: an older cluster partly judged again (review I4)', () => {
+  const a = cur(10, 1, 'A', 'Apple iPhone 15 128GB Black');
+  const b = cur(20, 2, 'B', 'APPLE iPhone 15 128GB Blue');
+  const c = cur(30, 3, 'C', 'Apple iPhone 15 128GB');
+  const d = cur(40, 4, 'D', 'Apple iPhone 15 128GB Green');
+  it('lets the rest of the older cluster follow the newer cluster that holds its other listings', () => {
+    const older = judgement([a, b, c, d], [[0, 1, 2, 3]], 1);
+    const newer = judgement([a, b, c], [[0, 1, 2]], 2);
+    const r = resolveJudgements([older, newer], byRef([a, b, c, d]));
+    expect(r.clusters).toEqual([[10, 20, 30, 40]]);
+    expect(r.groups).toEqual([{ key: newer.key, ids: [10, 20, 30, 40] }]);
+  });
+  it('keeps the rest apart when the newer judgement split its other listings, or the veto disagrees', () => {
+    const older = judgement([a, b, c, d], [[0, 1, 2, 3]], 1);
+    const split = judgement([a, b, c], [[0, 1], [2]], 2);
+    expect(resolveJudgements([older, split], byRef([a, b, c, d])).clusters).toEqual([[10, 20]]);
+    const plus = cur(40, 4, 'D', 'Apple iPhone 15 Plus 128GB Green');
+    expect(resolveJudgements([judgement([a, b, c, plus], [[0, 1, 2, 3]], 1), judgement([a, b, c], [[0, 1, 2]], 2)], byRef([a, b, c, plus])).clusters).toEqual([[10, 20, 30]]);
+  });
+});

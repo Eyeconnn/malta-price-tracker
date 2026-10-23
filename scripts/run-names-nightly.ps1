@@ -4,6 +4,8 @@
 # task has already pulled, installed and migrated. Claude runs on the owner's own login (never an API key).
 # Caps per night: names at most 400 batches and about 5 dollars of reported cost; judging at most 200 batches and
 # about 1 dollar. Change them in the commands below.
+# Judging ends with the merge pass (clusters judged apart that look like one product, src/match/merge.ts) within the
+# same caps; to switch it off add --no-merge-pass to the judge-matches line.
 # Logs go to out/names/nightly-YYYY-MM-DD.log; the task result is the first failing exit code (0 when both pass).
 $ErrorActionPreference = 'Continue'
 $repo = Split-Path -Parent $PSScriptRoot

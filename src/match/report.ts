@@ -53,6 +53,8 @@ export type JudgeSummary = {
   wallSeconds: number;
   batchStats: JudgeBatchStat[];
   sample?: string;
+  /** the merge pass (src/match/merge.ts; groups with keys "m..." in the rows) */
+  merge?: { clusters: number; pairs: number; candidatePairs: number; candidates: number; toJudge: number; groups: number; merged: number };
 };
 
 export type JudgeListingRow = { shop: string; shopId: number; groupKey: string; title: string; priceCents: number | null };
@@ -109,6 +111,15 @@ export function renderJudgeHtml(s: JudgeSummary, rows: JudgeGroupRow[]): string 
     ['Mode', `${s.pilot ? 'pilot' : 'full'}${s.dryRun ? ', dry run (nothing written)' : ''}`],
     ...(s.sample ? ([['Sample', s.sample]] as [string, string][]) : []),
     ['Candidate groups', `${int(s.candidates)} found, ${int(s.toJudge)} new or changed`],
+    ...(s.merge
+      ? ([
+          [
+            'Merge pass',
+            `${int(s.merge.clusters)} clusters, ${int(s.merge.pairs)} pairs with the same brand and numbers, ${int(s.merge.candidatePairs)} candidate pairs, ` +
+              `${int(s.merge.candidates)} merge groups (${int(s.merge.toJudge)} new or changed), ${int(s.merge.groups)} sent, ${int(s.merge.merged)} with a merge`,
+          ],
+        ] as [string, string][])
+      : []),
     ['Groups sent', int(s.groups)],
     ['Judged', int(s.judged)],
     ['Rejected answers', int(s.rejected)],

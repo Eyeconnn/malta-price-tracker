@@ -12,7 +12,9 @@ import {
   loadJudgements,
   loadStoredFingerprints,
   saveJudgements,
+  runIsComplete,
   startJudgeRun,
+  supersedeJudgements,
   type JudgementRow,
 } from '../../src/match/store.js';
 
@@ -102,20 +104,37 @@ describe.skipIf(!process.env.SITE_BUILD_TEST_DB)('judge reads and writes on PGli
     expect(b).toMatchObject({ shopSlug: 'b', variantTitles: [], cleanName: null, priceCents: 78900 });
   });
 
-  it('saves judgements by candidate key, replaces them, and removes older ones sharing a listing', async () => {
+  it('saves judgements by candidate key and replaces them; older ones sharing a listing go only when superseded (review I4)', async () => {
     const runId = await startJudgeRun(sql, { model: 'haiku', effort: 'low', pilot: true });
     const verdict = { clusters: [[0, 1]], apart: [], vetoed: [], final: [[0, 1]] };
     const row = (key: string, keys: string[], fp: string): JudgementRow => ({
       key, fingerprint: fp, model: 'haiku', effort: 'low', verdict,
       members: keys.map((k, i) => ({ shop_id: i === 0 ? shop.a : shop.b, group_key: k, site_product_id: i + 1 })),
     });
-    expect(await saveJudgements(sql, runId, [row('c1', ['P1', 'Q'], 'f1'), row('c2', ['X', 'Y'], 'f2')])).toEqual({ saved: 2, superseded: 0 });
-    expect(await saveJudgements(sql, runId, [row('c1', ['P1', 'Q'], 'f1b')])).toEqual({ saved: 1, superseded: 0 });
+    expect(await saveJudgements(sql, runId, [row('c1', ['P1', 'Q'], 'f1'), row('c2', ['X', 'Y'], 'f2')])).toEqual({ saved: 2 });
+    expect(await saveJudgements(sql, runId, [row('c1', ['P1', 'Q'], 'f1b')])).toEqual({ saved: 1 });
     expect(await loadStoredFingerprints(sql)).toEqual(new Map([['c1', 'f1b'], ['c2', 'f2']]));
-    // a new candidate group holding listing Q replaces the one Q was in
-    expect(await saveJudgements(sql, runId, [row('c3', ['Z', 'Q'], 'f3')])).toEqual({ saved: 1, superseded: 1 });
+    // a new candidate group holding listing Q: the one Q was in stays until it is superseded
+    expect(await saveJudgements(sql, runId, [row('c3', ['Z', 'Q'], 'f3')])).toEqual({ saved: 1 });
+    expect((await loadJudgements(sql)).map((j) => j.key).sort()).toEqual(['c1', 'c2', 'c3']);
+    // a stopped run removes only judgements whose every listing is in a newer one: P1 of c1 is in none yet
+    expect(await supersedeJudgements(sql, { complete: false })).toBe(0);
+    await saveJudgements(sql, runId, [row('c4', ['P1', 'W'], 'f4')]);
+    expect(await supersedeJudgements(sql, { complete: false })).toBe(1);
+    expect((await loadJudgements(sql)).map((j) => j.key).sort()).toEqual(['c2', 'c3', 'c4']);
+    // a complete run removes every older judgement sharing a listing with a newer one
+    await saveJudgements(sql, runId, [row('c5', ['V', 'Y'], 'f5')]);
+    expect(await supersedeJudgements(sql, { complete: false })).toBe(0);
+    expect(await supersedeJudgements(sql, { complete: true })).toBe(1);
+    // a newer merge judgement removes no chunk judgement, only older merges
+    await saveJudgements(sql, runId, [row('m1', ['P1', 'Q'], 'fm1')]);
+    expect(await supersedeJudgements(sql, { complete: true })).toBe(0);
+    await saveJudgements(sql, runId, [row('m2', ['P1', 'W'], 'fm2')]);
+    expect(await supersedeJudgements(sql, { complete: true })).toBe(1);
+    expect((await loadJudgements(sql)).map((j) => j.key).sort()).toEqual(['c3', 'c4', 'c5', 'm2']);
+    await sql`delete from match_judgements where candidate_key not in ('c3')`;
     const stored = await loadJudgements(sql);
-    expect(stored.map((j) => j.key).sort()).toEqual(['c2', 'c3']);
+    expect(stored.map((j) => j.key).sort()).toEqual(['c3']);
     expect(stored.find((j) => j.key === 'c3')).toMatchObject({ verdict, model: 'haiku', effort: 'low', members: [{ shop_id: shop.a, group_key: 'Z', site_product_id: 1 }, { shop_id: shop.b, group_key: 'Q', site_product_id: 2 }] });
 
     await finishJudgeRun(sql, runId, {
@@ -125,5 +144,18 @@ describe.skipIf(!process.env.SITE_BUILD_TEST_DB)('judge reads and writes on PGli
     const [r] = await sql`select finished_at, groups, matched, vetoes, reported_cost_usd::float as cost, report_path from judge_runs where id = ${runId}`;
     expect(r).toMatchObject({ groups: 3, matched: 2, vetoes: 1, cost: 0.0123, report_path: 'out/judge/x.html' });
     expect(r.finished_at).not.toBeNull();
+  });
+});
+
+describe('runIsComplete (re-review 1)', () => {
+  const full = { stopped: false, failedBatches: 0, pilot: false, filtered: false, mergeOnly: false, capped: false };
+  it('is complete only for a whole run: not stopped, no failed batch, no pilot, filter, merge pass alone or --max-batches cut', () => {
+    expect(runIsComplete(full)).toBe(true);
+    expect(runIsComplete({ ...full, stopped: true })).toBe(false);
+    expect(runIsComplete({ ...full, failedBatches: 1 })).toBe(false);
+    expect(runIsComplete({ ...full, pilot: true })).toBe(false);
+    expect(runIsComplete({ ...full, filtered: true })).toBe(false);
+    expect(runIsComplete({ ...full, mergeOnly: true })).toBe(false);
+    expect(runIsComplete({ ...full, capped: true })).toBe(false);
   });
 });

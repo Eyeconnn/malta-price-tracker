@@ -281,8 +281,12 @@ exactly the same product, so a product page can show every seller's price (desig
 
 1. **Candidates** (`src/match/candidates.ts`): fresh listings of visible shops that are likely one product: the
    title-similarity groups, plus listings sharing a model code (4 or more characters, or a 5 to 8 digit set number) in
-   the same or a neighbouring category, never across two brands. At most 12 listings per group (larger ones are split
-   by brand, model code and title); groups already matched by one barcode or part number are left out.
+   the same or a neighbouring category, never across two brands. Claude is shown at most 12 listings per group: a
+   larger one is split by brand, then into chunks of whole model families (same brand, storage or size, model numbers
+   and words; colours differ), so the colours of one model are judged together. A family larger than 12 is shown
+   through one listing per shop and colour where a colour is an option (phones, TV and audio, appliances, fashion,
+   ...); the family's other listings follow their shop's shown listing when the titles differ in colour words alone
+   and the veto agrees. Groups already matched by one barcode or part number are left out.
 2. **Judging** (`src/match/judge.ts`): one `claude -p` call holds up to 15 groups (120 listings), with each listing's
    shop, title, variant titles, brand, shop category, codes, clean name, attributes and price. Claude answers which
    listings are exactly the same product and lists every difference between the others. Same runner and safety as
@@ -293,12 +297,23 @@ exactly the same product, so a product page can show every seller's price (desig
    audience or gender (also from the shop's category path), platform, edition, format, bundle words, OS or Windows
    version and edition, storage type, SIM, region (plug, version, import, NTSC, voltage), material, size words, the
    variety of a drink, food or toiletry, accessory or part words (case, refill, replacement heads), barcodes (two
-   shops) and part numbers, a price more than 3 times another, the brand or the category. Every fact is read from the
-   title and every variant title; the shop's category path adds gender, children's audience, accessory and model words.
-4. **Storage**: `match_judgements` (one row per candidate group: members, fingerprint of their titles and variant
+   shops) and part numbers (except the colours one shop lists on their own with part numbers of one stem, such as
+   MG8M4 and MG8N4), a price more than 3 times another, the brand or the category. Every fact is read from the title
+   and every variant title; the shop's category path adds gender, children's audience, accessory and model words.
+4. **Merge pass** (`src/match/merge.ts`, at the end of every run; `--no-merge-pass` skips it, `--merge-pass` runs it
+   alone): clusters of different judgements that look like one product (same category and brand, equal storage, size
+   and model numbers, the same model words, most title words shared, no veto) are judged again together, one listing
+   per cluster. They merge only when Claude says same and the veto passes for every pair of their listings; clusters
+   Claude kept apart side by side are never joined. The result is stored like any judgement (key `m...`).
+5. **Storage**: `match_judgements` (one row per candidate group: members, fingerprint of their titles and variant
    titles, verdict, model, time) and `judge_runs` (migration 013). A group is judged again only when a member's title
-   or variant titles change or another listing joins it.
-5. **Site build**: with `pnpm site-build --judged-matching` (or `JUDGED_MATCHING=on`) the listings of a current,
+   or variant titles change or another listing joins it. Saved judgements replace older ones sharing their listings
+   only at the end of a run, and only a complete run (not stopped, no failed batch, no `--pilot`, `--category` or
+   `--title`, not `--merge-pass` alone, no batch cut by `--max-batches`) removes older judgements with listings it did
+   not judge again; any other run removes only those whose every listing was judged again, so no listing loses its
+   match before it has a new judgement. A nightly run capped by `--max-batches` therefore leaves the rest for a later
+   night.
+6. **Site build**: with `pnpm site-build --judged-matching` (or `JUDGED_MATCHING=on`) the listings of a current,
    not vetoed judgement form a product with match method `judged`, trusted on the site like barcode matches. Barcode
    and part-number groups keep priority and are never merged with each other. Off by default.
 
@@ -309,6 +324,10 @@ shop, title and price, Claude's clusters and differences, the vetoes, tokens and
 pnpm judge-matches --model sonnet --effort low --pilot --limit 300 --dry-run --max-cost 10   # 300 groups spread over categories
 pnpm judge-matches --model haiku --effort low --pilot --limit 300 --dry-run --max-cost 5     # the same groups (same seed), cheaper model
 ```
+
+The first run after the family split (23 Oct) judges about 550 regrouped candidate groups again (about 47 batches)
+and the merge pass about 230 groups (16 batches); `--plan` prints both counts without calling Claude, and a pilot
+of the merge pass alone is `pnpm judge-matches --model haiku --effort low --merge-pass --pilot --limit 50 --dry-run`.
 
 Full run, after the owner approves the pilot and `pnpm migrate` has added migration 013 (writes need it and
 `DATABASE_URL`; reads use `DASHBOARD_DATABASE_URL` and work before it). A run that writes needs `--pilot` or
@@ -322,7 +341,11 @@ pnpm site-build --judged-matching      # or JUDGED_MATCHING=on in the site-build
 Options: `--model` (required), `--effort`, `--pilot` with `--limit` (default 300) and `--seed`, `--category <slug>`
 (repeatable), `--batch-size` (groups per call, default 15), `--max-listings` (listings per call, default 120),
 `--parallel` (default 2, max 6), `--max-batches`, `--max-cost <usd>` (no new batch once the reported cost reaches it),
-`--timeout` (seconds per call, default 600), `--dry-run`, `--save-raw` (keeps each batch's raw JSON). A run stops
+`--timeout` (seconds per call, default 600), `--dry-run`, `--save-raw` (keeps each batch's raw JSON), `--merge-pass`
+(the merge pass alone), `--no-merge-pass`, `--title <text>` (only groups with a listing whose title has the text),
+`--plan` (prints the plan of both passes, calls Claude for nothing). The nightly task
+(`scripts/run-names-nightly.ps1`) runs the merge pass; add `--no-merge-pass` to its judge-matches line to switch it
+off. A run stops
 after 5 failed batches in a row and at once on a login or usage-limit error; Ctrl+C stops after the running batches.
 Progress:
 

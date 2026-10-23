@@ -10,7 +10,8 @@
 // helpers of the name checks. Pure: the judge run and the site build both call it.
 import { bundleWords, canonText, PRICE_INCLUDES } from '../names/canon-text.js';
 import { conditions, inRun, packCounts, prep, quantityClass, QUANTITY, tokens, UNIT } from '../names/text.js';
-import { COLOUR_SUFFIX, gtinIdentity, guardOf, MODEL, mpnIdentity } from '../site/matching.js';
+import { COLOUR_SUFFIX, colourPartNumbers, gtinIdentity, guardOf, MODEL, mpnIdentity } from '../site/matching.js';
+import { COLOURS, withoutColourWords } from '../names/colours.js';
 
 export type VetoListing = {
   title: string;
@@ -63,12 +64,6 @@ function withoutBrands(text: string, brands: string[]): string {
     .replace(/\b([a-z])\.([a-z]{2,})\b/gi, '$1$2');
 }
 
-/** Colour words (a colour or a marketing colour name next to "titanium" keeps it a colour). */
-const COLOURS = new Set(
-  ('black white silver grey gray blue red green pink purple gold yellow orange beige brown navy natural desert midnight starlight ' +
-    'graphite space sage mist lavender cream rose violet teal mint coral obsidian porcelain jet onyx phantom cobalt icy amber marble ' +
-    'silverblue jetblack titaniumblack whitesilver').split(' '),
-);
 
 const isQuantity = (t: string) => {
   const m = QUANTITY.exec(t);
@@ -241,9 +236,19 @@ function modelWords(texts: string[], category: string): Set<string> {
       }
     });
     if (/\bnew\s+(?:nintendo\s+)?[23]ds\b/.test(prep(text))) out.add('new');
+    // devices: a family word one listing has names another model (S25 Edge, Watch8 Classic, Pixel 9 Pro Fold, Z Flip)
+    // or another version (AirPods 4 with Active Noise Cancellation, written ANC or Noise Cancelling)
+    if (device) {
+      for (const t of toks) if (DEVICE_FAMILY.has(t)) out.add(t);
+      if (toks.includes('anc') || NOISE_CANCELLING.test(prep(text))) out.add('anc');
+    }
   }
   return out;
 }
+
+/** Device family words, as words of their own (Galaxy S25 Edge, not EdgeSense). */
+const DEVICE_FAMILY = new Set(['edge', 'classic', 'fold', 'flip']);
+const NOISE_CANCELLING = /\b(?:active\s+)?noise[\s-]*cancel+(?:ing|ling|ation|led)?\b/;
 
 /** Words that each name one class of thing; two listings naming different ones of a class differ. */
 const MATERIAL: Record<string, string> = Object.fromEntries(
@@ -606,7 +611,8 @@ export function vetoReasons(a: VetoListing, b: VetoListing): string[] {
   if (ga && gb && ga !== gb && (a.shopId === undefined || b.shopId === undefined || a.shopId !== b.shopId)) add(`barcode ${ga} vs ${gb}`);
   const pa = mpnIdentity(a.mpn);
   const pb = mpnIdentity(b.mpn);
-  if (pa && pb && pa !== pb) add(`part number ${pa} vs ${pb}`);
+  // the colours one shop lists on their own may each have their own part number of one stem (Apple: one per colour)
+  if (pa && pb && pa !== pb && !colourPartNumbers(a, b)) add(`part number ${pa} vs ${pb}`);
 
   const qa = quantities(xa);
   const qb = quantities(xb);
@@ -623,6 +629,13 @@ export function vetoReasons(a: VetoListing, b: VetoListing): string[] {
 
   const ma = modelWords(xa, cat);
   const mb = modelWords(xb, cat);
+  // noise cancelling named on one side only is a feature when a shared model code fixes the model (WH-1000XM5),
+  // another version without one (AirPods 4 and AirPods 4 with Active Noise Cancellation)
+  const sharedCode = codesA.some((c) => c.length >= 4 && codesB.includes(c));
+  if (sharedCode && ma.has('anc') !== mb.has('anc')) {
+    ma.delete('anc');
+    mb.delete('anc');
+  }
   if (!equalSets(ma, mb)) add(`model words ${show(ma)} vs ${show(mb)}`);
   const pma = modelWords(segments(a.categoryPath), cat);
   const pmb = modelWords(segments(b.categoryPath), cat);
@@ -770,4 +783,42 @@ export function applyVeto(listings: VetoListing[], clusters: number[][]): VetoRe
     for (const p of parts) if (p.length >= 2) out.push(p);
   }
   return { clusters: out, vetoed };
+}
+
+/** Years printed in titles (2025 edition, iPhone (2025)): no identity. */
+const isYear = (n: number) => Number.isInteger(n) && n >= 1990 && n <= 2035;
+
+/** Storage in GB as one value: 1TB, 1000GB and 1024GB are one size. */
+function storageValue(gb: number): number {
+  if (gb < 1000) return gb;
+  const tb = Math.round(gb / 1024);
+  return tb > 0 && Math.abs(gb - tb * 1024) <= 0.03 * gb ? tb * 1024 : gb;
+}
+
+/**
+ * What names one model in a title, for the judge's splitting and merge pass (src/match/candidates.ts, merge.ts):
+ * numbers (numbers with a unit, storage as its largest value so 12GB of RAM next to 512GB of storage is left out,
+ * and bare model numbers, years left out) and model words (Pro, Max, Ultra). Colour words are never part of it.
+ */
+export function identityOf(title: string, category: string): { numbers: string[]; models: string[] } {
+  const numbers = new Set<string>();
+  for (const [cls, values] of quantities([title])) {
+    if (cls === 'gb') numbers.add(`gb${storageValue(Math.max(...values))}`);
+    else for (const v of values) numbers.add(`${cls}${v}`);
+  }
+  for (const n of bareNumbers([title], category)) if (!isYear(n)) numbers.add(`n${n}`);
+  return { numbers: [...numbers].sort(), models: [...modelWords([title], category)].sort() };
+}
+
+/** The colour words of a title (Deep Blue is blue, Cosmic Orange is orange). */
+export function colourWords(title: string): string[] {
+  return [...new Set(words(title).filter((w) => COLOURS.has(w)))].sort();
+}
+
+/**
+ * A title's words without its colour words and the colour modifier before each (Deep Blue, Cosmic Orange, Jet Black;
+ * src/names/colours.ts), in order: two listings with the same words here differ at most in colour.
+ */
+export function withoutColours(title: string): string {
+  return withoutColourWords(words(title)).join(' ');
 }
