@@ -31,5 +31,7 @@ jobs:
       - name: Migrate and build
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          # group listings Claude judged the same product (pnpm judge-matches), after the code veto
+          JUDGED_MATCHING: 'on'
           SKIP_ARGS: ${{ github.event_name == 'schedule' && '--skip-if-built-hours 20' || '' }}
         run: pnpm migrate && pnpm site-build $SKIP_ARGS
