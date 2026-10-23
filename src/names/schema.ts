@@ -21,6 +21,9 @@ export type AttributeSchemas = Record<string, CategorySchema>;
 
 export const SCHEMA_FILE = path.resolve('config/attribute-schemas.json');
 
+/** The entry of a category that lists its identity specs (src/site/identity.ts); never an attribute key. */
+export const IDENTITY_KEY = 'identity';
+
 type RawSpec = Omit<AttrSpec, 'values'> & { values?: string[]; list?: string };
 type RawFile = { lists?: Record<string, string[]>; categories?: Record<string, Record<string, RawSpec>> };
 
@@ -34,6 +37,8 @@ export function parseAttributeSchemas(raw: unknown): AttributeSchemas {
     if (!cat) throw new Error(`attribute schemas: no entry for category ${slug}`);
     const schema: CategorySchema = {};
     for (const [key, spec] of Object.entries(cat)) {
+      // the category's key specs for matching across shops (src/site/identity.ts), not an attribute
+      if (key === IDENTITY_KEY) continue;
       if (!/^[a-z][a-z0-9_]*$/.test(key)) throw new Error(`attribute schemas: bad key ${slug}.${key}`);
       if (!spec.meaning) throw new Error(`attribute schemas: ${slug}.${key} has no meaning`);
       const resolved: AttrSpec = { type: spec.type, meaning: spec.meaning };
