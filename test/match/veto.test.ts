@@ -6,7 +6,7 @@ import { describe, expect, it } from 'vitest';
 import { applyVeto, modelCodes, vetoReasons, type VetoListing } from '../../src/match/veto.js';
 import { PAIRS, SAME, type L } from '../names/adversarial-pairs.js';
 import { APART, TOGETHER, type PairListing } from '../site/review-pairs.js';
-import { PROBE_DIFF, PROBE_MORE, PROBE_SAME } from './probe-pairs.js';
+import { PROBE_DIFF, PROBE_MORE, PROBE_RR5, PROBE_SAME } from './probe-pairs.js';
 
 const fromAdversarial = (x: L): VetoListing => ({ title: x.title, brand: x.brand, category: x.cat, variantTitles: x.variants ?? [], mpn: x.mpn ?? null });
 const fromReview = (x: PairListing): VetoListing => ({ title: x.title, brand: x.brand, category: x.category });
@@ -211,4 +211,17 @@ describe('veto: true matches from the pilot of 23 Oct', () => {
     expectKept([v('tv-audio', 'Logitech Z623 2.1 Speaker System with THX Certified Audio', 'Logitech'), v('tv-audio', 'Logitech Z623 2.1 Speakers with Subwoofer', 'Logitech')]));
   it('still vetoes a console with and without a second controller', () =>
     expectVetoed(v('gaming', 'Sony PS5 Slim Console with 2 Controllers', 'Sony'), v('gaming', 'Sony PS5 Slim Console', 'Sony')));
+});
+
+describe('veto: the re-review probes of 23 Oct (rr5)', () => {
+  for (const [what, a, b] of PROBE_RR5) it(`vetoes ${what}`, () => expectVetoed(a, b));
+  it('keeps AirPods sold with their MagSafe charging case, with or without "with"', () =>
+    expectKept([v('tv-audio', 'Apple AirPods Pro 2 MagSafe Charging Case (USB-C)', 'Apple'), v('tv-audio', 'Apple AirPods Pro 2 with MagSafe Charging Case (USB-C)', 'Apple')]));
+  it('keeps the same phone when one shop omits 5G', () =>
+    expectKept([v('phones', 'Samsung Galaxy A55 5G 128GB Awesome Navy', 'Samsung'), v('phones', 'Samsung Galaxy A55 128GB Navy', 'Samsung')]));
+});
+
+describe('veto: maker word only from the title start', () => {
+  it('reads no maker from a title starting with a number', () =>
+    expectKept([v('toys', 'LEGO Harry Potter 76469 Dobby the Free Elf', null), v('toys', '76469 2 in 1 Dobby the Free Elf', null)]));
 });

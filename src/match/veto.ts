@@ -272,12 +272,34 @@ const ACCESSORY: Record<string, string> = {
   accessories: 'accessory', accessory: 'accessory',
 };
 /** Phrases where an accessory word names part of the product itself. */
-const NOT_ACCESSORY = /\b(?:charging\s+case|stand\s+mixer|filter\s+coffee|smart\s*band|fitness\s+band|wrist\s*band|skin\s*care|for\s+\w+\s+skin|\w+\s+skin\s+type)\b/g;
+const NOT_ACCESSORY = /\b(?:stand\s+mixer|filter\s+coffee|smart\s*band|fitness\s+band|wrist\s*band|skin\s*care|for\s+\w+\s+skin|\w+\s+skin\s+type)\b/g;
+
+/**
+ * Whether "Charging Case" in a prepped text is part of the earbuds sold: after "with", w/, +, and or incl., or
+ * AirPods' "MagSafe Charging Case"; never with "for", "replacement" or "only" (a case sold on its own).
+ */
+function caseIsPart(t: string): boolean {
+  if (/\bfor\b|\breplacement\b|\bonly\b/.test(t)) return false;
+  return /(?:\bwith|\bw\s*\/|\+|\band|\bincl\w*)\s+(?:[\p{L}\p{N}-]+\s+){0,3}charging\s+case\b/u.test(t) || /\bmagsafe\s+charging\s+case\b/.test(t);
+}
+
+/** The kind of charging case named (a wireless and a plain charging case are two AirPods). */
+function caseKinds(texts: string[]): Set<string> {
+  const out = new Set<string>();
+  for (const text of texts) {
+    for (const m of prep(text).matchAll(/\b((?:[\p{L}\p{N}-]+\s+){0,3})charging\s+case\b/gu)) {
+      for (const w of m[1].split(/\s+/)) if (w === 'wireless' || w === 'lightning' || w === 'magsafe') out.add(w);
+    }
+  }
+  return out;
+}
 
 function accessories(listing: VetoListing, title: string): Set<string> {
   const out = new Set<string>();
   const add = (text: string) => {
-    for (const t of words(prep(text).replace(NOT_ACCESSORY, ' '))) {
+    const t = prep(text);
+    const plain = (caseIsPart(t) ? t.replace(/\bcharging\s+case\b/g, ' ') : t).replace(NOT_ACCESSORY, ' ');
+    for (const t of words(plain)) {
       if (!Object.hasOwn(ACCESSORY, t)) continue;
       if (t === 'skin' || t === 'skins') {
         if (listing.category === 'beauty-health') continue;
@@ -295,7 +317,7 @@ function accessories(listing: VetoListing, title: string): Set<string> {
 
 /** Things a bundle adds after "with" (not features: "with Active Noise Cancellation" is no bundle). */
 const PRODUCT_NOUN =
-  /^(?:case|bag|controllers?|games?|charger|cables?|headphones|headset|earbuds|stand|mouse|keyboard|sleeve|cover|strap|lens|lenses|bottles?|glass(?:es)?|mugs?|kit|accessories|batter(?:y|ies)|adapter|dock|remote|protector|voucher|card|pen|stylus|mat|bowl|tripod|microphone|mic|speaker|printer|monitor|tv|console|phone|tablet|laptop|watch|refills?|pods|capsules|heads|blades|brush|toothbrush|gift|box|set|pack|bundle)$/;
+  /^(?:case|bag|controllers?|games?|charger|cables?|headphones|headset|earbuds|stand|mouse|keyboard|sleeve|cover|strap|lens|lenses|bottles?|glass(?:es)?|mugs?|kit|accessories|batter(?:y|ies)|adapter|dock|remote|protector|voucher|card|pen|stylus|mat|bowl|tripod|microphone|mic|speaker|printer|monitor|tv|console|phone|tablet|laptop|watch|refills?|pods|capsules|heads|blades|brush|toothbrush|gift|box|set|pack|bundle|frother|aeroccino|grinder|steamer|base|station|bridge|hub)$/;
 
 /**
  * Whether a text names a bundle: + item, incl., includes, bundle or multipack, or "with" (or w/) a product (review
@@ -341,13 +363,15 @@ function varieties(texts: string[], category: string): Set<string> {
 
 /** Version and import regions (a Chinese version, a Japanese import, NTSC); the European default ones say nothing. */
 const REGION_DEFAULT = new Set(['global', 'eu', 'pal']);
-function versionRegions(texts: string[]): Set<string> {
+function versionRegions(texts: string[], category: string): Set<string> {
   const out = new Set<string>();
+  // a bare HK, China or Chinese names the region of a device (Chinese tea or porcelain is no region)
+  const device = ['phones', 'laptops', 'tv-audio', 'gaming'].includes(category);
   const NAME: Record<string, string> = { usa: 'us', intl: 'global', international: 'global', cn: 'china', chinese: 'china', jp: 'japan', japanese: 'japan', asian: 'asia', hk: 'hong kong' };
   for (const text of texts) {
     const t = prep(text);
     for (const m of t.matchAll(/\b(eu|uk|us|usa|au|global|international|intl|asia|asian|china|chinese|cn|hk|japan|japanese|jp|korea|korean|india|indian)\s*[-/]?\s*(?:version|ver|model|spec|stock|rom|edition|import(?:ed)?|region)\b/g)) out.add(NAME[m[1]] ?? m[1]);
-    if (/\bchinese\b/.test(t)) out.add('china');
+    if (device) for (const m of t.matchAll(/\b(hk|china|cn|chinese)\b/g)) out.add(NAME[m[1]] ?? m[1]);
     if (/\bimport(?:ed)?\b/.test(t)) out.add('import');
     if (/\bntsc\b/.test(t)) out.add('ntsc');
     if (/\bpal\b/.test(t)) out.add('pal');
@@ -375,6 +399,49 @@ function sims(texts: string[]): Set<string> {
   for (const text of texts) for (const [k, re] of SIM) if (re.test(prep(text))) out.add(k);
   return out;
 }
+
+/** Network and SIM facts a phone, watch or tablet title states. */
+function connectivity(texts: string[]): Set<string> {
+  const out = new Set<string>();
+  for (const text of texts) {
+    const t = prep(text);
+    if (/\bdual[\s-]?sim\b|\bds\b/.test(t)) out.add('dual sim');
+    if (/\be[\s-]?sim\b/.test(t)) out.add('esim');
+    for (const m of t.matchAll(/\b(4g|5g|lte|cellular|gps)\b/g)) out.add(m[1]);
+    if (/\bwi[\s-]?fi\b/.test(t)) out.add('wifi');
+  }
+  return out;
+}
+const NETWORK = ['dual sim', 'esim', '4g', '5g', 'lte', 'cellular'];
+const MOBILE_DATA = ['cellular', 'lte', '4g'];
+/** A watch or tablet: one sold with and without mobile data. */
+const WATCH_OR_TABLET = /\b(?:watch|smartwatch|ipad|tablet|tab)\b/;
+
+/** with ads or without (Kindle). */
+function ads(texts: string[]): Set<string> {
+  const out = new Set<string>();
+  for (const text of texts) {
+    const t = prep(text);
+    if (/\bwithout\s+(?:ads|adverts|advertising|special\s+offers|lockscreen\s+ads)\b|\bad[\s-]?free\b/.test(t)) out.add('without ads');
+    if (/\bwith\s+(?:ads|adverts|advertising|special\s+offers|lockscreen\s+ads)\b|\bad[\s-]?supported\b/.test(t)) out.add('with ads');
+  }
+  return out;
+}
+
+/** Battery sizes (AA, AAA, C, D, CR2032, 18650). */
+function batterySizes(texts: string[]): Set<string> {
+  const out = new Set<string>();
+  for (const text of texts) {
+    const t = prep(text);
+    for (const m of t.matchAll(/\b(aaaa|aaa|aa)\b/g)) out.add(m[1]);
+    for (const m of t.matchAll(/\b(c|d)\s*(?:size|cell|batter)/g)) out.add(m[1]);
+    for (const m of t.matchAll(/\b(cr|lr|sr|ag)\s?-?(\d{2,4})\b/g)) out.add(`${m[1]}${m[2]}`);
+    for (const m of t.matchAll(/\b(18650|21700|14500|16340|26650)\b/g)) out.add(m[1]);
+  }
+  return out;
+}
+
+const STARTER = /\bstarter\s+(?:kit|set|pack)\b/;
 
 const OS: [string, RegExp][] = [
   ['windows', /\bw(?:in(?:dows)?)?\s*(?:7|8|10|11)\b|\bwindows\b/],
@@ -454,8 +521,24 @@ function brandConflict(a: VetoListing, b: VetoListing): string | null {
   // a brand field on one side only: the other title must name it (an Apple case and a case for an iPhone)
   if (ba.length > 0 && !namesBrand(b.title, ba)) return `brand ${a.brand} vs none`;
   if (bb.length > 0 && !namesBrand(a.title, bb)) return `brand none vs ${b.brand}`;
+  // no brand field at all: each title's first maker word must be somewhere in the other (Tefal and Prestige pans)
+  if (ba.length === 0 && bb.length === 0) {
+    const wa = titleWords(a.title);
+    const wb = titleWords(b.title);
+    // the title's first word, when it is a word (a title starting with a number names no maker)
+    const first = (w: string[]) => {
+      const x = w.find((y) => !FILLER_FIRST.has(y));
+      return x !== undefined && /^\p{L}[\p{L}\p{N}]+$/u.test(x) ? x : undefined;
+    };
+    const fa = first(wa);
+    const fb = first(wb);
+    if (fa && fb && !inRun(wb, fa) && !inRun(wa, fb)) return `maker ${fa} vs ${fb}`;
+  }
   return null;
 }
+
+/** Words a title may start with that name no maker. */
+const FILLER_FIRST = new Set('new the genuine original official brand latest sale offer deal pack set bundle'.split(' '));
 
 const show = (s: Set<string | number> | string[]) => ([...s].length === 0 ? 'none' : [...s].sort().join(' '));
 const equalSets = <T>(a: Set<T>, b: Set<T>) => a.size === b.size && [...a].every((x) => b.has(x));
@@ -486,6 +569,8 @@ function guardSets(texts: string[], category: string): Set<string>[] {
 
 /** A price more than this many times another of the same condition is another product (a case at a phone's price). */
 const PRICE_RATIO = 3;
+/** The ratio when one listing names an accessory or part (a charging case at a third of the earbuds' price). */
+const ACCESSORY_PRICE_RATIO = 2.5;
 
 /**
  * Why two listings cannot be one product, as short reasons; empty when nothing in their data disagrees. Text in a
@@ -581,6 +666,33 @@ export function vetoReasons(a: VetoListing, b: VetoListing): string[] {
   const aca = accessories(a, ta);
   const acb = accessories(b, tb);
   if ((aca.size === 0) !== (acb.size === 0)) add(`accessory ${show(aca)} vs ${show(acb)}`);
+  const cka = caseKinds(xa);
+  const ckb = caseKinds(xb);
+  if (!equalSets(cka, ckb)) add(`charging case ${show(cka)} vs ${show(ckb)}`);
+  const sta = xa.some((t) => STARTER.test(prep(t)));
+  const stb = xb.some((t) => STARTER.test(prep(t)));
+  if (sta !== stb) add(`starter kit ${sta ? 'yes' : 'no'} vs ${stb ? 'yes' : 'no'}`);
+  const ada = ads(xa);
+  const adb = ads(xb);
+  if (bothDiffer(ada, adb)) add(`ads ${show(ada)} vs ${show(adb)}`);
+  const bsa = batterySizes(xa);
+  const bsb = batterySizes(xb);
+  if (bothDiffer(bsa, bsb)) add(`battery size ${show(bsa)} vs ${show(bsb)}`);
+  // network: each states a network fact the other lacks (Dual SIM and 5G), or mobile data on one side only where the
+  // other says GPS or Wi-Fi, or on a watch or tablet (sold with and without it); a 5G phone whose other shop omits
+  // 5G stays one product
+  const cna = connectivity(xa);
+  const cnb = connectivity(xb);
+  const neta = new Set([...cna].filter((x) => NETWORK.includes(x)));
+  const netb = new Set([...cnb].filter((x) => NETWORK.includes(x)));
+  if (eachLacks(neta, netb)) add(`network ${show(neta)} vs ${show(netb)}`);
+  const dataA = MOBILE_DATA.some((x) => cna.has(x));
+  const dataB = MOBILE_DATA.some((x) => cnb.has(x));
+  if (dataA !== dataB) {
+    const without = dataA ? cnb : cna;
+    const watchOrTablet = [ta, tb].some((t) => WATCH_OR_TABLET.test(prep(t)));
+    if (without.has('gps') || without.has('wifi') || watchOrTablet) add(`mobile data ${dataA ? 'yes' : 'no'} vs ${dataB ? 'yes' : 'no'}`);
+  }
 
   const ea = editions(xa);
   const eb = editions(xb);
@@ -599,8 +711,8 @@ export function vetoReasons(a: VetoListing, b: VetoListing): string[] {
   const sim1 = sims(xa);
   const sim2 = sims(xb);
   if (bothDiffer(sim1, sim2)) add(`SIM ${show(sim1)} vs ${show(sim2)}`);
-  const ra = versionRegions(xa);
-  const rb = versionRegions(xb);
+  const ra = versionRegions(xa, cat);
+  const rb = versionRegions(xb, cat);
   if (!equalSets(ra, rb)) add(`region ${show(ra)} vs ${show(rb)}`);
   const pla = plugs(xa);
   const plb = plugs(xb);
@@ -619,7 +731,7 @@ export function vetoReasons(a: VetoListing, b: VetoListing): string[] {
 
   const pra = a.priceCents ?? 0;
   const prb = b.priceCents ?? 0;
-  if (pra > 0 && prb > 0 && ca.join(',') === cb.join(',') && Math.max(pra, prb) > PRICE_RATIO * Math.min(pra, prb)) add(`price ${pra} vs ${prb} cents`);
+  if (pra > 0 && prb > 0 && ca.join(',') === cb.join(',') && Math.max(pra, prb) > (aca.size > 0 || acb.size > 0 ? ACCESSORY_PRICE_RATIO : PRICE_RATIO) * Math.min(pra, prb)) add(`price ${pra} vs ${prb} cents`);
   return reasons;
 }
 

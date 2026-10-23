@@ -53,7 +53,8 @@ describe('assignMatches with judged clusters: barcodes and part numbers (review 
     expect(assignMatches([m(1, 1, '5000112637922'), m(2, 2, '5449000000996')], { judged: [[1, 2]] }).size).toBe(0);
   });
   it('groups the colours one shop lists with their own barcodes', () => {
-    expect(assignMatches([m(1, 1, '5000112637922'), m(2, 1, '5449000000996')], { judged: [[1, 2]] }).get(1)?.method).toBe('judged');
+    const colour = (id: number, gtin: string, title: string): MatchInput => ({ ...m(id, 1, gtin), title });
+    expect(assignMatches([colour(1, '5000112637922', 'Hot Wheels Monster Truck Red'), colour(2, '5449000000996', 'Hot Wheels Monster Truck Blue')], { judged: [[1, 2]] }).get(1)?.method).toBe('judged');
   });
   it('never adds a listing to a GTIN group whose barcode differs from its own', () => {
     const r = assignMatches([m(1, 1, '5000112637922'), m(2, 2, '5000112637922'), m(3, 3, '4006381333931')], { judged: [[1, 3]] });
@@ -62,5 +63,24 @@ describe('assignMatches with judged clusters: barcodes and part numbers (review 
   it('never groups listings with different part numbers', () => {
     expect(assignMatches([m(1, 1, null, '82XM00ABUK'), m(2, 2, null, '83ER0012UK')], { judged: [[1, 2]] }).size).toBe(0);
     expect(assignMatches([m(1, 1, null, 'T500WHT'), m(2, 2, null, 'T500BLK')], { judged: [[1, 2]] }).get(1)?.method).toBe('judged');
+  });
+});
+
+describe('assignMatches with judged clusters: re-review G4, G5, G7', () => {
+  const X = '5000112637922';
+  const Y = '5449000000996';
+  const Z = '4006381333931';
+  const m = (id: number, shopId: number, gtin: string | null, mpn: string | null = null, title = 'Hot Wheels Monster Truck'): MatchInput => ({ id, shopId, gtin, mpn, title, brand: 'Mattel' });
+  it('G4: never joins an MPN group holding a listing with another barcode', () => {
+    expect(assignMatches([m(1, 1, X, 'ABC12345'), m(2, 2, null, 'ABC12345'), m(3, 3, Y)], { judged: [[2, 3]] }).get(3)).toBeUndefined();
+  });
+  it('G5: never joins a GTIN group holding a listing with another part number', () => {
+    expect(assignMatches([m(1, 1, X, 'ABC12345'), m(2, 2, X, null), m(3, 3, null, 'XYZ98765')], { judged: [[2, 3]] }).get(3)).toBeUndefined();
+  });
+  it('G7: a group left at one shop is kept only for colour or size variants of one title', () => {
+    expect(assignMatches([m(1, 1, X), m(2, 1, Y), m(3, 2, Z)], { judged: [[1, 2, 3]] }).size).toBe(0);
+    const r = assignMatches([m(1, 1, X, null, 'Hot Wheels Monster Truck Red'), m(2, 1, Y, null, 'Hot Wheels Monster Truck Blue'), m(3, 2, Z)], { judged: [[1, 2, 3]] });
+    expect(r.get(1)?.method).toBe('judged');
+    expect(r.get(3)).toBeUndefined();
   });
 });

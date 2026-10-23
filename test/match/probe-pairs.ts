@@ -89,3 +89,27 @@ export const PROBE_MORE: [string, V, V][] = [
   ['B13 2TB vs 2000GB (should be equal)', v('laptops', 'WD Black SN850X 2TB', 'WD'), v('laptops', 'WD Black SN850X 2000GB', 'WD')],
   ['B14 same title, same brand, iPhone 15 vs iPhone 15 Pro only in mpn', v('phones', 'Apple iPhone 128GB Black', 'Apple', { mpn: 'MTP03' }), v('phones', 'Apple iPhone 128GB Black', 'Apple', { mpn: 'MTUV3' })],
 ];
+
+// The re-review probes of 23 Oct (scratchpad rr5-probe.mts): different products, each aimed at a relaxed rule.
+export const PROBE_RR5: [string, V, V][] = [
+  ['N1 charging case sold alone vs earbuds with the case', v('tv-audio', 'Apple MagSafe Charging Case (USB-C) for AirPods Pro 2', 'Apple', { priceCents: 9900 }), v('tv-audio', 'Apple AirPods Pro 2 with MagSafe Charging Case (USB-C)', 'Apple', { priceCents: 27900 })],
+  ['N2 replacement charging case vs buds', v('tv-audio', 'Samsung Galaxy Buds FE Charging Case', 'Samsung', { priceCents: 3500 }), v('tv-audio', 'Samsung Galaxy Buds FE', 'Samsung', { priceCents: 9900 })],
+  ['N3 with <feature> that is an add-on: PS5 Pro with Disc Drive', v('gaming', 'Sony PlayStation 5 Pro Console with Disc Drive', 'Sony', { priceCents: 92900 }), v('gaming', 'Sony PlayStation 5 Pro Console', 'Sony', { priceCents: 79900 })],
+  ['N4 with milk frother bundle', v('home-kitchen', "Nespresso Vertuo Next Coffee Machine with Aeroccino Milk Frother", "Nespresso", { priceCents: 19900 }), v('home-kitchen', 'Nespresso Vertuo Next Coffee Machine', 'Nespresso', { priceCents: 12900 })],
+  ['N5 Kindle with ads vs without ads', v('laptops', 'Amazon Kindle Paperwhite 16GB with Ads', 'Amazon', { priceCents: 16999 }), v('laptops', 'Amazon Kindle Paperwhite 16GB without Ads', 'Amazon', { priceCents: 18999 })],
+  ['N6 Dual SIM one side, A15 4G vs A15 5G', v('phones', 'Samsung Galaxy A15 128GB Dual SIM', 'Samsung', { priceCents: 17900 }), v('phones', 'Samsung Galaxy A15 5G 128GB', 'Samsung', { priceCents: 19900 })],
+  ['N7 Dual SIM HK model vs EU model', v('phones', 'Apple iPhone 15 Pro 256GB Dual SIM HK', 'Apple', { priceCents: 119900 }), v('phones', 'Apple iPhone 15 Pro 256GB', 'Apple', { priceCents: 129900 })],
+  ['N8 Dual SIM China model', v('phones', 'Xiaomi 14 12GB 256GB Dual SIM China', 'Xiaomi', { priceCents: 59900 }), v('phones', 'Xiaomi 14 12GB 256GB', 'Xiaomi', { priceCents: 79900 })],
+  ['N9 no brand fields, makers in titles: pans', v('home-kitchen', 'Tefal Non-Stick Frying Pan 28cm', null, { priceCents: 2999 }), v('home-kitchen', 'Prestige Non-Stick Frying Pan 28cm', null, { priceCents: 2499 })],
+  ['N10 no brand fields, makers in titles: drills', v('home-kitchen', 'Bosch Cordless Drill Driver 18V', null), v('home-kitchen', 'Makita Cordless Drill Driver 18V', null)],
+  ['N11 brand field one side, other title names it but is a third party', v('phones', 'Spigen Ultra Hybrid Case Apple iPhone 15 Clear', null, { priceCents: 1599 }), v('phones', 'Apple iPhone 15 Clear Case', 'Apple', { priceCents: 4900 })],
+  ['N12 price under 3x, Grade B unlabelled refurb', v('phones', 'Apple iPhone 13 128GB Midnight Grade B', 'Apple', { priceCents: 32000 }), v('phones', 'Apple iPhone 13 128GB Midnight', 'Apple', { priceCents: 69900 })],
+  ['N13 price under 3x, open box', v('laptops', 'Apple MacBook Air 13 M2 8GB 256GB Open Box', 'Apple', { priceCents: 79900 }), v('laptops', 'Apple MacBook Air 13 M2 8GB 256GB', 'Apple', { priceCents: 109900 })],
+  ['N14 3 Bulbs vs 3 Pack, other wattage', v('home-kitchen', 'Philips LED Bulb E27 3 Bulbs 8W', 'Philips'), v('home-kitchen', 'Philips LED Bulb E27 3 Pack 13W', 'Philips')],
+  ['N15 3 Bulbs vs 3 Pack, other lumen and equivalent only', v('home-kitchen', 'Philips LED E27 3 Bulbs 60W Equivalent 806lm', 'Philips'), v('home-kitchen', 'Philips LED E27 3 Pack 100W Equivalent 1521lm', 'Philips')],
+  ['N16 starter kit (with bridge) vs bulbs only', v('home-kitchen', 'Philips Hue White E27 Starter Kit 3 Bulbs', 'Philips'), v('home-kitchen', 'Philips Hue White E27 3 Pack', 'Philips')],
+  ['N17 AA vs AAA, 4 bulbs-style count', v('home-kitchen', 'Duracell Plus AA 4 Batteries', 'Duracell'), v('home-kitchen', 'Duracell Plus AAA 4 Pack', 'Duracell')],
+  ['N18 earbuds Pro vs earbuds, charging case words', v('tv-audio', 'Samsung Galaxy Buds 3 with Charging Case', 'Samsung'), v('tv-audio', 'Samsung Galaxy Buds 3 Pro with Charging Case', 'Samsung')],
+  ['N19 with <feature> Wireless Charging Case vs Lightning case (AirPods 2 vs 2 wireless)', v('tv-audio', 'Apple AirPods (2nd generation) with Wireless Charging Case', 'Apple', { priceCents: 17900 }), v('tv-audio', 'Apple AirPods (2nd generation) with Charging Case', 'Apple', { priceCents: 12900 })],
+  ['N20 Watch GPS vs GPS + Cellular', v('phones', 'Apple Watch Series 10 46mm GPS', 'Apple'), v('phones', 'Apple Watch Series 10 46mm GPS + Cellular', 'Apple')],
+];

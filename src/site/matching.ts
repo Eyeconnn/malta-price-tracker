@@ -399,18 +399,41 @@ function matchByJudged(items: MatchInput[], clusters: number[][], out: Map<numbe
       if (parts.length > 1) split.add(p);
     }
   }
-  /** A listing never joins a code group whose barcode or part number differs from its own. */
+  // the listings of each code group, to check a joining listing against every one of them (review G4, G5)
+  const membersOf = new Map<string, MatchInput[]>();
+  for (const [id, m] of out) {
+    const it = byId.get(id);
+    if (!it) continue;
+    const list = membersOf.get(m.key);
+    if (list) list.push(it);
+    else membersOf.set(m.key, [it]);
+  }
+  /** A listing never joins a code group whose barcode or part number differs from its own or a member's. */
   const fits = (id: number, code: string) => {
     const it = byId.get(id)!;
     if (code.startsWith('gtin:')) {
       const g = gtinKey(it.gtin);
-      return g === null || `gtin:${g}` === code;
+      if (g !== null && `gtin:${g}` !== code) return false;
     }
     if (code.startsWith('mpn:')) {
       const p = mpnKey(it.mpn);
-      return p === null || `mpn:${p}` === code;
+      if (p !== null && `mpn:${p}` !== code) return false;
     }
-    return true;
+    return (membersOf.get(code) ?? []).every((m) => !conflict(m, it) && !conflictSameShop(m, it));
+  };
+  /** Two barcodes or part numbers that differ, also at one shop (a code group holds one product). */
+  const conflictSameShop = (x: MatchInput, y: MatchInput) => {
+    const gx = gtinKey(x.gtin);
+    const gy = gtinKey(y.gtin);
+    return gx !== null && gy !== null && gx !== gy;
+  };
+  /**
+   * A new judged group: listings of two or more shops, or the colour or size variants one shop lists on their own
+   * (titles that differ only in colour or size words); a group of one shop's listings is otherwise no product of
+   * several sellers (review G7).
+   */
+  const assignNew = (ids: number[], key: string) => {
+    if (new Set(ids.map((id) => byId.get(id)!.shopId)).size > 1 || variantsOfOne(ids.map((id) => byId.get(id)!))) assign(ids, key);
   };
   const judgedOfCode = new Map<string, Set<number>>();
   for (const c of lists) {
@@ -430,7 +453,7 @@ function matchByJudged(items: MatchInput[], clusters: number[][], out: Map<numbe
     if (free.length === 0) continue;
     const codes = new Set(c.filter((id) => out.has(id)).map((id) => out.get(id)!.key));
     if (codes.size === 0) {
-      assign(free, `judged:${Math.min(...c)}`);
+      assignNew(free, `judged:${Math.min(...c)}`);
       continue;
     }
     if (codes.size === 1 && !split.has(c)) {
@@ -441,8 +464,24 @@ function matchByJudged(items: MatchInput[], clusters: number[][], out: Map<numbe
         continue;
       }
     }
-    if (free.length >= 2) assign(free, `judged:${Math.min(...free)}`);
+    if (free.length >= 2) assignNew(free, `judged:${Math.min(...free)}`);
   }
+}
+
+/** Size words of clothing and shoes (one product in several sizes). */
+const SIZE_TOKENS = new Set('xs xl xxl xxxl 2xl 3xl 4xl small medium large size'.split(' '));
+
+/** Whether listings are colour or size variants of one product: different titles, the same words besides colour and size. */
+function variantsOfOne(items: MatchInput[]): boolean {
+  const norm = (t: string) => t.toLowerCase().replace(/\s+/g, ' ').trim();
+  const core = (t: string) =>
+    titleTokens(t.replace(/\b(?:size|eu|uk|us)\s*\d+(?:\.\d+)?\b/gi, ' ')).filter((w) => !SIZE_TOKENS.has(w)).sort().join(' ');
+  for (let i = 0; i < items.length; i++) {
+    for (let j = i + 1; j < items.length; j++) {
+      if (norm(items[i].title) === norm(items[j].title) || core(items[i].title) !== core(items[j].title)) return false;
+    }
+  }
+  return true;
 }
 
 /**
