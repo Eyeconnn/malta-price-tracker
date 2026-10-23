@@ -47,6 +47,11 @@ function fetcherFor(url: string, shop: Shop, shopFetcher: ShopFetcher): ShopFetc
  * fetched at most once: later products with the same URL are linked to the stored row.
  */
 export async function downloadImagesForShop(shop: Shop): Promise<{ downloaded: number; linked: number }> {
+  // off until the small-copy pipeline lands (full-size originals would fill the free R2 tier)
+  if (!/^(1|on|true|yes)$/i.test(process.env.IMAGES_ENABLED ?? '')) {
+    console.log(`[${shop.slug}] images skipped: IMAGES_ENABLED is not on`);
+    return { downloaded: 0, linked: 0 };
+  }
   if (!r2Configured() || !(await r2Writable())) {
     console.log(`[${shop.slug}] images skipped: R2 is not configured or not writable`);
     return { downloaded: 0, linked: 0 };
