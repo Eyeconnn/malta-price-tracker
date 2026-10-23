@@ -1,0 +1,155 @@
+{
+  "_about": "Attribute keys per site category for the name normaliser (src/names). Types: text, enum (values, or list naming a shared list), number (fixed unit, min and max bounds). multi: the value is a list (for example every colour or size the group's variants come in).",
+  "lists": {
+    "colours": [
+      "black", "white", "grey", "silver", "gold", "rose gold", "bronze", "copper",
+      "blue", "navy", "light blue", "turquoise", "red", "burgundy", "pink", "purple",
+      "green", "olive", "khaki", "yellow", "orange", "beige", "cream", "brown",
+      "multicolour", "transparent"
+    ],
+    "genders": ["men", "women", "unisex", "boys", "girls", "kids", "baby"]
+  },
+  "categories": {
+    "laptops": {
+      "brand": { "type": "text", "meaning": "maker of the laptop, in its usual spelling" },
+      "model": { "type": "text", "meaning": "model name and number, without specs" },
+      "screen_in": { "type": "number", "unit": "inch", "min": 7, "max": 21, "meaning": "screen diagonal" },
+      "cpu": { "type": "text", "meaning": "processor as written by the shop, for example Intel Core i5-1335U" },
+      "ram_gb": { "type": "number", "unit": "GB", "min": 1, "max": 256, "meaning": "memory" },
+      "storage_gb": { "type": "number", "unit": "GB", "min": 16, "max": 16384, "meaning": "total storage, 1TB = 1024" },
+      "storage_type": { "type": "enum", "values": ["SSD", "HDD", "eMMC", "SSD+HDD"], "meaning": "kind of storage" },
+      "gpu": { "type": "text", "meaning": "graphics chip when named, for example RTX 4060" },
+      "os": { "type": "enum", "values": ["Windows", "macOS", "ChromeOS", "Linux", "none"], "meaning": "operating system family (W11P, Win 11 Home are Windows)" },
+      "colour": { "type": "enum", "list": "colours", "multi": true, "meaning": "colours the group comes in" }
+    },
+    "phones": {
+      "brand": { "type": "text", "meaning": "maker" },
+      "model": { "type": "text", "meaning": "model name and number, without storage or colour" },
+      "device_type": { "type": "enum", "values": ["phone", "tablet", "smartwatch", "e-reader", "accessory"], "meaning": "kind of device" },
+      "storage_gb": { "type": "number", "unit": "GB", "min": 1, "max": 4096, "meaning": "built-in storage" },
+      "ram_gb": { "type": "number", "unit": "GB", "min": 1, "max": 32, "meaning": "memory" },
+      "screen_in": { "type": "number", "unit": "inch", "min": 1, "max": 16, "meaning": "screen diagonal" },
+      "network": { "type": "enum", "values": ["4G", "5G", "Wi-Fi only"], "meaning": "best mobile network supported" },
+      "sim": { "type": "enum", "values": ["single", "dual", "eSIM", "dual + eSIM"], "meaning": "SIM slots" },
+      "colour": { "type": "enum", "list": "colours", "multi": true, "meaning": "colours the group comes in" }
+    },
+    "tv-audio": {
+      "brand": { "type": "text", "meaning": "maker" },
+      "model": { "type": "text", "meaning": "model code or name" },
+      "device_type": { "type": "enum", "values": ["tv", "soundbar", "headphones", "earbuds", "speaker", "projector", "home cinema", "hi-fi", "accessory", "other"], "meaning": "kind of product" },
+      "screen_in": { "type": "number", "unit": "inch", "min": 10, "max": 120, "meaning": "screen diagonal (TVs only)" },
+      "resolution": { "type": "enum", "values": ["HD", "Full HD", "4K", "8K"], "meaning": "screen resolution (UHD is 4K)" },
+      "panel": { "type": "enum", "values": ["LED", "QLED", "Neo QLED", "OLED", "QD-OLED", "Mini LED", "NanoCell", "LCD"], "meaning": "screen technology" },
+      "smart_os": { "type": "enum", "values": ["Google TV", "Android TV", "Tizen", "webOS", "Roku", "Fire TV", "VIDAA", "Titan OS", "other"], "meaning": "smart TV system" },
+      "hdr": { "type": "text", "meaning": "HDR formats named by the shop, for example HDR10, Dolby Vision" },
+      "refresh_hz": { "type": "number", "unit": "Hz", "min": 50, "max": 480, "meaning": "screen refresh rate" },
+      "power_w": { "type": "number", "unit": "W", "min": 1, "max": 5000, "meaning": "audio output power" },
+      "wireless": { "type": "enum", "values": ["yes", "no"], "meaning": "Bluetooth or other wireless audio" },
+      "colour": { "type": "enum", "list": "colours", "multi": true, "meaning": "colours the group comes in" }
+    },
+    "gaming": {
+      "brand": { "type": "text", "meaning": "maker or publisher" },
+      "platform": { "type": "enum", "values": ["PS5", "PS4", "Xbox Series X|S", "Xbox One", "Nintendo Switch", "Nintendo Switch 2", "PC", "multi"], "meaning": "platform the product is for" },
+      "product_type": { "type": "enum", "values": ["console", "game", "controller", "headset", "accessory", "gift card", "chair", "other"], "meaning": "kind of product" },
+      "edition": { "type": "text", "meaning": "edition, for example Standard, Deluxe, Digital" },
+      "storage_gb": { "type": "number", "unit": "GB", "min": 1, "max": 16384, "meaning": "console storage" },
+      "colour": { "type": "enum", "list": "colours", "multi": true, "meaning": "colours the group comes in" }
+    },
+    "appliances": {
+      "brand": { "type": "text", "meaning": "maker" },
+      "model": { "type": "text", "meaning": "model code" },
+      "appliance_type": { "type": "text", "meaning": "kind of appliance, for example washing machine, air fryer" },
+      "capacity_l": { "type": "number", "unit": "L", "min": 0.1, "max": 1000, "meaning": "volume capacity (fridges, ovens, kettles, air fryers)" },
+      "capacity_kg": { "type": "number", "unit": "kg", "min": 1, "max": 30, "meaning": "load capacity (washing machines, dryers)" },
+      "power_w": { "type": "number", "unit": "W", "min": 1, "max": 10000, "meaning": "rated power" },
+      "energy_class": { "type": "enum", "values": ["A", "B", "C", "D", "E", "F", "G"], "meaning": "EU energy label class" },
+      "noise_db": { "type": "number", "unit": "dB", "min": 10, "max": 120, "meaning": "noise level" },
+      "width_cm": { "type": "number", "unit": "cm", "min": 1, "max": 300, "meaning": "width" },
+      "height_cm": { "type": "number", "unit": "cm", "min": 1, "max": 300, "meaning": "height" },
+      "depth_cm": { "type": "number", "unit": "cm", "min": 1, "max": 300, "meaning": "depth" },
+      "colour": { "type": "enum", "list": "colours", "multi": true, "meaning": "colours the group comes in" }
+    },
+    "toys": {
+      "brand": { "type": "text", "meaning": "maker, for example LEGO" },
+      "model": { "type": "text", "meaning": "set or item number, for example 42115" },
+      "theme": { "type": "text", "meaning": "toy line or licence, for example Star Wars, Technic" },
+      "product_type": { "type": "text", "meaning": "kind of toy, for example building set, doll, board game" },
+      "age_min_years": { "type": "number", "unit": "years", "min": 0, "max": 18, "meaning": "minimum age" },
+      "pieces": { "type": "number", "unit": "pieces", "min": 1, "max": 20000, "meaning": "number of pieces" },
+      "colour": { "type": "enum", "list": "colours", "multi": true, "meaning": "colours the group comes in" }
+    },
+    "baby": {
+      "brand": { "type": "text", "meaning": "maker" },
+      "product_type": { "type": "text", "meaning": "kind of product, for example pram, car seat, nappies" },
+      "age_min_months": { "type": "number", "unit": "months", "min": 0, "max": 72, "meaning": "minimum age" },
+      "age_max_months": { "type": "number", "unit": "months", "min": 0, "max": 144, "meaning": "maximum age" },
+      "max_weight_kg": { "type": "number", "unit": "kg", "min": 1, "max": 50, "meaning": "maximum child weight" },
+      "sizes": { "type": "text", "multi": true, "meaning": "sizes the group comes in, for example 0-3 months, size 4" },
+      "pack_count": { "type": "number", "unit": "items", "min": 1, "max": 500, "meaning": "items in the pack" },
+      "colour": { "type": "enum", "list": "colours", "multi": true, "meaning": "colours the group comes in" }
+    },
+    "fashion": {
+      "brand": { "type": "text", "meaning": "maker" },
+      "product_type": { "type": "text", "meaning": "kind of item, for example trainers, dress, watch" },
+      "gender": { "type": "enum", "list": "genders", "meaning": "who it is made for" },
+      "size_system": { "type": "enum", "values": ["EU", "UK", "US", "IT", "FR", "letter", "age", "one size"], "meaning": "how sizes are written" },
+      "sizes": { "type": "text", "multi": true, "meaning": "sizes the group comes in, as the shop writes them, for example S, M, L or 42, 43" },
+      "material": { "type": "text", "meaning": "main material, for example cotton, leather" },
+      "fit": { "type": "enum", "values": ["regular", "slim", "relaxed", "oversized", "skinny", "straight", "loose"], "meaning": "cut" },
+      "colour": { "type": "enum", "list": "colours", "multi": true, "meaning": "colours the group comes in" }
+    },
+    "beauty-health": {
+      "brand": { "type": "text", "meaning": "maker" },
+      "product_type": { "type": "text", "meaning": "kind of product, for example eau de parfum, shaver, vitamin C" },
+      "gender": { "type": "enum", "list": "genders", "meaning": "who it is made for" },
+      "volume_ml": { "type": "number", "unit": "ml", "min": 1, "max": 5000, "meaning": "liquid volume" },
+      "weight_g": { "type": "number", "unit": "g", "min": 1, "max": 10000, "meaning": "net weight" },
+      "count": { "type": "number", "unit": "items", "min": 1, "max": 1000, "meaning": "tablets, capsules or items in the pack" },
+      "spf": { "type": "number", "unit": "SPF", "min": 1, "max": 100, "meaning": "sun protection factor" },
+      "scent": { "type": "text", "meaning": "scent or flavour when named" },
+      "colour": { "type": "enum", "list": "colours", "multi": true, "meaning": "colours the group comes in" }
+    },
+    "home-kitchen": {
+      "brand": { "type": "text", "meaning": "maker" },
+      "product_type": { "type": "text", "meaning": "kind of product, for example frying pan, duvet, sofa" },
+      "capacity_l": { "type": "number", "unit": "L", "min": 0.01, "max": 1000, "meaning": "volume capacity" },
+      "power_w": { "type": "number", "unit": "W", "min": 1, "max": 10000, "meaning": "rated power" },
+      "width_cm": { "type": "number", "unit": "cm", "min": 0.1, "max": 1000, "meaning": "width" },
+      "height_cm": { "type": "number", "unit": "cm", "min": 0.1, "max": 1000, "meaning": "height" },
+      "depth_cm": { "type": "number", "unit": "cm", "min": 0.1, "max": 1000, "meaning": "depth or length" },
+      "diameter_cm": { "type": "number", "unit": "cm", "min": 0.1, "max": 500, "meaning": "diameter (pans, plates, lamps)" },
+      "pieces": { "type": "number", "unit": "pieces", "min": 1, "max": 500, "meaning": "pieces in a set" },
+      "material": { "type": "text", "meaning": "main material" },
+      "colour": { "type": "enum", "list": "colours", "multi": true, "meaning": "colours the group comes in" }
+    },
+    "sports": {
+      "brand": { "type": "text", "meaning": "maker" },
+      "product_type": { "type": "text", "meaning": "kind of product, for example running shoes, tent, dumbbell" },
+      "sport": { "type": "text", "meaning": "sport or activity" },
+      "gender": { "type": "enum", "list": "genders", "meaning": "who it is made for" },
+      "sizes": { "type": "text", "multi": true, "meaning": "sizes the group comes in" },
+      "material": { "type": "text", "meaning": "main material" },
+      "weight_kg": { "type": "number", "unit": "kg", "min": 0.01, "max": 500, "meaning": "weight (dumbbells, plates) or product weight" },
+      "wheel_size_in": { "type": "number", "unit": "inch", "min": 10, "max": 29, "meaning": "bike wheel size" },
+      "colour": { "type": "enum", "list": "colours", "multi": true, "meaning": "colours the group comes in" }
+    },
+    "drinks": {
+      "brand": { "type": "text", "meaning": "producer or brand" },
+      "drink_type": { "type": "enum", "values": ["wine", "sparkling wine", "beer", "cider", "spirit", "liqueur", "soft drink", "water", "juice", "other"], "meaning": "kind of drink" },
+      "style": { "type": "text", "meaning": "style or spirit type, for example red, IPA, single malt whisky, gin" },
+      "volume_ml": { "type": "number", "unit": "ml", "min": 10, "max": 30000, "meaning": "volume of one bottle or can" },
+      "pack_count": { "type": "number", "unit": "items", "min": 1, "max": 100, "meaning": "bottles or cans in the pack" },
+      "abv_pct": { "type": "number", "unit": "%", "min": 0, "max": 100, "meaning": "alcohol by volume" },
+      "vintage": { "type": "number", "unit": "year", "min": 1900, "max": 2030, "meaning": "vintage year" },
+      "country": { "type": "text", "meaning": "country of origin" },
+      "grape": { "type": "text", "meaning": "grape variety" }
+    },
+    "other": {
+      "brand": { "type": "text", "meaning": "maker" },
+      "product_type": { "type": "text", "meaning": "kind of product" },
+      "material": { "type": "text", "meaning": "main material" },
+      "sizes": { "type": "text", "multi": true, "meaning": "sizes the group comes in" },
+      "colour": { "type": "enum", "list": "colours", "multi": true, "meaning": "colours the group comes in" }
+    }
+  }
+}

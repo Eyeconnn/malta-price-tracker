@@ -208,6 +208,59 @@ has a full run in progress, and never goes below the robots.txt crawl delay.
 
 To switch on: set the repository variable `SCRAPE_DUE_ENABLED` to `true`.
 
+## Clean product names (pilot)
+
+`pnpm normalise-names` sends batches of one site category's product groups to Claude Code (`claude -p`, on the
+owner's own Claude login, never an API key and never `--bare`) and gets back a clean name, a variant label and the
+category's attributes (`config/attribute-schemas.json`). Every answer is checked in code (`src/names/check.ts`: the
+brand, every number with its unit and every model code must survive, and no word or number may be invented; brand
+values that are the shop's own name, a domain, a company or a distributor are not required and may not be added, see
+`src/names/brand.ts`); a failed check is stored as rejected and the site keeps the
+shop's title. Claude runs with tools off, no MCP servers, no user or project settings (so no hooks or plugins), no
+session saved, in an empty temp folder with an allowlisted environment (no API keys, tokens or database URLs); shop
+text is passed as data. A run that writes to the database needs `--pilot` or `--max-batches`.
+
+```bash
+pnpm normalise-names --model haiku --pilot --dry-run             # 500 groups spread over categories and shops, no writes
+pnpm normalise-names --model sonnet --pilot --limit 200 --dry-run
+pnpm normalise-names --model haiku --category toys --max-batches 5
+pnpm normalise-names --model haiku --effort low --sample-from out/names/<run>-haiku.csv --dry-run   # the same groups again
+```
+
+Options: `--model` (required), `--effort` (low, medium, high, xhigh or max, passed to `claude --effort`; left out it is the CLI default), `--pilot` with `--limit` (default 500) and `--seed`, `--sample-from <csv>` (exactly the groups of an earlier report, by shop_id and group_key or, for older CSVs, by shop and title), `--category <slug>` (repeatable; filters on the category of today's rules, which every run recomputes),
+`--batch-size` (default 40), `--parallel` (default 2, max 6), `--max-batches`, `--timeout` (seconds per call,
+default 300), `--dry-run`, `--save-raw` (keeps each batch's raw JSON). Each run writes `out/names/<run>-<model>.html`
+and `.csv` (names before and after, attributes, rejects, tokens and the cost Claude Code reports, which on a plan is
+what the run would have cost at API prices). Reads use `DASHBOARD_DATABASE_URL`; without `--dry-run` the results go
+to `product_names` and `name_runs` (migration 007) through `DATABASE_URL`. A group is only sent again when its title
+or variant titles change. Ctrl+C stops after the running batches. `--max-cost <usd>` starts no new batch once the
+summed reported cost reaches it (running batches finish). Batches take turns across categories, so a capped run covers
+every category. A run stops after 5 failed batches in a row, and at once on a login or usage-limit error; the report and
+`name_runs.finished_at` are written on every stop. `--retry-rejected` also resends groups stored as rejected;
+`--recheck-stored` makes no model call and marks stored names rejected that today's checks would reject (with
+`--dry-run` it only lists them).
+
+### Nightly run
+
+The Windows task `MTP Name Normaliser` (daily 05:00, after the 02:30 scrape, hidden, at most 4 hours, no second copy
+while one runs; installed by `scripts/install-tasks.ps1`) runs `scripts/run-names-nightly.ps1` from the main checkout:
+
+```bash
+pnpm normalise-names --model haiku --effort low --max-batches 400 --max-cost 5 --parallel 3
+```
+
+It names the new or changed groups of the whole catalogue, at most 400 batches (about 16,000 groups) and about 5
+dollars of reported cost per night (on the owner's plan this is usage, not a bill), and writes `product_names` and
+`name_runs`; the next night continues with what is left. To change the caps, edit that line in
+`scripts/run-names-nightly.ps1` (no reinstall needed); to stop it, disable or unregister the task. The log is
+`out/names/nightly-YYYY-MM-DD.log`, the report `out/names/<run id>-haiku.html`. Progress:
+
+```sql
+select status, count(*) from product_names group by 1;
+select id, started_at, finished_at, batches, items, accepted, rejected, failed_batches, reported_cost_usd
+from name_runs order by id desc limit 10;
+```
+
 ## Public site (web/)
 
 The public Black Friday Guide: a React app plus a Cloudflare Worker (`web/worker`, Worker name `bf-guide`) that serves the app and a JSON API. Shoppers check whether a Black Friday "was" price is real against the EU rule (lowest price of the previous 30 days). Verdicts, shop ratings and cross-shop matches are built from this repo's price history by the nightly `site-build` job; the Worker only reads them. The "How we check" page explains the rules to visitors and shows the live thresholds from `GET /api/thresholds`.
