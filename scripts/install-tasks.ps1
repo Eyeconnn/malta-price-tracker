@@ -3,13 +3,16 @@
 #   MTP Hourly Local Rechecks hourly at :41 from 1 Nov 2026 (adaptive re-checks for local shops)
 #   MTP Shop Requests         every 15 minutes, hidden window: checks shops added on the admin Add shop page
 #                             (does not wake the PC; a run that is still going makes the next one skip)
+#   MTP Name Normaliser       every day 05:00 (after the scrape), hidden window, clean names for new or changed
+#                             groups, capped by batches and cost (does not wake the PC; at most 4 hours)
 # Run from the main checkout (the tasks run the scripts of the checkout this file is in):
 #   powershell -ExecutionPolicy Bypass -File scripts\install-tasks.ps1
-# Remove: Unregister-ScheduledTask -TaskName 'MTP Nightly Local Scrape','MTP Hourly Local Rechecks','MTP Shop Requests'
+# Remove: Unregister-ScheduledTask -TaskName 'MTP Nightly Local Scrape','MTP Hourly Local Rechecks','MTP Shop Requests','MTP Name Normaliser'
 $repo = Split-Path -Parent $PSScriptRoot
 $ps = "$env:SystemRoot\System32\WindowsPowerShell\v1.0\powershell.exe"
 
-function Install($name, $script, $trigger, $limit, [switch]$Hidden, [switch]$NoWake) {
+function Install($name, $script, $trigger, $limit, [switch]$Hidden, [switch]$NoWake,
+  $description = 'Malta price tracker (MTPIndex): local scrape of shops that refuse GitHub Actions IPs') {
   $window = if ($Hidden) { '-WindowStyle Hidden ' } else { '' }
   $action = New-ScheduledTaskAction -Execute $ps -Argument "-NoProfile $window-ExecutionPolicy Bypass -File `"$repo\scripts\$script`"" -WorkingDirectory $repo
   $options = @{
@@ -23,7 +26,7 @@ function Install($name, $script, $trigger, $limit, [switch]$Hidden, [switch]$NoW
   if ($Hidden) { $options.Hidden = $true }
   $settings = New-ScheduledTaskSettingsSet @options
   Register-ScheduledTask -TaskName $name -Action $action -Trigger $trigger -Settings $settings `
-    -Description 'Malta price tracker (MTPIndex): local scrape of shops that refuse GitHub Actions IPs' -Force | Out-Null
+    -Description $description -Force | Out-Null
   Get-ScheduledTask -TaskName $name | Select-Object TaskName, State
 }
 
@@ -35,4 +38,7 @@ Install 'MTP Hourly Local Rechecks' 'run-local-due.ps1' $hourly (New-TimeSpan -M
 # a check of up to 20 shops at the polite pace can take a while; overlapping runs are skipped (IgnoreNew,
 # and pnpm shop-requests also takes a database lock)
 $quarterly = New-ScheduledTaskTrigger -Once -At ((Get-Date).Date.AddMinutes(7)) -RepetitionInterval (New-TimeSpan -Minutes 15)
-Install 'MTP Shop Requests' 'run-shop-requests.ps1' $quarterly (New-TimeSpan -Hours 2) -Hidden -NoWake
+Install 'MTP Shop Requests' 'run-shop-requests.ps1' $quarterly (New-TimeSpan -Hours 2) -Hidden -NoWake -description 'Malta price tracker (MTPIndex): checks shops added on the admin Add shop page'
+
+Install 'MTP Name Normaliser' 'run-names-nightly.ps1' (New-ScheduledTaskTrigger -Daily -At '05:00') (New-TimeSpan -Hours 4) -Hidden -NoWake `
+  -description 'Malta price tracker (MTPIndex): nightly clean product names with Claude Code (capped by batches and cost)'

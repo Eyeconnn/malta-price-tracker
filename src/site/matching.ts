@@ -13,8 +13,8 @@ const IGNORE = new Set(
     'midnight starlight graphite space sage mist lavender cream rose violet teal mint coral obsidian porcelain ' +
     'smartphone phone mobile storage with and the for new edition version dual sim unlocked eu uk ver colour color').split(' '),
 );
-// Model words must agree between two titles.
-const MODEL = new Set('pro max plus mini ultra air lite se fe neo slim xl xs'.split(' '));
+// Model words must agree between two titles (also kept by the name normaliser, src/names/check.ts).
+export const MODEL = new Set('pro max plus mini ultra air lite se fe neo slim xl xs'.split(' '));
 
 /** Titles are cut to this many characters before tokenising, so a huge shop title cannot blow up the work. */
 const MAX_TITLE_CHARS = 300;
