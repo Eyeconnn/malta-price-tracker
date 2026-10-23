@@ -5,6 +5,7 @@ import { useMode } from '@/components/site/ModeProvider';
 import { PriceTag, type PriceTagProps } from '@/components/site/PriceTag';
 import { ShopBadge } from '@/components/site/ShopBadge';
 import type { Card } from '@/lib/api';
+import { listingPath } from '@/lib/links';
 import { formatDay, formatEuro } from '@/lib/format';
 import { cn } from '@/lib/utils';
 
@@ -145,7 +146,7 @@ export function DealCard({ card, className }: { card: Card; className?: string }
         <h3 id={titleId} className="line-clamp-2 text-[15px] leading-snug font-semibold">
           {/* the title link covers the card, so the whole card opens the product */}
           <Link
-            to={`/p/${card.id}`}
+            to={listingPath(card.id)}
             className="rounded-sm outline-none after:absolute after:inset-0 after:content-[''] hover:underline focus-visible:ring-[3px] focus-visible:ring-ring/50"
           >
             {card.title}

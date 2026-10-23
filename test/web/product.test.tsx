@@ -1,12 +1,12 @@
 // @vitest-environment jsdom
-// Product page (web/src/pages/Product.tsx) against a mocked read API, with the Lenovo case:
-// €709.00 until 21 Oct, €799.00 on 22 Oct while marked Black Friday (+€90.00, +12.7%).
+// Product page (web/src/pages/Product.tsx, design Part 3) against a mocked read API: one product, every seller.
+// Alpha has the Lenovo case: €709.00 until 21 Oct, €799.00 on 22 Oct while marked Black Friday (+€90.00, +12.7%).
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
-import { MemoryRouter } from 'react-router';
+import { MemoryRouter, useLocation } from 'react-router';
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { App } from '@/App';
 import { ModeProvider } from '@/components/site/ModeProvider';
-import type { HistoryObs, OtherShop, ProductResponse } from '@/lib/api';
+import type { HistoryObs, ProductPage, SellerView } from '@/lib/api';
 import { dayRows, lastDays } from '@/lib/history';
 
 /** matchMedia: (min-width: Npx) for a 1024px viewport, and prefers-reduced-motion when `reduced`. */
@@ -40,79 +40,102 @@ function daysFrom(start: string, n: number): string[] {
   return Array.from({ length: n }, (_, i) => new Date(t + i * 86_400_000).toISOString().slice(0, 10));
 }
 
-/** The 16GB variant (the verdict's): 23 Sep to 21 Oct at €709.00 (was €739.00, marked from 21 Oct), €799.00 on 22 Oct. */
+/** Alpha's Black variant (its verdict's): 23 Sep to 21 Oct at €709.00 (was €739.00, marked from 21 Oct), €799.00 on 22 Oct. */
 const lenovoHistory: HistoryObs[] = [
   ...daysFrom('2026-09-23', 29).map((d) => obs(REP, d, 70900, 73900, d === '2026-10-21')),
   obs(REP, '2026-10-22', 79900, 88900, true),
 ];
-/** The 8GB variant: €599.00 every day from 13 Oct, no was price. */
-const smallHistory = daysFrom('2026-10-13', 10).map((d) => obs(SMALL, d, 59900, null, false));
-const history = [...lenovoHistory, ...smallHistory].sort((a, b) => a.at.localeCompare(b.at) || a.productId - b.productId);
+/** Alpha's Grey variant: €759.00 every day from 13 Oct. */
+const smallHistory = daysFrom('2026-10-13', 10).map((d) => obs(SMALL, d, 75900, null, false));
+/** Beta: €699.00 for the last 5 days. */
+const betaHistory = daysFrom('2026-10-18', 5).map((d) => obs(80, d, 69900, null, false));
 
-function other(id: number, shop: string, priceCents: number | null, possible: boolean, extra: Partial<OtherShop> = {}): OtherShop {
+const alpha: SellerView = {
+  id: 1,
+  productId: REP,
+  shop: 'Alpha',
+  shopSlug: 'alpha',
+  title: 'LENOVO V15 G5 IRL 15.6" i5/16GB/512SSD',
+  url: 'https://alpha.example/v15',
+  priceCents: 79900,
+  wasCents: 88900,
+  inStock: true,
+  bf: true,
+  verdict: {
+    label: 'avoid',
+    reason: 'Price went from €709.00 on 21 Oct to €799.00 on 22 Oct while marked Black Friday.',
+    facts: {
+      low30: 70900,
+      usual: 70900,
+      claimedPct: -10.1,
+      realPct: 12.7,
+      raisedFrom: { price: 70900, at: '2026-10-21' },
+      raisedTo: { price: 79900, at: '2026-10-22' },
+      wasRaisedFrom: 73900,
+      historyDays: 30,
+      priceChanges: 1,
+      wasChanges: 1,
+      daysWorthBuying: 29,
+      judged: true,
+    },
+  },
+  cheaper: { id: 2, shop: 'Beta', shopSlug: 'beta', priceCents: 69900 },
+};
+const beta: SellerView = {
+  id: 2,
+  productId: 80,
+  shop: 'Beta',
+  shopSlug: 'beta',
+  title: 'Lenovo V15 G5 Laptop',
+  url: 'https://beta.example/p/v15',
+  priceCents: 69900,
+  wasCents: null,
+  inStock: true,
+  bf: false,
+  verdict: { label: 'none', reason: 'Not marked Black Friday and no discount claimed.', facts: null },
+  cheaper: null,
+};
+const gamma: SellerView = {
+  id: 3,
+  productId: 90,
+  shop: 'Gamma',
+  shopSlug: 'gamma',
+  title: 'Lenovo V15 <b>G5</b>',
+  url: 'javascript:alert(1)',
+  priceCents: null,
+  wasCents: null,
+  inStock: false,
+  bf: false,
+  verdict: { label: 'insufficient', reason: 'Price not shown by the shop.', facts: null },
+  cheaper: null,
+};
+
+function page(extra: Partial<ProductPage> = {}): ProductPage {
   return {
-    id,
-    title: `Lenovo V15 G5 at ${shop}`,
-    shop,
-    shopSlug: shop.toLowerCase(),
-    priceCents,
-    inStock: true,
-    verdict: 'none',
-    matchMethod: possible ? 'title' : 'gtin',
-    possible,
-    ...extra,
-  };
-}
-
-const scan = other(9, 'Scan', 69900, false);
-
-function lenovo(extra: Partial<ProductResponse> = {}): ProductResponse {
-  return {
+    key: 'c5',
     product: {
-      id: 7,
-      productId: REP,
-      title: 'Lenovo V15 G5 15.6" i5, 16GB, 512GB',
+      key: 'c5',
+      name: 'Lenovo V15 G5 IRL 15.6" Intel Core i5 Notebook',
+      specs: '512GB, 16GB RAM',
       brand: 'Lenovo',
-      url: 'https://atoz.example/p/7',
       imageUrl: null,
       category: 'laptops',
-      shopId: 1,
-      shop: 'AtoZ Electronics',
-      shopSlug: 'atoz',
-      priceCents: 79900,
-      wasCents: 88900,
-      inStock: true,
-      bf: true,
-      variantCount: 2,
-      canonicalId: 3,
-      matchMethod: 'gtin',
-      matchConfirmed: false,
+      attributes: [
+        { key: 'screen_in', label: 'Screen', value: '15.6"' },
+        { key: 'storage_gb', label: 'Storage', value: '512GB' },
+      ],
     },
+    sellers: [beta, alpha, gamma],
+    cheapestId: 2,
     variants: [
-      { id: REP, title: 'Lenovo V15 G5', variantTitle: '16GB', priceCents: 79900, inStock: true },
-      { id: SMALL, title: 'Lenovo V15 G5', variantTitle: '8GB', priceCents: 59900, inStock: true },
+      { id: REP, sellerId: 1, label: 'Black', priceCents: 79900, inStock: true, seenAt: '2026-10-22T18:00:00.000Z' },
+      { id: SMALL, sellerId: 1, label: 'Grey', priceCents: 75900, inStock: false, seenAt: '2026-10-22T18:00:00.000Z' },
+      { id: 80, sellerId: 2, label: 'black', priceCents: 69900, inStock: true, seenAt: '2026-10-22T18:00:00.000Z' },
+      { id: 90, sellerId: 3, label: null, priceCents: null, inStock: false, seenAt: null },
     ],
-    history,
-    verdict: {
-      label: 'avoid',
-      reason: 'Price went from €709.00 on 21 Oct to €799.00 on 22 Oct while marked Black Friday.',
-      facts: {
-        low30: 70900,
-        usual: 70900,
-        claimedPct: -10.1,
-        realPct: 12.7,
-        raisedFrom: { price: 70900, at: '2026-10-21' },
-        raisedTo: { price: 79900, at: '2026-10-22' },
-        wasRaisedFrom: 73900,
-        historyDays: 30,
-        priceChanges: 1,
-        wasChanges: 1,
-        daysWorthBuying: 29,
-        judged: true,
-      },
-    },
-    others: [scan, other(10, 'Intercomp', 74500, true)],
-    cheaper: scan,
+    history: [...lenovoHistory.map((h) => ({ ...h, sellerId: 1 })), ...smallHistory.map((h) => ({ ...h, sellerId: 1 })), ...betaHistory.map((h) => ({ ...h, sellerId: 2 }))].sort(
+      (a, b) => a.at.localeCompare(b.at) || a.productId - b.productId,
+    ),
     minHistoryDays: 14,
     raiseWindowDays: 14,
     ...extra,
@@ -121,14 +144,22 @@ function lenovo(extra: Partial<ProductResponse> = {}): ProductResponse {
 
 const json = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } });
 
-function mockProduct(answer: (id: string) => Response) {
+/** /api/product/:key answers with `answer`; /api/products/:id (the old listing page) with `listing`. */
+function mockApi(answer: (key: string) => Response, listing: (id: string) => Response = () => json({ error: 'not found' }, 404)) {
   const fn = vi.fn(async (input: RequestInfo | URL) => {
     const url = new URL(String(input), 'http://localhost');
-    const m = /^\/api\/products\/(.*)$/.exec(url.pathname);
-    return m ? answer(m[1]!) : json({ error: 'not found' }, 404);
+    const m = /^\/api\/product\/(.*)$/.exec(url.pathname);
+    if (m) return answer(m[1]!);
+    const old = /^\/api\/products\/(.*)$/.exec(url.pathname);
+    return old ? listing(old[1]!) : json({ error: 'not found' }, 404);
   });
   vi.stubGlobal('fetch', fn);
   return fn;
+}
+
+function Where() {
+  const loc = useLocation();
+  return <output data-testid="where">{loc.pathname + loc.search}</output>;
 }
 
 function renderAt(path: string) {
@@ -136,17 +167,22 @@ function renderAt(path: string) {
     <ModeProvider>
       <MemoryRouter initialEntries={[path]}>
         <App />
+        <Where />
       </MemoryRouter>
     </ModeProvider>,
   );
 }
 
-async function openLenovo(data: ProductResponse = lenovo()) {
-  mockProduct(() => json(data));
-  const view = renderAt('/p/7');
-  await screen.findByRole('heading', { level: 1, name: data.product.title });
+const TITLE = 'Lenovo V15 G5 IRL 15.6" Intel Core i5 Notebook · 512GB, 16GB RAM';
+
+async function openProduct(data: ProductPage = page()) {
+  mockApi(() => json(data));
+  const view = renderAt('/product/c5');
+  await screen.findByRole('heading', { level: 1, name: data.product.specs ? `${data.product.name} · ${data.product.specs}` : data.product.name });
   return view;
 }
+
+const sellerItem = (shop: string) => screen.getByRole('listitem', { name: shop });
 
 /** Recharts sizes itself with ResizeObserver, which jsdom lacks. */
 class FakeResizeObserver {
@@ -204,585 +240,411 @@ describe('day rows', () => {
   });
 });
 
+
 describe('product page, Simple', () => {
-  it('shows the title as the one h1, the raised tag with €709.00 crossed out and the reason sentence', async () => {
-    await openLenovo();
-    expect(screen.getAllByRole('heading', { level: 1 })).toHaveLength(1);
-    const tag = screen.getByRole('img', { name: 'Raised from €709.00 to €799.00' });
-    expect(tag.querySelector('s')?.textContent).toBe('€709.00');
-    expect(screen.getByText('Price went from €709.00 on 21 Oct to €799.00 on 22 Oct while marked Black Friday.')).toBeTruthy();
+  it('shows the clean name and specs as the one h1, the brand, and every seller in the order the API gives', async () => {
+    await openProduct();
+    expect(screen.getAllByRole('heading', { level: 1 }).map((h) => h.textContent)).toEqual([TITLE]);
+    expect(screen.getByText('Lenovo', { selector: 'p' })).toBeTruthy();
+    const list = screen.getByRole('list', { name: 'Shops selling this product' });
+    expect(within(list).getAllByRole('heading', { level: 3 }).map((h) => h.textContent)).toEqual(['Beta', 'Alpha', 'Gamma']);
+    expect(screen.getByText('from €699.00 at 3 shops')).toBeTruthy();
   });
 
-  it('makes a Black Friday price rise stand out: the alarm banner and the earlier price', async () => {
-    await openLenovo();
-    expect(screen.getByText('Marked Black Friday, price raised')).toBeTruthy();
-    expect(screen.getByText('Price on 21 Oct: €709.00')).toBeTruthy();
+  it('highlights the cheapest seller', async () => {
+    await openProduct();
+    expect(sellerItem('Beta').getAttribute('data-cheapest')).toBe('true');
+    expect(within(sellerItem('Beta')).getByText('Cheapest')).toBeTruthy();
+    expect(sellerItem('Alpha').getAttribute('data-cheapest')).toBeNull();
+    expect(within(sellerItem('Alpha')).queryByText('Cheapest')).toBeNull();
   });
 
-  it('shows the three numbers: lowest 30 days, usual price and real change', async () => {
-    await openLenovo();
-    const numbers = screen.getByRole('list', { name: 'Price facts' });
-    expect(within(numbers).getByText('Lowest 30 days').nextElementSibling?.textContent).toBe('€709.00');
-    expect(within(numbers).getByText('Usual price').nextElementSibling?.textContent).toBe('€709.00');
-    expect(within(numbers).getByText('Real change').nextElementSibling?.textContent).toBe('+12.7%');
+  it("keeps each seller's own verdict: Alpha's raised tag, alarm and earlier price, Beta's sentence", async () => {
+    await openProduct();
+    const a = sellerItem('Alpha');
+    expect(within(a).getByRole('img', { name: 'Raised from €709.00 to €799.00' })).toBeTruthy();
+    expect(within(a).getByText('Marked Black Friday, price raised')).toBeTruthy();
+    expect(within(a).getByText('Price on 21 Oct: €709.00')).toBeTruthy();
+    expect(within(a).getByText(alpha.verdict.reason!)).toBeTruthy();
+    expect(a.getAttribute('data-verdict')).toBe('avoid');
+    const b = sellerItem('Beta');
+    expect(within(b).queryByRole('img', { name: /Raised|Real deal/ })).toBeNull();
+    expect(within(b).getByText(beta.verdict.reason!)).toBeTruthy();
+    expect(within(b).queryByText('Marked Black Friday, price raised')).toBeNull();
   });
 
-  it('shows the CheaperBox linking to the cheaper shop when cheaper is set', async () => {
-    await openLenovo();
-    const link = screen.getByRole('link', { name: /Cheaper at Scan, €699\.00/ });
-    expect(link.getAttribute('href')).toBe('/p/9');
-    expect(link.textContent).toMatch(/€100\.00 less/);
+  it("shows each seller's price and was price, and never €0.00", async () => {
+    await openProduct();
+    // the price line (the raised tag repeats the price in its drawing)
+    expect(within(sellerItem('Alpha')).getAllByText('€799.00').length).toBeGreaterThan(0);
+    expect(within(sellerItem('Alpha')).getByText('€889.00')).toBeTruthy();
+    const g = sellerItem('Gamma');
+    expect(within(g).getByText('Price not shown by the shop')).toBeTruthy();
+    expect(within(g).getByText('Out of stock')).toBeTruthy();
+    expect(document.body.textContent).not.toContain('€0.00');
   });
 
-  it('has no CheaperBox when cheaper is null', async () => {
-    await openLenovo(lenovo({ cheaper: null }));
-    expect(screen.queryByText(/Cheaper at/)).toBeNull();
+  it('names the cheaper seller the API decided (R36), and nothing more', async () => {
+    await openProduct();
+    expect(sellerItem('Alpha').textContent).toContain('Cheaper at Beta, €699.00');
+    expect(within(sellerItem('Beta')).queryByText(/Cheaper at/)).toBeNull();
   });
 
-  it('never shows a CheaperBox for a title-only match, even if the API sent one', async () => {
-    await openLenovo(lenovo({ cheaper: other(10, 'Intercomp', 50000, true) }));
-    expect(screen.queryByText(/Cheaper at/)).toBeNull();
+  it('links to each shop page in a new tab, only for web addresses', async () => {
+    await openProduct();
+    const link = within(sellerItem('Alpha')).getByRole('link', { name: /^View on Alpha/ });
+    expect(link.textContent).toContain('(opens in a new tab)');
+    expect(link.getAttribute('href')).toBe('https://alpha.example/v15');
+    expect(link.getAttribute('target')).toBe('_blank');
+    expect(link.getAttribute('rel')).toContain('noopener');
+    expect(within(sellerItem('Gamma')).queryByRole('link', { name: /View on/ })).toBeNull();
   });
 
-  it('lists only exactly matched other shops, never a title-only match', async () => {
-    await openLenovo();
-    const list = screen.getByRole('region', { name: 'Other shops' });
-    expect(within(list).getByRole('link', { name: /Scan/ }).getAttribute('href')).toBe('/p/9');
-    expect(within(list).queryByText(/Intercomp/)).toBeNull();
-    expect(screen.queryByText(/possibly the same product/i)).toBeNull();
-  });
-
-  it('shows no chart, day table or numbers panel', async () => {
-    await openLenovo();
-    expect(screen.queryByRole('table', { name: /Price by day/ })).toBeNull();
-    expect(screen.queryByTestId('price-chart')).toBeNull();
-    expect(screen.queryByRole('radiogroup', { name: 'Chart range' })).toBeNull();
-  });
-
-  it('has a "Something wrong?" button that opens the report form for this product', async () => {
-    await openLenovo();
-    const button = screen.getByRole('button', { name: 'Something wrong?' });
-    // the report target (Ruling R20): the verdict's variant, products.id
+  it("has a \"Something wrong?\" button per seller for that seller's listing (R20)", async () => {
+    await openProduct();
+    const button = within(sellerItem('Alpha')).getByRole('button', { name: /^Something wrong\?/ });
     expect(button.getAttribute('data-report-target')).toBe(`product:${REP}`);
+    expect(within(sellerItem('Beta')).getByRole('button', { name: /^Something wrong\?/ }).getAttribute('data-report-target')).toBe('product:80');
     fireEvent.click(button);
     const dialog = await screen.findByRole('dialog');
     expect(within(dialog).getByRole('heading', { name: 'Something wrong?' })).toBeTruthy();
-    expect(within(dialog).getByRole('radiogroup', { name: 'What is wrong?' })).toBeTruthy();
-    expect(within(dialog).getByRole('button', { name: 'Send report' })).toBeTruthy();
-  });
-
-  it('has no report button when the product has no variant to report (productId null)', async () => {
-    const data = lenovo();
-    data.product = { ...data.product, productId: null };
-    await openLenovo(data);
-    expect(screen.queryByRole('button', { name: 'Something wrong?' })).toBeNull();
-  });
-
-  it('says a recent price change for a product that is not an avoid', async () => {
-    const data = lenovo({ cheaper: null });
-    data.verdict = { ...data.verdict, label: 'none', reason: 'Not marked Black Friday and no discount claimed.' };
-    await openLenovo(data);
-    expect(screen.getByText('Price changed from €709.00 to €799.00 on 22 Oct, while marked Black Friday')).toBeTruthy();
-  });
-
-  it('names a recent change only within the stored raiseWindowDays of the latest day', async () => {
-    const later = [...history, obs(REP, '2026-10-23', 79900, 88900, true)];
-    const none = (raiseWindowDays: number) => {
-      const data = lenovo({ cheaper: null, history: later, raiseWindowDays });
-      data.verdict = { ...data.verdict, label: 'none', reason: 'Not marked Black Friday and no discount claimed.' };
-      return data;
-    };
-    await openLenovo(none(2));
-    expect(screen.getByText(/Price changed from €709.00 to €799.00 on 22 Oct/)).toBeTruthy();
-    cleanup();
-    await openLenovo(none(1));
-    expect(screen.queryByText(/Price changed/)).toBeNull();
-  });
-
-  it('says plainly that there is not enough history yet, with the stored minimum', async () => {
-    const data = lenovo({ cheaper: null, minHistoryDays: 21, history: lenovoHistory.slice(-5) });
-    data.verdict = { label: 'insufficient', reason: 'Not enough history yet: 5 days tracked, 21 needed.', facts: { ...data.verdict.facts!, historyDays: 5 } };
-    await openLenovo(data);
-    expect(screen.getByText('Not enough price history yet')).toBeTruthy();
-    expect(screen.getByText(/We judge a deal after 21 days of prices\. We have 5 days for this product so far\./)).toBeTruthy();
-    expect(screen.queryByRole('list', { name: 'Price facts' })).toBeNull();
-    expect(screen.queryByRole('img', { name: /Raised/ })).toBeNull();
-  });
-
-  it('shows "Price not shown by the shop" for a product without a price, never €0.00', async () => {
-    const data = lenovo({ cheaper: null });
-    data.product = { ...data.product, priceCents: null, wasCents: null };
-    data.verdict = { label: 'insufficient', reason: 'Price not shown by the shop.', facts: null };
-    const { container } = await openLenovo(data);
-    expect(screen.getAllByText(/Price not shown by the shop/).length).toBeGreaterThan(0);
-    expect(container.textContent).not.toMatch(/€0\.00/);
-  });
-
-  it('links to the product on the shop website, opening a new tab', async () => {
-    await openLenovo();
-    const link = screen.getByRole('link', { name: /^View on AtoZ Electronics\s*\(opens in a new tab\)$/ });
-    expect(link.getAttribute('href')).toBe('https://atoz.example/p/7');
-    expect(link.getAttribute('target')).toBe('_blank');
-    expect(link.getAttribute('rel')).toBe('noopener noreferrer nofollow');
-  });
-
-  it('shows no shop link when the address is missing or not a web address', async () => {
-    for (const url of [null, 'javascript:alert(1)', 'ftp://atoz.example/p/7', 'not a url', 'https://user:secret@atoz.example/p/7', 'https://user@atoz.example/p/7']) {
-      const data = lenovo();
-      data.product = { ...data.product, url };
-      await openLenovo(data);
-      expect(screen.queryByRole('link', { name: /View on/ })).toBeNull();
-      cleanup();
-    }
+    expect(within(dialog).getByText(`${alpha.title} at Alpha`)).toBeTruthy();
   });
 
   it('renders shop text as text', async () => {
-    const data = lenovo({ cheaper: null });
-    data.product = { ...data.product, title: '<img src=x onerror=alert(1)> Laptop', shop: '<b>Evil</b>' };
-    const { container } = await openLenovo(data);
-    expect(screen.getAllByText(/<b>Evil<\/b>/).length).toBeGreaterThan(0);
-    expect(container.querySelector('b')).toBeNull();
-    expect(container.querySelector('img[src="x"]')).toBeNull();
+    await openProduct();
+    const g = sellerItem('Gamma');
+    expect(g.querySelector('b')).toBeNull();
+    expect(within(g).getByText('Lenovo V15 <b>G5</b>')).toBeTruthy();
+  });
+
+  it('shows no chart, day table or attributes', async () => {
+    await openProduct();
+    expect(screen.queryByRole('table', { name: /Price by day/ })).toBeNull();
+    expect(screen.queryByTestId('sellers-chart')).toBeNull();
+    expect(screen.queryByRole('region', { name: 'Product details' })).toBeNull();
   });
 });
 
-describe('product page, Simple, variants', () => {
-  const picker = () => screen.getByRole('radiogroup', { name: 'Variant' });
-  const choose = (name: RegExp) => fireEvent.click(within(picker()).getByRole('radio', { name }));
-  const checkLine = 'Our deal check is for 16GB. Choose it to see the check.';
-
-  it('shows the variant radiogroup for a two-variant product, the verdict variant chosen, and not for one', async () => {
-    await openLenovo();
-    expect(within(picker()).getByRole('radio', { name: /16GB/ }).getAttribute('aria-checked')).toBe('true');
-    expect(within(picker()).getByRole('radio', { name: /8GB/ }).getAttribute('aria-checked')).toBe('false');
-    expect(screen.queryByText(/Our deal check is for/)).toBeNull();
+describe('product page, variant options', () => {
+  it('offers the options of every seller once (case aside), and none for a product with one option', async () => {
+    await openProduct();
+    const group = screen.getByRole('radiogroup', { name: 'Option' });
+    expect(within(group).getAllByRole('radio').map((r) => r.textContent)).toEqual(['All', 'Black', 'Grey']);
     cleanup();
-    const one = lenovo();
-    one.variants = one.variants.slice(0, 1);
-    await openLenovo(one);
-    expect(screen.queryByRole('radiogroup', { name: 'Variant' })).toBeNull();
+    await openProduct(page({ variants: [{ id: 80, sellerId: 2, label: 'Black', priceCents: 69900, inStock: true, seenAt: null }] }));
+    expect(screen.queryByRole('radiogroup', { name: 'Option' })).toBeNull();
+    // the one option is named, so a shop that lists each colour on its own shows which one this is
+    expect(screen.getByText('Option: Black')).toBeTruthy();
   });
 
-  it('puts the picker inside the product card, before the verdict sentence', async () => {
-    await openLenovo();
-    const article = screen.getByRole('article');
-    expect(within(article).getByRole('radiogroup', { name: 'Variant' })).toBeTruthy();
-    const order = picker().compareDocumentPosition(screen.getByText(/Price went from/));
-    expect(order & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  it("choosing an option lists the sellers that have it, at that option's price", async () => {
+    await openProduct();
+    fireEvent.click(within(screen.getByRole('radiogroup', { name: 'Option' })).getByRole('radio', { name: 'Grey' }));
+    const list = screen.getByRole('list', { name: 'Shops selling this product' });
+    expect(within(list).getAllByRole('heading', { level: 3 }).map((h) => h.textContent)).toEqual(['Alpha']);
+    const a = sellerItem('Alpha');
+    expect(within(a).getByText('€759.00')).toBeTruthy();
+    expect(within(a).getByText('Out of stock')).toBeTruthy();
+    // the deal check is about another option of this listing: no tag, no alarm
+    expect(within(a).queryByRole('img', { name: /Raised/ })).toBeNull();
+    expect(within(a).getByText('Our deal check at Alpha is for Black.')).toBeTruthy();
+    expect(screen.getByText('Shops that do not name this option are left out.')).toBeTruthy();
   });
 
-  it("shows the 8GB variant's own price and lowest 30 days, and hides the verdict facts", async () => {
-    await openLenovo();
-    choose(/8GB/);
-    const article = screen.getByRole('article');
-    expect(within(article).getAllByText('€599.00').length).toBeGreaterThan(0);
-    // €799.00 stays only on the 16GB picker button
-    expect(within(article).getAllByText('€799.00')).toHaveLength(1);
-    expect(within(picker()).getByText('€799.00')).toBeTruthy();
-    expect(within(article).getByText('Lowest price in the last 30 days').parentElement?.textContent).toMatch(/€599\.00/);
-    // nothing the verdict computed: tag, reason, alarm, the three numbers, the cheaper box
-    expect(screen.queryByRole('img', { name: /Raised/ })).toBeNull();
-    expect(screen.queryByText(/Price went from/)).toBeNull();
-    expect(screen.queryByText('Marked Black Friday, price raised')).toBeNull();
-    expect(screen.queryByText(/^Price on 21 Oct/)).toBeNull();
-    expect(article.getAttribute('data-alarm')).toBeNull();
-    expect(screen.queryByRole('list', { name: 'Price facts' })).toBeNull();
-    expect(screen.queryByText('Usual price')).toBeNull();
-    expect(screen.queryByText('Real change')).toBeNull();
-    expect(screen.queryByText(/Cheaper at/)).toBeNull();
-    // the shop link and the other shops stay
-    expect(screen.getByRole('link', { name: /^View on AtoZ Electronics/ })).toBeTruthy();
-    // the other shops' prices are for the verdict's variant, and the heading says so
-    expect(screen.getByRole('region', { name: 'Other shops (for 16GB)' })).toBeTruthy();
-    expect(screen.queryByRole('region', { name: 'Other shops' })).toBeNull();
-  });
-
-  it('says the deal check is for the verdict variant, with a button that switches back to everything as before', async () => {
-    await openLenovo();
-    choose(/8GB/);
-    expect(screen.getByText(checkLine)).toBeTruthy();
-    fireEvent.click(screen.getByRole('button', { name: 'Choose 16GB' }));
-    expect(within(picker()).getByRole('radio', { name: /16GB/ }).getAttribute('aria-checked')).toBe('true');
-    expect(screen.queryByText(checkLine)).toBeNull();
-    expect(screen.getByRole('img', { name: 'Raised from €709.00 to €799.00' })).toBeTruthy();
-    expect(screen.getByText('Marked Black Friday, price raised')).toBeTruthy();
-    expect(screen.getByText(/Price went from/)).toBeTruthy();
-    expect(within(screen.getByRole('list', { name: 'Price facts' })).getByText('Real change').nextElementSibling?.textContent).toBe('+12.7%');
-    expect(screen.queryByText('Lowest price in the last 30 days')).toBeNull();
-  });
-
-  it("names the variant's own recent price change, and no change when the price is steady", async () => {
-    const data = lenovo();
-    data.history = [...history, obs(SMALL, '2026-10-12', 64900, null, false)].sort((a, b) => a.at.localeCompare(b.at) || a.productId - b.productId);
-    await openLenovo(data);
-    choose(/8GB/);
-    expect(screen.getByText('Price changed from €649.00 to €599.00 on 13 Oct')).toBeTruthy();
-    cleanup();
-    await openLenovo(lenovo({ raiseWindowDays: 14 }));
-    choose(/8GB/);
-    expect(screen.queryByText(/Price changed/)).toBeNull();
-  });
-
-  it("shows the variant's was price and out-of-stock state from its latest history point", async () => {
-    const data = lenovo();
-    data.history = data.history.map((h) => (h.productId === SMALL && h.at.startsWith('2026-10-22') ? { ...h, was: 69900, inStock: false } : h));
-    data.variants = [data.variants[0]!, { ...data.variants[1]!, inStock: true }];
-    await openLenovo(data);
-    choose(/8GB/);
-    const article = screen.getByRole('article');
-    expect(within(article).getByText('€699.00').tagName).toBe('S');
-    expect(within(article).getByText('Out of stock')).toBeTruthy();
-  });
-
-  it('falls back to the variant row when it has no history', async () => {
-    const data = lenovo();
-    data.history = lenovoHistory;
-    await openLenovo(data);
-    choose(/8GB/);
-    const article = screen.getByRole('article');
-    expect(within(article).getAllByText('€599.00').length).toBeGreaterThan(0);
-    expect(within(article).getByText('Lowest price in the last 30 days').parentElement?.textContent).toMatch(/Not known yet/);
-  });
-
-  it('shows "Price not shown by the shop" for a variant without a price, never €0.00', async () => {
-    const data = lenovo();
-    data.history = data.history.map((h) => (h.productId === SMALL ? { ...h, price: null } : h));
-    data.variants = [data.variants[0]!, { ...data.variants[1]!, priceCents: null }];
-    const { container } = await openLenovo(data);
-    choose(/8GB/);
-    const article = screen.getByRole('article');
-    expect(within(article).getAllByText('Price not shown by the shop').length).toBeGreaterThan(0);
-    expect(within(article).getByText('Lowest price in the last 30 days').parentElement?.textContent).toMatch(/Not known yet/);
-    expect(container.textContent).not.toMatch(/€0\.00/);
-  });
-
-  it('announces the new price politely when the variant changes', async () => {
-    await openLenovo();
-    const live = screen.getByRole('status');
-    expect(live.getAttribute('aria-live')).toBe('polite');
-    expect(live.textContent).toBe('');
-    choose(/8GB/);
-    expect(live.textContent).toBe('8GB: €599.00. Deal check not shown for this variant.');
-    fireEvent.click(screen.getByRole('button', { name: 'Choose 16GB' }));
-    expect(live.textContent).toBe('16GB: €799.00. Deal check shown.');
-  });
-
-  it('keeps the chosen variant when switching to Advanced and back', async () => {
-    await import('@/components/site/PriceChart');
-    await openLenovo();
-    choose(/8GB/);
-    fireEvent.click(screen.getByRole('switch', { name: 'Advanced mode' }));
-    const advanced = await screen.findByRole('radiogroup', { name: 'Variant' });
-    expect(within(advanced).getByRole('radio', { name: /8GB/ }).getAttribute('aria-checked')).toBe('true');
-    const table = await screen.findByRole('table', { name: /Price by day/ });
-    await waitFor(() => expect(within(table).getAllByText('€599.00')).toHaveLength(10));
-    fireEvent.click(screen.getByRole('switch', { name: 'Advanced mode' }));
-    await waitFor(() => expect(screen.queryByTestId('price-chart')).toBeNull());
-    expect(within(picker()).getByRole('radio', { name: /8GB/ }).getAttribute('aria-checked')).toBe('true');
-    expect(screen.getByText(checkLine)).toBeTruthy();
-  }, 30_000);
-});
-
-describe("product page, Simple, a variant's facts from every reading", () => {
-  const choose8 = () => fireEvent.click(within(screen.getByRole('radiogroup', { name: 'Variant' })).getByRole('radio', { name: /8GB/ }));
-  const withSmall = (extra: HistoryObs[], keep: (h: HistoryObs) => boolean = () => true) => {
-    const data = lenovo();
-    data.history = [...lenovoHistory, ...smallHistory.filter(keep), ...extra].sort((a, b) => a.at.localeCompare(b.at) || a.productId - b.productId);
-    return data;
-  };
-  const lowest = () => screen.getByText('Lowest price in the last 30 days').parentElement?.textContent;
-
-  it('takes the lowest of every reading, not the last of each day', async () => {
-    // 22 Oct: €499.00 in the morning, €599.00 in the evening
-    await openLenovo(withSmall([{ ...obs(SMALL, '2026-10-22', 49900, null, false), at: '2026-10-22T06:00:00.000Z' }]));
-    choose8();
-    expect(lowest()).toMatch(/€499\.00/);
-    expect(within(screen.getByRole('article')).getAllByText('€599.00').length).toBeGreaterThan(0);
-  });
-
-  it('counts an earlier reading on a day whose last reading hid the price', async () => {
-    const data = withSmall([{ ...obs(SMALL, '2026-10-22', 54900, null, false), at: '2026-10-22T06:00:00.000Z' }], (h) => !h.at.startsWith('2026-10-22'));
-    data.history.push(obs(SMALL, '2026-10-22', null, null, false));
-    const { container } = await openLenovo(data);
-    choose8();
-    expect(lowest()).toMatch(/€549\.00/);
-    expect(within(screen.getByRole('article')).getAllByText('Price not shown by the shop').length).toBeGreaterThan(0);
-    expect(container.textContent).not.toMatch(/€0\.00/);
-  });
-
-  it('counts the 30th Malta day back (24 Sep) and not the 31st (23 Sep), counting from today', async () => {
-    await openLenovo(withSmall([obs(SMALL, '2026-09-24', 39900, null, false)]));
-    choose8();
-    expect(lowest()).toMatch(/€399\.00/);
-    cleanup();
-    await openLenovo(withSmall([obs(SMALL, '2026-09-23', 39900, null, false)]));
-    choose8();
-    expect(lowest()).toMatch(/€599\.00/);
-  });
-
-  it('says "Not known yet" when no reading falls in the last 30 days', async () => {
-    await openLenovo(withSmall([], () => false));
-    choose8();
-    expect(lowest()).toMatch(/Not known yet/);
-  });
-
-  it('says when a variant was last seen instead of showing an old price as current', async () => {
-    const data = lenovo();
-    data.history = [...lenovoHistory, ...daysFrom('2026-09-01', 10).map((d) => obs(SMALL, d, 59900, 64900, true))];
-    await openLenovo(data);
-    choose8();
-    const article = screen.getByRole('article');
-    expect(within(article).getByText('Last seen on 10 Sep')).toBeTruthy();
-    expect(within(article).queryByText('Black Friday')).toBeNull();
-    expect(lowest()).toMatch(/Not known yet/);
-    expect(screen.getByRole('status').textContent).toMatch(/^8GB: last seen on 10 Sep/);
-    // neither the price line nor the picker button shows the old €599.00 as current
-    expect(within(article).queryByText('€599.00')).toBeNull();
-    expect(within(within(article).getByRole('radiogroup', { name: 'Variant' })).getByRole('radio', { name: /8GB/ }).textContent).toMatch(/Last seen 10 Sep/);
-  });
-
-  it("prints a variant button's price from its own newest reading, not the variant row", async () => {
-    const data = lenovo();
-    // the 8GB row says €599.00, but its newest reading hid the price; the 16GB row has no readings at all
-    data.history = [...smallHistory.slice(0, -1), obs(SMALL, '2026-10-22', null, null, false)];
-    await openLenovo(data);
-    const picker = within(screen.getByRole('radiogroup', { name: 'Variant' }));
-    expect(picker.getByRole('radio', { name: /8GB/ }).textContent).toMatch(/Price not shown by the shop/);
-    expect(picker.getByRole('radio', { name: /8GB/ }).textContent).not.toMatch(/€599/);
-    expect(picker.getByRole('radio', { name: /16GB/ }).textContent).toMatch(/Price not shown by the shop/);
-    expect(picker.getByRole('radio', { name: /16GB/ }).textContent).not.toMatch(/€799/);
-  });
-
-  it("counts a price change from today, not from the variant's latest day", async () => {
-    // 10 Oct is the latest day: 9 days after the rise on 1 Oct, but 22 days before today
-    const data = lenovo({ raiseWindowDays: 14 });
-    data.history = [
-      ...lenovoHistory,
-      ...daysFrom('2026-09-20', 11).map((d) => obs(SMALL, d, 64900, null, false)),
-      ...daysFrom('2026-10-01', 10).map((d) => obs(SMALL, d, 59900, null, false)),
-    ];
-    await openLenovo(data);
-    choose8();
-    expect(screen.queryByText(/Price changed/)).toBeNull();
-    cleanup();
-    await openLenovo(lenovo({ raiseWindowDays: 30, history: data.history }));
-    choose8();
-    expect(screen.getByText('Price changed from €649.00 to €599.00 on 1 Oct')).toBeTruthy();
-  });
-});
-
-describe('product page, Simple, verdicts without a variant to hide', () => {
-  const choose8 = () => fireEvent.click(within(screen.getByRole('radiogroup', { name: 'Variant' })).getByRole('radio', { name: /8GB/ }));
-
-  it('keeps the whole card when the product has no verdict variant (productId null)', async () => {
-    const data = lenovo();
-    data.product = { ...data.product, productId: null };
-    await openLenovo(data);
-    choose8();
-    expect(screen.getByText(/Price went from/)).toBeTruthy();
-    expect(screen.queryByText(/Our deal check is for/)).toBeNull();
-    expect(screen.queryByText('Lowest price in the last 30 days')).toBeNull();
-  });
-
-  it('keeps the whole card when the verdict variant is not among the variants', async () => {
-    const data = lenovo();
-    data.variants = [data.variants[1]!, { id: 72, title: 'Lenovo V15 G5', variantTitle: '32GB', priceCents: 99900, inStock: true }];
-    await openLenovo(data);
-    choose8();
-    expect(screen.getByText(/Price went from/)).toBeTruthy();
-    expect(screen.getByRole('list', { name: 'Price facts' })).toBeTruthy();
-    expect(screen.queryByText(/Our deal check is for/)).toBeNull();
-  });
-});
-
-describe('product page, card details', () => {
-  it('reserves room for the tag only while the tag is shown', async () => {
-    await openLenovo();
-    const article = screen.getByRole('article');
-    expect(article.querySelector('.pr-24')).not.toBeNull();
-    fireEvent.click(within(screen.getByRole('radiogroup', { name: 'Variant' })).getByRole('radio', { name: /8GB/ }));
-    expect(article.querySelector('.pr-24')).toBeNull();
-  });
-
-  it('says out of stock for the verdict variant too', async () => {
-    const data = lenovo();
-    data.product = { ...data.product, inStock: false };
-    await openLenovo(data);
-    expect(within(screen.getByRole('article')).getByText('Out of stock')).toBeTruthy();
+  it('choosing Black keeps the verdict of the seller whose checked option it is', async () => {
+    await openProduct();
+    fireEvent.click(within(screen.getByRole('radiogroup', { name: 'Option' })).getByRole('radio', { name: 'Black' }));
+    const list = screen.getByRole('list', { name: 'Shops selling this product' });
+    expect(within(list).getAllByRole('heading', { level: 3 }).map((h) => h.textContent)).toEqual(['Beta', 'Alpha']);
+    expect(within(sellerItem('Alpha')).getByRole('img', { name: 'Raised from €709.00 to €799.00' })).toBeTruthy();
+    fireEvent.click(within(screen.getByRole('radiogroup', { name: 'Option' })).getByRole('radio', { name: 'All' }));
+    expect(within(list).getAllByRole('heading', { level: 3 })).toHaveLength(3);
   });
 });
 
 describe('product page, Advanced', () => {
   // the first import of Recharts is slow in the test runner; load it once up front
   beforeAll(async () => {
-    await import('@/components/site/PriceChart');
+    await import('@/components/site/SellersChart');
   }, 30_000);
   beforeEach(() => localStorage.setItem('mode', 'advanced'));
 
-  async function dayTable() {
-    return screen.findByRole('table', { name: /Price by day/ });
-  }
+  it('draws one line per seller with prices, each its verdict variant, named in a legend', async () => {
+    await openProduct();
+    const chart = await screen.findByTestId('sellers-chart');
+    expect(chart.getAttribute('data-lines')).toBe('2');
+    expect(chart.getAttribute('role')).toBe('img');
+    const legend = screen.getByRole('list', { name: 'Chart lines' });
+    expect(within(legend).getAllByRole('listitem').map((l) => l.textContent)).toEqual(['Beta (black)', 'Alpha (Black)']);
+  });
 
-  it('DayTable row for 22 Oct shows +€90.00 and +12.7%, marked Black Friday, not worth buying', async () => {
-    await openLenovo();
-    const row = within(await dayTable()).getByRole('row', { name: /22 Oct/ });
+  it('never mixes variants: choosing Grey draws Alpha from the Grey readings', async () => {
+    await openProduct();
+    fireEvent.click(within(screen.getByRole('radiogroup', { name: 'Option' })).getByRole('radio', { name: 'Grey' }));
+    const legend = await screen.findByRole('list', { name: 'Chart lines' });
+    expect(within(legend).getAllByRole('listitem').map((l) => l.textContent)).toEqual(['Alpha (Grey)']);
+    // the numbers are about the checked option, and say so
+    expect(screen.getByRole('region', { name: 'Numbers at Alpha, for Black' })).toBeTruthy();
+  });
+
+  it("names each line by its seller and option, also for a shop's colours listed on their own", async () => {
+    const blue: SellerView = { ...beta, id: 4, productId: 40, shop: 'AtoZ', shopSlug: 'atoz' };
+    const black: SellerView = { ...beta, id: 5, productId: 50, shop: 'AtoZ', shopSlug: 'atoz' };
+    await openProduct(
+      page({
+        sellers: [blue, black],
+        cheapestId: 4,
+        variants: [
+          { id: 40, sellerId: 4, label: 'Blue', priceCents: 69900, inStock: true, seenAt: null },
+          { id: 50, sellerId: 5, label: 'Black', priceCents: 69900, inStock: true, seenAt: null },
+        ],
+        history: [...betaHistory.map((h) => ({ ...h, productId: 40, sellerId: 4 })), ...betaHistory.map((h) => ({ ...h, productId: 50, sellerId: 5 }))],
+      }),
+    );
+    const legend = await screen.findByRole('list', { name: 'Chart lines' });
+    expect(within(legend).getAllByRole('listitem').map((l) => l.textContent)).toEqual(['AtoZ (Blue)', 'AtoZ (Black)']);
+  });
+
+  it("shows the day table of the chosen seller: the cheapest first, another by choice, with R44's column", async () => {
+    await openProduct();
+    let table = await screen.findByRole('table', { name: /Price by day/ });
+    expect(within(table).getAllByRole('row')).toHaveLength(6);
+    // Beta's verdict is none: no worth-buying column (R44)
+    expect(within(table).queryByRole('columnheader', { name: 'Worth buying' })).toBeNull();
+    fireEvent.click(within(screen.getByRole('radiogroup', { name: 'Shop for the price by day' })).getByRole('radio', { name: 'Alpha' }));
+    table = await screen.findByRole('table', { name: /Price by day/ });
+    const row = within(table).getByRole('row', { name: /22 Oct/ });
     expect(within(row).getByText('+€90.00')).toBeTruthy();
     expect(within(row).getByText('+12.7%')).toBeTruthy();
-    expect(within(row).getByText('€799.00')).toBeTruthy();
-    expect(within(row).getByText('€889.00')).toBeTruthy();
     expect(within(row).getByText('Marked')).toBeTruthy();
     expect(within(row).getByText('No')).toBeTruthy();
-    const before = within(await dayTable()).getByRole('row', { name: /21 Oct/ });
-    expect(within(before).getByText('No change')).toBeTruthy();
-    expect(within(before).getByText('Yes')).toBeTruthy();
   });
 
-  it('switching to 7 days keeps only the last 7 days in the chart data and the table', async () => {
-    await openLenovo();
-    const chart = await screen.findByTestId('price-chart');
-    expect(chart.getAttribute('data-points')).toBe('30');
+  it('switching to 7 days keeps only the last 7 days in the table', async () => {
+    await openProduct();
+    fireEvent.click(within(screen.getByRole('radiogroup', { name: 'Shop for the price by day' })).getByRole('radio', { name: 'Alpha' }));
     fireEvent.click(within(screen.getByRole('radiogroup', { name: 'Chart range' })).getByRole('radio', { name: '7 days' }));
-    await waitFor(() => expect(screen.getByTestId('price-chart').getAttribute('data-points')).toBe('7'));
-    const rows = within(await dayTable()).getAllByRole('row').slice(1);
+    const rows = within(await screen.findByRole('table', { name: /Price by day/ })).getAllByRole('row').slice(1);
     expect(rows).toHaveLength(7);
     expect(rows[0]!.textContent).toMatch(/22 Oct/);
-    expect(rows[6]!.textContent).toMatch(/16 Oct/);
   });
 
-  it('describes the chart by the day table (its text alternative)', async () => {
-    await openLenovo();
-    const chart = await screen.findByTestId('price-chart');
-    const table = await dayTable();
-    expect(chart.getAttribute('aria-describedby')).toBe(table.id);
-    expect(chart.getAttribute('role')).toBe('img');
+  it("shows the chosen seller's numbers and the product's attributes", async () => {
+    await openProduct();
+    fireEvent.click(within(screen.getByRole('radiogroup', { name: 'Shop for the price by day' })).getByRole('radio', { name: 'Alpha' }));
+    const numbers = screen.getByRole('region', { name: 'Numbers at Alpha' });
+    expect(within(numbers).getByText('Lowest 30 days').nextElementSibling!.textContent).toBe('€709.00');
+    const details = screen.getByRole('region', { name: 'Product details' });
+    expect(within(details).getByText('Screen').nextElementSibling!.textContent).toBe('15.6"');
+    expect(within(details).getByText('Storage').nextElementSibling!.textContent).toBe('512GB');
   });
 
-  it('loads the Recharts chart and turns its animation off under prefers-reduced-motion', async () => {
+  it('lets each seller of a product sold by several shops be reported as not the same product', async () => {
+    await openProduct();
+    const report = within(sellerItem('Alpha')).getByRole('button', { name: 'Not the same product? Report Alpha' });
+    expect(report.getAttribute('data-report-target')).toBe('match:1');
+  });
+
+  it('turns the chart animation off under prefers-reduced-motion', async () => {
     setMedia(true);
-    await openLenovo();
-    const chart = await screen.findByTestId('price-chart');
+    await openProduct();
+    const chart = await screen.findByTestId('sellers-chart');
     await waitFor(() => expect(chart.querySelector('[data-animate]')?.getAttribute('data-animate')).toBe('false'));
-  });
-
-  it('shows the numbers panel from the stored facts', async () => {
-    await openLenovo();
-    const panel = screen.getByRole('region', { name: 'Numbers' });
-    const value = (label: string) => within(panel).getByText(label).nextElementSibling?.textContent;
-    expect(value('Lowest 30 days')).toBe('€709.00');
-    expect(value('Claimed discount')).toBe('-10.1%');
-    expect(value('Real change vs lowest 30 days')).toBe('+12.7%');
-    expect(value('Price before the rise')).toBe('€709.00 on 21 Oct');
-    expect(value('Was price before its rise')).toBe('€739.00');
-    expect(value('Days worth buying')).toBe('29 of 30');
-  });
-
-  it('lists title-only matches labelled "possibly the same product" in the comparison table', async () => {
-    await openLenovo();
-    const table = screen.getByRole('table', { name: 'Other shops' });
-    const intercomp = within(table).getByRole('row', { name: /Intercomp/ });
-    expect(within(intercomp).getByText('possibly the same product')).toBeTruthy();
-    const scanRow = within(table).getByRole('row', { name: /Scan/ });
-    expect(within(scanRow).queryByText('possibly the same product')).toBeNull();
-  });
-
-  it('lets each comparison row be reported as a wrong match (target: that row, site_products.id)', async () => {
-    await openLenovo();
-    const table = screen.getByRole('table', { name: 'Other shops' });
-    const button = within(table).getByRole('button', { name: 'Report a wrong match with Intercomp' });
-    expect(button.textContent).toBe('Report');
-    expect(button.getAttribute('data-report-target')).toBe('match:10');
-    expect(within(table).getByRole('button', { name: 'Report a wrong match with Scan' }).getAttribute('data-report-target')).toBe('match:9');
-    fireEvent.click(button);
-    const dialog = await screen.findByRole('dialog');
-    expect(within(dialog).getByRole('heading', { name: 'Wrong match?' })).toBeTruthy();
-    expect((within(dialog).getAllByRole('radio')[0] as HTMLInputElement).value).toBe('wrong-match');
-  });
-
-  it('shows the verdict variant by default and never mixes variants; another variant can be picked', async () => {
-    await openLenovo();
-    const picker = screen.getByRole('radiogroup', { name: 'Variant' });
-    expect(within(picker).getByRole('radio', { name: /16GB/ }).getAttribute('aria-checked')).toBe('true');
-    expect(within(await dayTable()).queryByText('€599.00')).toBeNull();
-    fireEvent.click(within(picker).getByRole('radio', { name: /8GB/ }));
-    const table = await dayTable();
-    await waitFor(() => expect(within(table).getAllByText('€599.00')).toHaveLength(10));
-    expect(within(table).queryByText('€709.00')).toBeNull();
-    expect(within(table).queryByText('Yes')).toBeNull();
-    expect(screen.getByTestId('price-chart').getAttribute('data-points')).toBe('10');
-  });
-
-  it('shows a missing price as "Price not shown by the shop", with no % on it or the next day', async () => {
-    const data = lenovo();
-    data.history = data.history.map((h) => (h.productId === REP && h.at.startsWith('2026-10-21') ? { ...h, price: null } : h));
-    const { container } = await openLenovo(data);
-    const table = await dayTable();
-    const hidden = within(table).getByRole('row', { name: /21 Oct/ });
-    expect(within(hidden).getByText('Price not shown by the shop')).toBeTruthy();
-    expect(hidden.textContent).not.toMatch(/%/);
-    const next = within(table).getByRole('row', { name: /22 Oct/ });
-    expect(next.textContent).not.toMatch(/%/);
-    expect(within(next).getByText('Previous day not shown by the shop')).toBeTruthy();
-    // only the first tracked day has no earlier price
-    expect(within(table).getAllByText('No earlier price')).toHaveLength(1);
-    expect(within(within(table).getByRole('row', { name: /23 Sep/ })).getByText('No earlier price')).toBeTruthy();
-    expect(container.textContent).not.toMatch(/€0\.00/);
-  });
-});
-
-describe('product page, Advanced, unjudged verdicts (Ruling R44)', () => {
-  beforeAll(async () => {
-    await import('@/components/site/PriceChart');
-  }, 30_000);
-  beforeEach(() => localStorage.setItem('mode', 'advanced'));
-
-  it.each(['insufficient', 'none'] as const)('verdict %s: shows no worth-buying answers, bands or count', async (label) => {
-    const data = lenovo({ cheaper: null });
-    data.verdict = { ...data.verdict, label, reason: 'Not enough history yet: 30 days tracked, 40 needed.' };
-    await openLenovo(data);
-    const table = await screen.findByRole('table', { name: /Price by day/ });
-    expect(within(table).queryByText('Yes')).toBeNull();
-    expect(within(table).queryByText('No')).toBeNull();
-    expect(within(table).queryByRole('columnheader', { name: 'Worth buying' })).toBeNull();
-    const chart = await screen.findByTestId('price-chart');
-    await waitFor(() => expect(chart.querySelector('[data-animate]')).not.toBeNull());
-    expect(chart.querySelector('[data-bands]')?.getAttribute('data-bands')).toBe('0');
-    expect(screen.queryByText('Worth buying')).toBeNull();
-    const panel = screen.getByRole('region', { name: 'Numbers' });
-    expect(within(panel).queryByText('Days worth buying')).toBeNull();
-  });
-
-  it('a judged verdict shows its bands', async () => {
-    await openLenovo();
-    const chart = await screen.findByTestId('price-chart');
-    await waitFor(() => expect(chart.querySelector('[data-bands]')?.getAttribute('data-bands')).toBe('2'));
   });
 });
 
 describe('product page, other states', () => {
-  it('shows a not-found state with one h1 and a link home for an unknown id', async () => {
-    mockProduct(() => json({ error: 'unknown product' }, 404));
-    renderAt('/p/999');
+  it('puts the product key the API gives in the address (a listing of a matched product)', async () => {
+    mockApi(() => json(page()));
+    renderAt('/product/s1');
+    await screen.findByRole('heading', { level: 1, name: TITLE });
+    await waitFor(() => expect(screen.getByTestId('where').textContent).toBe('/product/c5'));
+  });
+
+  it('shows a not-found state with one h1 for an unknown key, and asks nothing for a malformed one', async () => {
+    const fn = mockApi(() => json({ error: 'unknown product' }, 404));
+    renderAt('/product/c999');
     expect(await screen.findByRole('heading', { level: 1, name: 'Product not found' })).toBeTruthy();
     expect(screen.getAllByRole('heading', { level: 1 })).toHaveLength(1);
     expect(screen.getByRole('link', { name: 'Back to the home page' }).getAttribute('href')).toBe('/');
-    expect(screen.queryByRole('button', { name: 'Something wrong?' })).toBeNull();
-  });
-
-  it('shows not found for a non-numeric id without asking the API', async () => {
-    const fn = mockProduct(() => json(lenovo()));
-    renderAt('/p/abc');
+    cleanup();
+    fn.mockClear();
+    renderAt('/product/x1');
     expect(await screen.findByRole('heading', { level: 1, name: 'Product not found' })).toBeTruthy();
     expect(fn).not.toHaveBeenCalled();
   });
 
   it('offers a retry when the API fails, and a malformed answer counts as a failure', async () => {
-    const fn = mockProduct(() => json({ error: 'internal error' }, 500));
-    renderAt('/p/7');
+    const fn = mockApi(() => json({ error: 'internal error' }, 500));
+    renderAt('/product/c5');
+    expect(screen.getAllByRole('heading', { level: 1 })).toHaveLength(1);
     fireEvent.click(await screen.findByRole('button', { name: 'Try again' }));
     await waitFor(() => expect(fn).toHaveBeenCalledTimes(2));
     cleanup();
-    mockProduct(() => json({ product: null }));
-    renderAt('/p/7');
+    mockApi(() => json({ product: null }));
+    renderAt('/product/c5');
     expect(await screen.findByRole('button', { name: 'Try again' })).toBeTruthy();
+  });
+});
+
+describe('old listing links /p/:id', () => {
+  it('go to their product page, replacing the address', async () => {
+    const fn = mockApi(
+      () => json(page()),
+      (id) => (id === '42' ? json({ product: { id: 42, key: 'c5', title: 'x' } }) : json({ error: 'unknown product' }, 404)),
+    );
+    renderAt('/p/42');
+    await screen.findByRole('heading', { level: 1, name: TITLE });
+    expect(screen.getByTestId('where').textContent).toBe('/product/c5');
+    expect(fn.mock.calls.map(([u]) => new URL(String(u), 'http://localhost').pathname)).toEqual(['/api/products/42', '/api/product/c5']);
+  });
+
+  it('show not found for an unknown or malformed id', async () => {
+    const fn = mockApi(() => json(page()));
+    renderAt('/p/999');
+    expect(await screen.findByRole('heading', { level: 1, name: 'Product not found' })).toBeTruthy();
+    cleanup();
+    fn.mockClear();
+    renderAt('/p/abc');
+    expect(await screen.findByRole('heading', { level: 1, name: 'Product not found' })).toBeTruthy();
+    expect(fn).not.toHaveBeenCalled();
+  });
+});
+
+describe('product page, Simple, price changes and facts per seller', () => {
+  /** Alpha with the same readings but a none verdict: its rise is not in a tag, so the change line says it. */
+  const noneAlpha = (extra: Partial<ProductPage> = {}) =>
+    page({ sellers: [beta, { ...alpha, cheaper: null, verdict: { ...alpha.verdict, label: 'none', reason: 'Not marked Black Friday and no discount claimed.' } }, gamma], ...extra });
+  const goodBeta: SellerView = {
+    ...beta,
+    verdict: {
+      label: 'good',
+      reason: '€21.00 below its lowest price in the last 30 days.',
+      facts: { low30: 72000, usual: 72500, claimedPct: null, realPct: -2.9, historyDays: 20, priceChanges: 1, wasChanges: 0, daysWorthBuying: 2, judged: true },
+    },
+  };
+
+  it('says a recent price change on the seller row, marked Black Friday, for a verdict that is not an avoid', async () => {
+    await openProduct(noneAlpha());
+    expect(within(sellerItem('Alpha')).getByText('Price changed from €709.00 to €799.00 on 22 Oct, while marked Black Friday')).toBeTruthy();
+    expect(within(sellerItem('Beta')).queryByText(/Price changed/)).toBeNull();
+  });
+
+  it('names a recent change only within the stored raiseWindowDays of the latest day', async () => {
+    const later = [...page().history, { ...obs(REP, '2026-10-23', 79900, 88900, true), sellerId: 1 }];
+    await openProduct(noneAlpha({ history: later, raiseWindowDays: 2 }));
+    expect(within(sellerItem('Alpha')).getByText(/Price changed from €709.00 to €799.00 on 22 Oct/)).toBeTruthy();
+    cleanup();
+    await openProduct(noneAlpha({ history: later, raiseWindowDays: 1 }));
+    expect(within(sellerItem('Alpha')).queryByText(/Price changed/)).toBeNull();
+  });
+
+  it('a Black Friday price rise stands out on its seller: alarm banner, raised tag with the real earlier price, and the fact', async () => {
+    await openProduct();
+    const a = sellerItem('Alpha');
+    expect(a.getAttribute('data-alarm')).toBe('true');
+    expect(within(a).getByText('Marked Black Friday, price raised')).toBeTruthy();
+    expect(within(a).getByRole('img', { name: 'Raised from €709.00 to €799.00' })).toBeTruthy();
+    expect(within(a).getByText('Price on 21 Oct: €709.00')).toBeTruthy();
+    // the rise is in the tag and the fact: not said a second time
+    expect(within(a).queryByText(/Price changed/)).toBeNull();
+  });
+
+  it('shows the three numbers of the cheapest seller when its verdict is judged', async () => {
+    await openProduct(page({ sellers: [goodBeta, alpha, gamma] }));
+    const facts = within(sellerItem('Beta')).getByRole('list', { name: 'Price facts at Beta' });
+    expect(within(facts).getByText('Lowest 30 days').nextElementSibling!.textContent).toBe('€720.00');
+    expect(within(facts).getByText('Usual price').nextElementSibling!.textContent).toBe('€725.00');
+    expect(within(facts).getByText('Real change').nextElementSibling!.textContent).toBe('-2.9%');
+  });
+
+  it("shows another judged seller's three numbers when asked, one seller at a time", async () => {
+    await openProduct(page({ sellers: [goodBeta, alpha, gamma] }));
+    // the cheapest seller's facts are open: its button says so
+    expect(within(sellerItem('Beta')).getByRole('button', { name: 'Hide the price facts at Beta' }).getAttribute('aria-expanded')).toBe('true');
+    const button = within(sellerItem('Alpha')).getByRole('button', { name: 'Show the price facts at Alpha' });
+    expect(button.getAttribute('aria-expanded')).toBe('false');
+    fireEvent.click(button);
+    const facts = within(sellerItem('Alpha')).getByRole('list', { name: 'Price facts at Alpha' });
+    // the button stays, says the facts are open, and the focus moves to them
+    expect(within(sellerItem('Alpha')).getByRole('button', { name: 'Hide the price facts at Alpha' }).getAttribute('aria-expanded')).toBe('true');
+    expect(facts.closest('[tabindex="-1"]')).toBe(document.activeElement);
+    expect(button.getAttribute('aria-controls')).toBe(document.activeElement!.id);
+    expect(within(facts).getByText('Lowest 30 days').nextElementSibling!.textContent).toBe('€709.00');
+    expect(within(facts).getByText('Real change').nextElementSibling!.textContent).toBe('+12.7%');
+    expect(within(sellerItem('Beta')).queryByRole('list', { name: /Price facts/ })).toBeNull();
+    expect(within(sellerItem('Beta')).getByRole('button', { name: 'Show the price facts at Beta' })).toBeTruthy();
+    // and closes again
+    fireEvent.click(within(sellerItem('Alpha')).getByRole('button', { name: 'Hide the price facts at Alpha' }));
+    expect(within(sellerItem('Alpha')).queryByRole('list', { name: /Price facts/ })).toBeNull();
+  });
+
+  it('says when an option was last seen instead of showing an old price as current (review I3)', async () => {
+    const data = page();
+    data.variants = data.variants.map((v) => (v.id === SMALL ? { ...v, seenAt: '2026-09-01T18:00:00.000Z' } : v));
+    await openProduct(data);
+    fireEvent.click(within(screen.getByRole('radiogroup', { name: 'Option' })).getByRole('radio', { name: 'Grey' }));
+    const a = sellerItem('Alpha');
+    expect(within(a).getByText('Last seen on 1 Sep')).toBeTruthy();
+    expect(a.textContent).not.toContain('€759.00');
+    expect(within(a).queryByText('Out of stock')).toBeNull();
+  });
+
+  it('marks the listing a link came from (?seller=) and opens its facts', async () => {
+    mockApi(() => json(page()));
+    renderAt('/product/c5?seller=1');
+    await screen.findByRole('heading', { level: 1, name: TITLE });
+    expect(sellerItem('Alpha').getAttribute('data-selected')).toBe('true');
+    expect(within(sellerItem('Alpha')).getByText('The listing you came from')).toBeTruthy();
+    expect(within(sellerItem('Alpha')).getByRole('list', { name: 'Price facts at Alpha' })).toBeTruthy();
+    expect(sellerItem('Beta').getAttribute('data-selected')).toBeNull();
+  });
+
+  it('keeps ?seller= when the address moves to the product key', async () => {
+    mockApi(() => json(page()));
+    renderAt('/product/s1?seller=1');
+    await screen.findByRole('heading', { level: 1, name: TITLE });
+    await waitFor(() => expect(screen.getByTestId('where').textContent).toBe('/product/c5?seller=1'));
+  });
+
+  it('shows no three numbers for a none or insufficient verdict (R44)', async () => {
+    await openProduct();
+    expect(within(sellerItem('Beta')).queryByRole('list', { name: /Price facts/ })).toBeNull();
+    expect(within(sellerItem('Beta')).queryByRole('button', { name: /price facts/ })).toBeNull();
+    expect(within(sellerItem('Gamma')).queryByRole('button', { name: /price facts/ })).toBeNull();
+  });
+
+  it('shows no three numbers for an option the deal check is not about', async () => {
+    await openProduct();
+    fireEvent.click(within(screen.getByRole('radiogroup', { name: 'Option' })).getByRole('radio', { name: 'Grey' }));
+    expect(within(sellerItem('Alpha')).queryByRole('button', { name: /price facts/ })).toBeNull();
+    expect(within(sellerItem('Alpha')).queryByRole('list', { name: /Price facts/ })).toBeNull();
+  });
+
+  it('says plainly that there is not enough history yet, with the stored minimum', async () => {
+    const young: SellerView = { ...gamma, priceCents: 50000, inStock: true, verdict: { label: 'insufficient', reason: 'Not enough price history yet.', facts: { historyDays: 5 } as never } };
+    await openProduct(page({ sellers: [beta, alpha, young] }));
+    expect(within(sellerItem('Gamma')).getByText(/Not enough price history yet\. We judge a deal after 14 days of prices; we have 5 days so far\./)).toBeTruthy();
+  });
+
+  it('lists the colours one shop sells as separate listings as options, each row naming its option', async () => {
+    const blue: SellerView = { ...beta, id: 4, productId: 40, shop: 'AtoZ', shopSlug: 'atoz', title: 'JBL Tune 525BT, Blue' };
+    const black: SellerView = { ...beta, id: 5, productId: 50, shop: 'AtoZ', shopSlug: 'atoz', title: 'JBL Tune 525BT, Black', priceCents: 70900 };
+    await openProduct(
+      page({
+        sellers: [blue, black],
+        cheapestId: 4,
+        variants: [
+          { id: 40, sellerId: 4, label: 'Blue', priceCents: 69900, inStock: true, seenAt: null },
+          { id: 50, sellerId: 5, label: 'Black', priceCents: 70900, inStock: true, seenAt: null },
+        ],
+        history: [],
+      }),
+    );
+    expect(within(screen.getByRole('radiogroup', { name: 'Option' })).getAllByRole('radio').map((r) => r.textContent)).toEqual(['All', 'Blue', 'Black']);
+    const rows = within(screen.getByRole('list', { name: 'Shops selling this product' })).getAllByRole('listitem');
+    expect(rows.map((r) => r.querySelector('[data-option]')?.textContent)).toEqual(['Blue', 'Black']);
+    expect(screen.getByText('at AtoZ')).toBeTruthy();
   });
 });

@@ -1,0 +1,82 @@
+// The Advanced product page chart: one price line per seller (Recharts), each line one variant of that seller's
+// listing, never a mix. Loaded with React.lazy, so Simple mode never downloads Recharts.
+import { CartesianGrid, Line, LineChart, Tooltip, XAxis, YAxis } from 'recharts';
+import { formatDay, formatEuro } from '@/lib/format';
+import { type DayRow, rowIndex } from '@/lib/history';
+import { seriesStyle } from '@/lib/sellerSeries';
+
+export type SellerLine = { id: number; shop: string; rows: DayRow[] };
+export type SellersChartProps = { lines: SellerLine[]; animate: boolean };
+
+const DAY_MS = 86_400_000;
+const isoDay = (idx: number) => new Date(idx * DAY_MS).toISOString().slice(0, 10);
+const euroTick = (cents: number) => `€${Math.round(cents / 100).toLocaleString('en-US')}`;
+
+/** About five evenly spaced day ticks, always including the first and the last day. */
+function ticks(first: number, last: number): number[] {
+  const span = last - first;
+  if (span <= 7) return Array.from({ length: span + 1 }, (_, i) => first + i);
+  const step = Math.ceil(span / 4);
+  const out: number[] = [];
+  for (let x = last; x >= first; x -= step) out.unshift(x);
+  if (out[0] !== first && out[0]! - first >= step / 2) out.unshift(first);
+  return out;
+}
+
+export default function SellersChart({ lines, animate }: SellersChartProps) {
+  const byDay = new Map<number, Record<string, number | null>>();
+  for (const l of lines) {
+    for (const r of l.rows) {
+      const x = rowIndex(r);
+      const point = byDay.get(x) ?? { x };
+      point[`s${l.id}`] = r.price;
+      byDay.set(x, point);
+    }
+  }
+  const data = [...byDay.values()].sort((a, b) => (a.x as number) - (b.x as number));
+  if (data.length === 0) return null;
+  const first = data[0]!.x as number;
+  const last = data.at(-1)!.x as number;
+  const names = new Map(lines.map((l) => [`s${l.id}`, l.shop]));
+  return (
+    <div data-animate={String(animate)} data-lines={lines.length}>
+      <LineChart responsive data={data} accessibilityLayer={false} margin={{ top: 8, right: 8, bottom: 0, left: 0 }} style={{ width: '100%', height: 240 }}>
+        <CartesianGrid stroke="var(--line)" vertical={false} />
+        <XAxis
+          dataKey="x"
+          type="number"
+          domain={[first - 0.5, last + 0.5]}
+          ticks={ticks(first, last)}
+          tickFormatter={(x: number) => formatDay(isoDay(x))}
+          tick={{ fill: 'var(--muted)', fontSize: 11 }}
+          stroke="var(--line)"
+        />
+        <YAxis width={56} domain={['auto', 'auto']} tickFormatter={euroTick} tick={{ fill: 'var(--muted)', fontSize: 11 }} stroke="var(--line)" />
+        <Tooltip
+          isAnimationActive={animate}
+          labelFormatter={(x) => formatDay(isoDay(Number(x)))}
+          formatter={(v, key) => [typeof v === 'number' && v > 0 ? formatEuro(v) : 'Not shown', names.get(String(key)) ?? '']}
+          contentStyle={{ background: 'var(--surface)', border: '1px solid var(--line)', borderRadius: 10, color: 'var(--ink)' }}
+          labelStyle={{ color: 'var(--ink)' }}
+        />
+        {lines.map((l, i) => {
+          const { stroke, dash } = seriesStyle(i);
+          return (
+            <Line
+              key={l.id}
+              type="stepAfter"
+              dataKey={`s${l.id}`}
+              name={`s${l.id}`}
+              stroke={stroke}
+              strokeWidth={2.4}
+              strokeDasharray={dash || undefined}
+              dot={l.rows.length <= 7 ? { r: 3, fill: stroke } : false}
+              connectNulls
+              isAnimationActive={animate}
+            />
+          );
+        })}
+      </LineChart>
+    </div>
+  );
+}

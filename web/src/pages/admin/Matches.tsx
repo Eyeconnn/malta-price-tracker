@@ -6,6 +6,7 @@ import { Notice } from '@/components/site/DealList';
 import { Button } from '@/components/ui/button';
 import { type MatchGroup, adminApi, adminErrorText } from '@/lib/admin-api';
 import { useApi } from '@/lib/api';
+import { listingPath } from '@/lib/links';
 import { formatEuro } from '@/lib/format';
 import { Pager, SaveMessage, Section, useSaver } from './shared';
 
@@ -32,7 +33,7 @@ function MemberRow({ member }: { member: Member }) {
         <span className="font-semibold">{member.shop}</span>: {member.title}
         <span className="ml-2 text-sm text-muted-foreground tabular-nums">{member.priceCents === null ? 'No price shown' : formatEuro(member.priceCents)}</span>
       </label>
-      <Link to={`/p/${member.id}`} className="text-sm text-brand underline-offset-4 hover:underline">
+      <Link to={listingPath(member.id)} className="text-sm text-brand underline-offset-4 hover:underline">
         Open<span className="sr-only"> {member.title} at {member.shop}</span>
       </Link>
       <SaveMessage state={state} />

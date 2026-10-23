@@ -5,7 +5,7 @@ import { MemoryRouter, useLocation } from 'react-router';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { App } from '@/App';
 import { ModeProvider } from '@/components/site/ModeProvider';
-import type { Card, GroupResult } from '@/lib/api';
+import type { Card, ProductResult } from '@/lib/api';
 
 /** matchMedia that answers (min-width: Npx) for the given viewport width; everything else is false. */
 function setViewport(width: number): void {
@@ -166,7 +166,7 @@ describe('home', () => {
     mockApi({ '/api/home': home() });
     renderAt('/');
     const first = (await screen.findAllByRole('article'))[0]!;
-    expect(within(first).getByRole('link', { name: 'Product 1' }).getAttribute('href')).toBe('/p/1');
+    expect(within(first).getByRole('link', { name: 'Product 1' }).getAttribute('href')).toBe('/product/s1?seller=1');
     expect(within(first).getByRole('link', { name: 'Alpha Shop' }).getAttribute('href')).toBe('/shops/alpha');
   });
 
@@ -299,13 +299,22 @@ describe('home', () => {
 });
 
 describe('home search box', () => {
-  const groups = (q: string): GroupResult[] => [
-    {
-      canonicalId: 1,
-      title: `${q} result`,
-      items: [{ ...card(41, { title: `${q} result`, priceCents: 59900, shop: 'Beta', shopSlug: 'beta' }), possible: false, inStock: true, cheaper: null }],
-    },
-  ];
+  const result = (key: string, extra: Partial<ProductResult> = {}): ProductResult => ({
+    key,
+    name: 'Thing',
+    specs: null,
+    priceCents: 59900,
+    inStock: true,
+    shops: 1,
+    shop: 'Beta',
+    bf: false,
+    imageUrl: null,
+    good: 0,
+    avoid: 0,
+    option: null,
+    ...extra,
+  });
+  const groups = (q: string): ProductResult[] => [result('c1', { name: `${q} result` })];
 
   it('typing "ip" waits for the debounce, then shows live results; one character calls nothing', async () => {
     const fn = mockApi({ '/api/home': home(), '/api/search': (url) => json({ results: groups(url.searchParams.get('q')!) }) });
@@ -321,7 +330,7 @@ describe('home search box', () => {
     expect(searchCalls(fn)).toHaveLength(0);
     const results = await screen.findByRole('region', { name: 'Search results' });
     await waitFor(() => expect(within(results).getByRole('link', { name: /ip result/ })).toBeTruthy());
-    expect(within(results).getByRole('link', { name: /ip result/ }).getAttribute('href')).toBe('/p/41');
+    expect(within(results).getByRole('link', { name: /ip result/ }).getAttribute('href')).toBe('/product/c1');
     expect(searchCalls(fn).map((u) => u.searchParams.get('q'))).toEqual(['ip']);
   });
 
@@ -347,49 +356,31 @@ describe('home search box', () => {
     expect(screen.getByTestId('search-status')).toBe(status);
   });
 
-  it('live results mark Black Friday rows, and a Black Friday avoid row says the price was raised', async () => {
-    const row = (c: Card) => ({ canonicalId: null, title: c.title, items: [{ ...c, possible: false, inStock: true, cheaper: null }] });
+  it('live results mark Black Friday rows, and a seller whose deal is one to avoid', async () => {
     mockApi({
       '/api/home': home(),
-      '/api/search': () =>
-        json({
-          results: [
-            row(card(51, { title: 'Lenovo V15', verdict: 'avoid', bf: true, priceCents: 79900, raisedFrom: { priceCents: 70900, at: '2026-10-20' } })),
-            row(card(52, { title: 'Razer keyboard', bf: true })),
-          ],
-        }),
+      '/api/search': () => json({ results: [result('s51', { name: 'Lenovo V15', avoid: 1, bf: true, priceCents: 79900 }), result('s52', { name: 'Razer keyboard', good: 1, bf: true })] }),
     });
     renderAt('/');
     fireEvent.change(screen.getByRole('searchbox', { name: 'Search a product' }), { target: { value: 'le' } });
     const avoidRow = await screen.findByRole('link', { name: /Lenovo V15/ });
-    expect(within(avoidRow).getByText('Marked Black Friday, price raised')).toBeTruthy();
+    expect(within(avoidRow).getByText('Deal to avoid')).toBeTruthy();
+    expect(within(avoidRow).getByText('Black Friday')).toBeTruthy();
     const goodRow = screen.getByRole('link', { name: /Razer keyboard/ });
+    expect(within(goodRow).getByText('Real deal')).toBeTruthy();
     expect(within(goodRow).getByText('Black Friday')).toBeTruthy();
   });
 
-  it('live results never show or count a "possibly the same" row (final review I1)', async () => {
+  it('a product sold by several shops is one live row with its lowest price and shop count', async () => {
     mockApi({
       '/api/home': home(),
-      '/api/search': () =>
-        json({
-          results: [
-            {
-              canonicalId: 9,
-              title: 'Lenovo IdeaPad Slim 3',
-              items: [
-                { ...card(62, { title: 'Acer Aspire Lite 15', priceCents: 29900, shop: 'Beta', shopSlug: 'beta' }), possible: true, inStock: true, cheaper: null },
-                { ...card(61, { title: 'Lenovo IdeaPad Slim 3', priceCents: 39900, shop: 'Alpha', shopSlug: 'alpha' }), possible: false, inStock: true, cheaper: null },
-              ],
-            },
-          ],
-        }),
+      '/api/search': () => json({ results: [result('c9', { name: 'Lenovo IdeaPad Slim 3', shops: 2, shop: null, priceCents: 39900 })] }),
     });
     renderAt('/');
     fireEvent.change(screen.getByRole('searchbox', { name: 'Search a product' }), { target: { value: 'lenovo' } });
     const row = await screen.findByRole('link', { name: /Lenovo IdeaPad Slim 3/ });
-    expect(row.getAttribute('href')).toBe('/p/61');
-    expect(row.textContent).toContain('Alpha');
-    expect(row.textContent).not.toContain('2 shops');
+    expect(row.getAttribute('href')).toBe('/product/c9');
+    expect(row.textContent).toContain('2 shops');
     expect(row.textContent).toContain('€399.00');
   });
 
@@ -438,12 +429,20 @@ describe('home search box', () => {
 });
 
 describe('search page', () => {
-  type Cheaper = { id: number; shop: string; shopSlug: string; priceCents: number } | null;
-  const item = (id: number, shop: string, priceCents: number | null, possible: boolean, extra: Partial<Card> = {}, cheaper: Cheaper = null) => ({
-    ...card(id, { title: 'Lenovo IdeaPad Slim 5', shop, shopSlug: shop.toLowerCase(), priceCents, verdict: 'none', ...extra }),
-    possible,
+  const product = (key: string, extra: Partial<ProductResult> = {}): ProductResult => ({
+    key,
+    name: 'Lenovo IdeaPad Slim 5',
+    specs: null,
+    priceCents: 60000,
     inStock: true,
-    cheaper,
+    shops: 1,
+    shop: 'Beta',
+    bf: false,
+    imageUrl: null,
+    good: 0,
+    avoid: 0,
+    option: null,
+    ...extra,
   });
 
   it('has its own h1 and searches the query from the URL straight away', async () => {
@@ -463,61 +462,34 @@ describe('search page', () => {
     expect(screen.queryByRole('region', { name: 'Search results' })).toBeNull();
   });
 
-  it('groups results by product, cheapest first, and shows the cheaper-elsewhere chip the API decided', async () => {
+  it('shows one card per product in the order the API gives, with its lowest price and number of shops', async () => {
     mockApi({
       '/api/search': () =>
         json({
           results: [
-            {
-              canonicalId: 1,
-              title: 'Lenovo IdeaPad Slim 5',
-              items: [
-                item(1, 'Beta', 60000, false),
-                item(2, 'Alpha', 70000, false, {}, { id: 1, shop: 'Beta', shopSlug: 'beta', priceCents: 60000 }),
-                item(3, 'Gamma', null, false),
-              ],
-            },
-            // the client never works out a cheaper claim itself: no `cheaper` from the API, no chip
-            { canonicalId: 2, title: 'Lenovo IdeaPad Slim 3', items: [item(4, 'Delta', 40000, true), item(5, 'Alpha', 45000, false)] },
+            product('c1', { name: 'Lenovo IdeaPad Slim 5', specs: '16GB RAM', priceCents: 60000, shops: 3, shop: null }),
+            product('s5', { name: 'Lenovo IdeaPad Slim 3', priceCents: 45000, shops: 1, shop: 'Alpha' }),
           ],
         }),
     });
     renderAt('/search?q=lenovo');
     const results = await screen.findByRole('region', { name: 'Search results' });
-    const groups = await waitFor(() => within(results).getAllByRole('article'));
-    expect(groups).toHaveLength(2);
-    const [g1, g2] = groups;
-    expect(within(g1!).getByRole('heading', { level: 2 }).textContent).toBe('Lenovo IdeaPad Slim 5');
-    const rows1 = within(g1!).getAllByRole('listitem');
-    expect(rows1.map((r) => within(r).getAllByRole('link')[0]!.textContent)).toEqual(['Beta', 'Alpha', 'Gamma']);
-    expect(within(rows1[0]!).queryByText(/Cheaper elsewhere/)).toBeNull();
-    expect(within(rows1[1]!).getByText('Cheaper elsewhere: €600.00 at Beta')).toBeTruthy();
-    expect(within(rows1[2]!).getByText('Price not shown by the shop')).toBeTruthy();
-    expect(within(rows1[2]!).queryByText(/Cheaper elsewhere/)).toBeNull();
-
-    expect(within(g2!).queryByText(/Cheaper elsewhere/)).toBeNull();
-    const rows2 = within(g2!).getAllByRole('listitem');
-    expect(within(rows2[0]!).getByText('Possibly the same product')).toBeTruthy();
-    expect(within(rows2[1]!).queryByText('Possibly the same product')).toBeNull();
+    const cards = await waitFor(() => within(results).getAllByRole('article'));
+    expect(cards.map((c) => within(c).getByRole('heading', { level: 2 }).textContent)).toEqual(['Lenovo IdeaPad Slim 5 · 16GB RAM', 'Lenovo IdeaPad Slim 3']);
+    expect(cards[0]!.textContent).toContain('from €600.00 at 3 shops');
+    expect(cards[1]!.textContent).toContain('at Alpha');
+    expect(within(cards[1]!).getByRole('link').getAttribute('href')).toBe('/product/s5');
+    // a product is one card: no per-shop rows, no cheaper chip (the product page lists every seller)
+    expect(within(results).queryAllByRole('listitem')).toHaveLength(0);
+    expect(within(results).queryByText(/Cheaper elsewhere/)).toBeNull();
   });
 
-  it('shows the verdict of each row: a raised price is visible, Black Friday rows are marked', async () => {
-    mockApi({
-      '/api/search': () =>
-        json({
-          results: [
-            {
-              canonicalId: null,
-              title: 'Lenovo V15',
-              items: [item(1, 'AtoZ', 79900, false, { verdict: 'avoid', bf: true, raisedFrom: { priceCents: 70900, at: '2026-10-20' } })],
-            },
-          ],
-        }),
-    });
+  it('shows the verdicts of the sellers and Black Friday on the card', async () => {
+    mockApi({ '/api/search': () => json({ results: [product('s1', { name: 'Lenovo V15', avoid: 1, good: 0, bf: true, shop: 'AtoZ' })] }) });
     renderAt('/search?q=lenovo');
-    const row = await screen.findByRole('listitem');
-    expect(within(row).getByText('Marked Black Friday, price raised')).toBeTruthy();
-    expect(within(row).getByText('Price on 20 Oct: €709.00')).toBeTruthy();
+    const card = await screen.findByRole('article');
+    expect(within(card).getByText('Deal to avoid')).toBeTruthy();
+    expect(within(card).getByText('Black Friday')).toBeTruthy();
   });
 
   it('shows an error with a retry when search is down', async () => {
@@ -546,7 +518,7 @@ describe('search page', () => {
   });
 
   it('announces the search state in one persistent status element', async () => {
-    mockApi({ '/api/search': () => json({ results: [{ canonicalId: null, title: 'Lenovo', items: [item(1, 'Beta', 60000, false)] }] }) });
+    mockApi({ '/api/search': () => json({ results: [product('s1', { name: 'Lenovo' })] }) });
     renderAt('/search');
     const status = screen.getByTestId('search-status');
     expect(status.getAttribute('role')).toBe('status');

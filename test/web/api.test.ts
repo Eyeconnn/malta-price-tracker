@@ -3,9 +3,8 @@ import { DEFAULT_SETTINGS } from '../../src/site/settings.js';
 import { SITE_CATEGORIES } from '../../src/site/categories.js';
 import { type ApiDeps, handleApi, searchPattern } from '../../web/worker/api.js';
 import type { ResponseCache } from '../../web/worker/cache.js';
-import type { Card, Data, OtherShop, ProductDetail } from '../../web/worker/data.js';
+import type { Card, Data, OtherShop, ProductDetail, ProductGroup, Seller } from '../../web/worker/data.js';
 import type { Bindings } from '../../web/worker/index.js';
-import { createSettingsCache } from '../../web/worker/settings.js';
 
 const env = { DATABASE_URL: 'postgres://ro@example/db' } as Bindings;
 
@@ -46,6 +45,7 @@ function detail(priceCents: number | null, others: OtherShop[]): ProductDetail {
   return {
     product: {
       id: 7,
+      key: 'c3',
       productId: 70,
       title: 'Lenovo IdeaPad',
       brand: 'Lenovo',
@@ -82,6 +82,7 @@ function fakeData(overrides: Partial<Data> = {}): Data {
     shop: vi.fn(async () => null),
     shopChanges: vi.fn(async () => ({ rises: [], drops: [] })),
     product: vi.fn(async () => null),
+    productGroup: vi.fn(async () => null),
     categories: vi.fn(async () => [
       { slug: 'laptops', count: 5, good: 1, avoid: 2 },
       { slug: '', count: 4, good: 3, avoid: 1 },
@@ -187,64 +188,96 @@ describe('GET /api/search', () => {
     expect((await w.fetch('/api/search?q=ipad&shop=' + encodeURIComponent('Scan%'))).status).toBe(400);
   });
 
-  it('groups hits by canonical id in data order, cheapest first inside a group, max 40 groups', async () => {
-    const c5 = { groupKey: 'c5', groupTitle: 'Product 1', canonicalId: 5, inStock: true };
+  it('gives one result per product in data order (max 40): clean name, specs, lowest in-stock price, shops, BF, image', async () => {
+    const c5 = { groupKey: 'c5', groupTitle: 'SAMSUNG S25 ULTRA 256GB', canonicalId: 5, possible: false, nameCategory: 'phones', imageUrl: null, variantLabel: null, groupShops: 3, groupBf: true, groupGood: 1, groupAvoid: 1, groupLowInStock: 80000, groupLow: 70000 };
+    const named = { displayName: 'Samsung Galaxy S25 Ultra Smartphone', attrs: { storage_gb: 256 } };
     const hits = [
-      { ...card(1, { priceCents: 900 }), ...c5, possible: false },
-      { ...card(2, { priceCents: 700 }), ...c5, possible: false },
-      { ...card(3, { priceCents: null }), groupKey: 's3', groupTitle: 'Product 3', canonicalId: null, possible: false, inStock: true },
-      { ...card(4, { priceCents: 800 }), ...c5, possible: true },
-      ...Array.from({ length: 45 }, (_, i) => ({ ...card(100 + i), groupKey: `s${100 + i}`, groupTitle: `Product ${100 + i}`, canonicalId: null, possible: false, inStock: true })),
+      { ...card(1, { shop: 'Alpha', shopSlug: 'alpha', priceCents: 90000, bf: false, verdict: 'none' }), ...c5, ...named, inStock: true, imageUrl: 'javascript:alert(1)' },
+      { ...card(2, { shop: 'Beta', shopSlug: 'beta', priceCents: 70000, bf: true, verdict: 'avoid' }), ...c5, ...named, inStock: false, imageUrl: 'https://beta.example/s25.jpg' },
+      { ...card(3, { shop: 'Gamma', shopSlug: 'gamma', priceCents: 80000, bf: false, verdict: 'good' }), ...c5, displayName: null, attrs: null, inStock: null },
+      ...Array.from({ length: 45 }, (_, i) => ({
+        ...card(100 + i, { priceCents: 0 }),
+        groupKey: `s${100 + i}`,
+        groupTitle: `Product ${100 + i}`,
+        canonicalId: null,
+        possible: false,
+        inStock: true,
+        displayName: null,
+        variantLabel: null,
+        nameCategory: null,
+        attrs: null,
+        imageUrl: null,
+        groupShops: 1, groupBf: false, groupGood: 0, groupAvoid: 0, groupLowInStock: null, groupLow: null,
+      })),
     ];
     const w = setup(fakeData({ search: vi.fn(async () => hits) }));
-    const body = (await (await w.fetch('/api/search?q=lenovo')).json()) as { results: { canonicalId: number | null; title: string; items: Card[] }[] };
+    const body = (await (await w.fetch('/api/search?q=s25')).json()) as { results: Record<string, unknown>[] };
     expect(body.results).toHaveLength(40);
-    expect(body.results[0].canonicalId).toBe(5);
-    expect(body.results[0].items.map((c) => c.id)).toEqual([2, 4, 1]);
-    // named after the best hit (the data's groupTitle), not the cheapest member
-    expect(body.results[0].title).toBe('Product 1');
-    expect(body.results[1]).toMatchObject({ canonicalId: null, items: [{ id: 3, priceCents: null }] });
-    expect(body.results[0].items[1]).toMatchObject({ possible: true });
-    expect(body.results[0].items[0]).not.toHaveProperty('groupKey');
-  });
-
-  it('marks each exact, priced row with the cheapest exact, in-stock row at another shop at least cheaperPct cheaper', async () => {
-    const hit = (id: number, shopSlug: string, priceCents: number | null, possible: boolean, inStock: boolean | null = true) => ({
-      ...card(id, { shop: shopSlug.toUpperCase(), shopSlug, priceCents }),
-      groupKey: 'c5',
-      groupTitle: 'Product 1',
-      canonicalId: 5,
-      possible,
-      inStock,
+    expect(body.results[0]).toEqual({
+      key: 'c5',
+      name: 'Samsung Galaxy S25 Ultra Smartphone',
+      specs: '256GB',
+      // 70000 is out of stock: the lowest price that is not known out of stock
+      priceCents: 80000,
+      inStock: true,
+      shops: 3,
+      shop: null,
+      bf: true,
+      // http(s) only
+      imageUrl: 'https://beta.example/s25.jpg',
+      option: null,
+      good: 1,
+      avoid: 1,
     });
-    const hits = [
-      hit(1, 'a', 10000, false),
-      hit(2, 'b', 9700, false), // 3% cheaper than a, at least cheaperPct 3: counts
-      hit(3, 'c', 5000, true), // title-only: never a cheaper target, never gets one
-      hit(4, 'd', 6000, false, false), // out of stock: never a cheaper target
-      hit(5, 'e', 9800, false), // 2% cheaper than a: below cheaperPct 3
-      hit(6, 'b', 9750, false), // same shop as 2: only another shop counts
-      hit(7, 'f', null, false),
-    ];
-    const settings = { ...DEFAULT_SETTINGS, thresholds: { ...DEFAULT_SETTINGS.thresholds, cheaperPct: 3 } };
-    const w = setup(fakeData({ search: vi.fn(async () => hits), settings: vi.fn(async () => settings) }));
-    const body = (await (await w.fetch('/api/search?q=lenovo')).json()) as {
-      results: { items: { id: number; cheaper: { id: number; shop: string; shopSlug: string; priceCents: number } | null }[] }[];
-    };
-    const cheaper = Object.fromEntries(body.results[0].items.map((i) => [i.id, i.cheaper?.id ?? null]));
-    expect(cheaper).toEqual({ 1: 2, 2: null, 3: null, 4: null, 5: null, 6: null, 7: null });
-    expect(body.results[0].items.find((i) => i.id === 1)!.cheaper).toEqual({ id: 2, shop: 'B', shopSlug: 'b', priceCents: 9700 });
+    // no clean name: the best hit's shop title; a 0 price is no price, never 0
+    expect(body.results[1]).toMatchObject({ key: 's100', name: 'Product 100', specs: null, priceCents: null, shops: 1, shop: 'Scan' });
   });
 
-  it('reads the thresholds through the per-isolate settings cache, not once per call (T11)', async () => {
-    const data = fakeData();
-    const deps: ApiDeps = { data: () => data, cache: () => null, searchSettings: createSettingsCache() };
-    for (const q of ['ipad', 'iphone']) {
-      const req = new Request('https://guide.example/api/search?q=' + q);
-      expect((await handleApi(req, env, new URL(req.url), deps)).status).toBe(200);
-    }
-    expect(data.search).toHaveBeenCalledTimes(2);
-    expect(data.settings).toHaveBeenCalledTimes(1);
+  it('names the option (the colour) of a product sold as one listing, so its colours stay apart', async () => {
+    const base = { ...card(1), groupTitle: 'x', canonicalId: null, possible: false, inStock: true, displayName: 'Samsung Galaxy S25 Ultra Smartphone', nameCategory: 'phones', imageUrl: null, groupShops: 1, groupBf: false, groupGood: 1, groupAvoid: 0, groupLowInStock: 10000, groupLow: 10000 };
+    const hits = [
+      { ...base, groupKey: 's1', variantLabel: '512GB, 12GB, Grey', attrs: { storage_gb: 512, ram_gb: 12 } },
+      { ...base, id: 2, groupKey: 's2', variantLabel: null, attrs: {} },
+      { ...base, id: 3, groupKey: 'c4', variantLabel: 'Blue', attrs: {} },
+      { ...base, id: 5, shopSlug: 'other', groupKey: 'c4', variantLabel: 'Black', attrs: {} },
+    ];
+    const w = setup(fakeData({ search: vi.fn(async () => hits) }));
+    const body = (await (await w.fetch('/api/search?q=s25')).json()) as { results: { key: string; option: string | null; specs: string | null }[] };
+    expect(body.results.map((r) => [r.key, r.option])).toEqual([
+      ['s1', 'Grey'],
+      ['s2', null],
+      // a product of several listings has its options on its page
+      ['c4', null],
+    ]);
+    expect(body.results[0]!.specs).toBe('512GB, 12GB RAM');
+  });
+
+  it('counts every shop, Black Friday, verdict and lowest price of the product, also past the rows listed (review)', async () => {
+    const hit = { ...card(1, { priceCents: 90000, bf: false, verdict: 'none' }), groupKey: 'c7', groupTitle: 'x', canonicalId: 7, possible: false, inStock: true, displayName: null, variantLabel: null, nameCategory: null, attrs: null, imageUrl: null, groupShops: 25, groupBf: true, groupGood: 2, groupAvoid: 3, groupLowInStock: 85000, groupLow: 60000 };
+    const w = setup(fakeData({ search: vi.fn(async () => [hit]) }));
+    const body = (await (await w.fetch('/api/search?q=xx')).json()) as { results: Record<string, unknown>[] };
+    expect(body.results[0]).toMatchObject({ shops: 25, shop: null, bf: true, good: 2, avoid: 3, priceCents: 85000, inStock: true });
+  });
+
+  it('takes the lowest price when every seller is out of stock, and never reads the thresholds', async () => {
+    const hit = (id: number, priceCents: number | null) => ({
+      ...card(id, { shopSlug: `s${id}`, priceCents }),
+      groupKey: 'c9',
+      groupTitle: 'Thing',
+      canonicalId: 9,
+      possible: false,
+      inStock: false,
+      displayName: null,
+      variantLabel: null,
+      groupShops: 3, groupBf: false, groupGood: 0, groupAvoid: 0, groupLowInStock: null, groupLow: 4000,
+      nameCategory: null,
+      attrs: null,
+      imageUrl: null,
+    });
+    const w = setup(fakeData({ search: vi.fn(async () => [hit(1, 5000), hit(2, 4000), hit(3, null)]) }));
+    const body = (await (await w.fetch('/api/search?q=thing')).json()) as { results: Record<string, unknown>[] };
+    expect(body.results[0]).toMatchObject({ priceCents: 4000, inStock: false, shops: 3 });
+    expect(w.data.settings).not.toHaveBeenCalled();
   });
 
   it('is never cached', async () => {
@@ -443,12 +476,170 @@ describe('GET /api/products/:id', () => {
   it('returns product (with productId for reports), variants, history, verdict', async () => {
     const w = setup(fakeData({ product: vi.fn(async () => detail(79900, [])) }));
     const body = (await (await w.fetch('/api/products/7')).json()) as Record<string, unknown>;
-    expect(body.product).toMatchObject({ id: 7, productId: 70, shopSlug: 'shop', bf: true });
+    expect(body.product).toMatchObject({ id: 7, key: 'c3', productId: 70, shopSlug: 'shop', bf: true });
     expect(body.product).not.toHaveProperty('verdict');
     expect(body.verdict).toEqual({ label: 'avoid', reason: 'Price went from €709.00 on 20 Oct to €799.00 on 22 Oct.', facts: null });
     expect(body.variants).toHaveLength(1);
     expect(body.history).toEqual([{ productId: 70, at: '2026-10-22T08:00:00.000Z', price: 79900, was: 79900, inStock: true, bf: true }]);
     expect(body.cheaper).toBeNull();
+  });
+});
+
+function seller(id: number, extra: Partial<Seller> = {}): Seller {
+  return {
+    id,
+    productId: id * 10,
+    groupKey: `G${id}`,
+    shopId: id,
+    shop: `Shop ${id}`,
+    shopSlug: `shop-${id}`,
+    title: `SHOP TITLE ${id}`,
+    brand: 'SAMSUNG',
+    url: `https://shop${id}.example/p`,
+    imageUrl: null,
+    category: 'phones',
+    priceCents: 100000,
+    wasCents: null,
+    inStock: true,
+    bf: false,
+    matchMethod: 'name',
+    verdict: 'none',
+    reason: `reason ${id}`,
+    facts: null,
+    displayName: 'Samsung Galaxy S25 Ultra Smartphone',
+    variantLabel: null,
+    nameCategory: 'phones',
+    attrs: { brand: 'Samsung', storage_gb: 256 },
+    ...extra,
+  };
+}
+
+function group(sellers: Seller[], extra: Partial<ProductGroup> = {}): ProductGroup {
+  return { key: 'c5', canonicalId: 5, sellers, variants: [], history: [], ...extra };
+}
+
+describe('GET /api/product/:key', () => {
+  it('returns 404 JSON for a malformed or unknown key, asking data only for well-formed keys', async () => {
+    const w = setup();
+    for (const path of ['/api/product/c999', '/api/product/x1', '/api/product/c', '/api/product/5', '/api/product/c1.5', '/api/product/s' + '9'.repeat(30), '/api/product/']) {
+      const res = await w.fetch(path);
+      expect(res.status, path).toBe(404);
+      expect(res.headers.get('content-type')).toContain('application/json');
+      expect(res.headers.get('cache-control')).toBe('no-store');
+    }
+    expect(w.data.productGroup).toHaveBeenCalledTimes(1);
+    expect(w.data.productGroup).toHaveBeenCalledWith('c999');
+  });
+
+  it('gives the product (clean name, specs, brand, image, attributes) and sellers in stock first, cheapest first', async () => {
+    const sellers = [
+      seller(1, { priceCents: 90000, inStock: false }),
+      seller(2, { priceCents: 120000, imageUrl: 'https://shop2.example/i.jpg', bf: true, verdict: 'avoid', facts: { raisedFrom: { price: 100000, at: '2026-10-20' } } as never }),
+      seller(3, { priceCents: 110000, url: 'javascript:alert(1)', attrs: { storage_gb: 256, ram_gb: 12, colour: ['black'] } }),
+      seller(4, { priceCents: null }),
+    ];
+    const w = setup(fakeData({ productGroup: vi.fn(async () => group(sellers)) }));
+    const body = (await (await w.fetch('/api/product/c5')).json()) as {
+      key: string;
+      product: Record<string, unknown>;
+      sellers: Record<string, unknown>[];
+      cheapestId: number | null;
+      minHistoryDays: number;
+      raiseWindowDays: number;
+    };
+    expect(body.key).toBe('c5');
+    expect(body.product).toEqual({
+      key: 'c5',
+      name: 'Samsung Galaxy S25 Ultra Smartphone',
+      specs: '256GB, 12GB RAM',
+      brand: 'Samsung',
+      imageUrl: 'https://shop2.example/i.jpg',
+      category: 'phones',
+      attributes: [
+        { key: 'storage_gb', label: 'Storage', value: '256GB' },
+        { key: 'ram_gb', label: 'Memory', value: '12GB' },
+        { key: 'colour', label: 'Colours', value: 'Black' },
+      ],
+    });
+    expect(body.sellers.map((s) => s.id)).toEqual([3, 2, 4, 1]);
+    expect(body.cheapestId).toBe(3);
+    // a link that is not http(s) is never sent
+    expect(body.sellers[0].url).toBeNull();
+    expect(body.sellers[1]).toMatchObject({
+      id: 2,
+      productId: 20,
+      shop: 'Shop 2',
+      shopSlug: 'shop-2',
+      title: 'SHOP TITLE 2',
+      priceCents: 120000,
+      url: 'https://shop2.example/p',
+      bf: true,
+      verdict: { label: 'avoid', reason: 'reason 2', facts: { raisedFrom: { price: 100000, at: '2026-10-20' } } },
+    });
+    expect(body.minHistoryDays).toBe(DEFAULT_SETTINGS.thresholds.minHistoryDays);
+    expect(body.raiseWindowDays).toBe(DEFAULT_SETTINGS.thresholds.raiseWindowDays);
+  });
+
+  it('gives each seller the cheapest other seller in stock at least cheaperPct cheaper', async () => {
+    const sellers = [seller(1, { priceCents: 100000 }), seller(2, { priceCents: 97000 }), seller(3, { priceCents: 50000, inStock: false }), seller(4, { priceCents: 98500 })];
+    const settings = { ...DEFAULT_SETTINGS, thresholds: { ...DEFAULT_SETTINGS.thresholds, cheaperPct: 3 } };
+    const w = setup(fakeData({ productGroup: vi.fn(async () => group(sellers)), settings: vi.fn(async () => settings) }));
+    const body = (await (await w.fetch('/api/product/c5')).json()) as { sellers: { id: number; cheaper: { id: number; shop: string; priceCents: number } | null }[] };
+    const cheaper = Object.fromEntries(body.sellers.map((s) => [s.id, s.cheaper?.id ?? null]));
+    expect(cheaper).toEqual({ 1: 2, 2: null, 3: null, 4: null });
+    expect(body.sellers.find((s) => s.id === 1)!.cheaper).toEqual({ id: 2, shop: 'Shop 2', shopSlug: 'shop-2', priceCents: 97000 });
+  });
+
+  it('a product sold by one shop with no clean name is named after its shop title', async () => {
+    const w = setup(fakeData({ productGroup: vi.fn(async () => group([seller(7, { displayName: null, attrs: null, nameCategory: null })], { key: 's7', canonicalId: null })) }));
+    const body = (await (await w.fetch('/api/product/s7')).json()) as { product: Record<string, unknown> };
+    expect(body.product).toMatchObject({ key: 's7', name: 'SHOP TITLE 7', specs: null, brand: null, attributes: [] });
+  });
+
+  it('labels variants by the shop variant title, else the clean variant label without the identity specs', async () => {
+    const sellers = [seller(1, { variantLabel: '256GB, 12GB, Grey', attrs: { storage_gb: 256, ram_gb: 12 } }), seller(2)];
+    const variants = [
+      { id: 10, sellerId: 1, title: 'S25 Ultra', variantTitle: null, priceCents: 100000, inStock: true, seenAt: '2026-10-22T08:00:00.000Z' },
+      { id: 20, sellerId: 2, title: 'S25 Ultra', variantTitle: 'Black', priceCents: 0, inStock: true, seenAt: null },
+      { id: 21, sellerId: 2, title: 'S25 Ultra', variantTitle: '  ', priceCents: 99000, inStock: false, seenAt: '2026-08-01T08:00:00.000Z' },
+    ];
+    const history = [{ sellerId: 1, productId: 10, at: '2026-10-22T08:00:00.000Z', price: 100000, was: null, inStock: true, bf: false }];
+    const w = setup(fakeData({ productGroup: vi.fn(async () => group(sellers, { variants, history })) }));
+    const body = (await (await w.fetch('/api/product/c5')).json()) as { variants: unknown[]; history: unknown[] };
+    expect(body.variants).toEqual([
+      { id: 10, sellerId: 1, label: 'Grey', priceCents: 100000, inStock: true, seenAt: '2026-10-22T08:00:00.000Z' },
+      { id: 20, sellerId: 2, label: 'Black', priceCents: null, inStock: true, seenAt: null },
+      { id: 21, sellerId: 2, label: null, priceCents: 99000, inStock: false, seenAt: '2026-08-01T08:00:00.000Z' },
+    ]);
+    expect(body.history).toEqual(history);
+  });
+
+  it('gives the colours one shop lists on their own as options, never as a cheaper shop', async () => {
+    const atoz = { shop: 'AtoZ', shopSlug: 'atoz', nameCategory: 'tv-audio', displayName: 'JBL Tune 525BT On-Ear Wireless Headphones' };
+    const sellers = [seller(1, { ...atoz, variantLabel: 'Blue', priceCents: 5000, attrs: { colour: ['blue'] } }), seller(2, { ...atoz, variantLabel: 'Black', priceCents: 4000, attrs: { colour: ['black'] } })];
+    const variants = [
+      { id: 10, sellerId: 1, title: 't', variantTitle: null, priceCents: 5000, inStock: true, seenAt: null },
+      { id: 20, sellerId: 2, title: 't', variantTitle: null, priceCents: 4000, inStock: true, seenAt: null },
+    ];
+    const w = setup(fakeData({ productGroup: vi.fn(async () => group(sellers, { variants })) }));
+    const body = (await (await w.fetch('/api/product/c5')).json()) as { variants: { label: string }[]; sellers: { id: number; cheaper: unknown }[]; product: { attributes: { key: string; value: string }[] } };
+    expect(body.variants.map((v) => v.label)).toEqual(['Blue', 'Black']);
+    expect(body.sellers.map((s) => [s.id, s.cheaper])).toEqual([
+      [2, null],
+      [1, null],
+    ]);
+    expect(body.product.attributes.find((x) => x.key === 'colour')?.value).toBe('Black, Blue');
+  });
+
+  it('is cached publicly for 10 minutes and answers HEAD without a body', async () => {
+    const cache = memoryCache();
+    const w = setup(fakeData({ productGroup: vi.fn(async () => group([seller(1)])) }), cache);
+    const res = await w.fetch('/api/product/c5');
+    expect(res.headers.get('cache-control')).toBe('public, max-age=600');
+    const head = await w.fetch('/api/product/c5', { method: 'HEAD' });
+    expect(head.status).toBe(200);
+    expect(await head.text()).toBe('');
+    expect(w.data.productGroup).toHaveBeenCalledTimes(1);
   });
 });
 

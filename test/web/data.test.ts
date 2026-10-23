@@ -396,3 +396,142 @@ describe('data.ts search groups only trusted matches (final review I1)', () => {
     expect(new Set(g.map((h) => h.groupTitle))).toEqual(new Set(['Quokka Phone Case']));
   });
 });
+
+describe('data.ts products by clean name (design Part 3)', () => {
+  beforeAll(async () => {
+    await pg.exec(`
+      insert into name_runs (id, model) values (1, 'test');
+      insert into products (id, shop_id, external_id, parent_external_id, title, variant_title, bf_status) values
+        (800, 1, 'n80-b', 'N80', 'SAMSUNG Galaxy S25 Ultra 256GB', 'Black', null),
+        (801, 1, 'n80-g', 'N80', 'SAMSUNG Galaxy S25 Ultra 256GB', 'Grey', null),
+        (810, 2, 'N81', null, 'SM-S938B 256GB Titanium Black', null, 'marked'),
+        (820, 5, 'N82', null, 'S25 Ultra case', null, null);
+      insert into price_observations (product_id, observed_at, price_cents, was_price_cents, in_stock, bf_marked) values
+        (800, now() - interval '2 days', 130000, null, true, null),
+        (800, now() - interval '1 day', 125000, 140000, true, null),
+        (801, now() - interval '1 day', 126000, null, false, null),
+        (810, now() - interval '3 days', 119900, null, true, true),
+        (810, now() - interval '1 day', 119900, null, true, true),
+        (820, now() - interval '1 day', 1500, null, true, null);
+      insert into site_products (id, shop_id, group_key, title, brand, category, rep_product_id, price_cents, was_price_cents, in_stock,
+          bf_status, verdict, reason, facts, canonical_id, match_method, match_confirmed, image_url, url, updated_at) values
+        (80, 1, 'N80', 'SAMSUNG Galaxy S25 Ultra 256GB', 'SAMSUNG', 'phones', 800, 125000, 140000, true, null, 'none', 'r80', null, 800, 'name', false,
+          'https://alpha.example/s25.jpg', 'https://alpha.example/s25', now()),
+        (81, 2, 'N81', 'SM-S938B 256GB Titanium Black', 'Samsung', 'phones', 810, 119900, null, true, 'marked', 'insufficient', 'r81', null, 800, 'name', false,
+          null, 'javascript:alert(1)', now()),
+        (82, 5, 'N82', 'S25 Ultra case', null, 'phones', 820, 1500, null, true, null, 'none', null, null, 800, 'title', false, null, null, now());
+      insert into product_names (shop_id, group_key, source_title, title_hash, category, display_name, variant_label, attrs, status, model, run_id) values
+        (1, 'N80', 'SAMSUNG Galaxy S25 Ultra 256GB', 'h', 'phones', 'Samsung Galaxy S25 Ultra Smartphone', '256GB, 12GB', '{"storage_gb": 256, "ram_gb": 12}', 'ok', 'test', 1),
+        (2, 'N81', 'SM-S938B 256GB Titanium Black', 'h', 'phones', 'Samsung Galaxy S25 Ultra Smartphone', '256GB, Titanium Black', '{"storage_gb": 256, "colour": ["black"]}', 'ok', 'test', 1),
+        (5, 'N82', 'an older title', 'h', 'phones', 'Samsung Galaxy S25 Ultra Case', null, '{}', 'ok', 'test', 1);
+    `);
+  });
+
+  it('search finds a listing by its clean name and groups name matches as one product', async () => {
+    const hits = await data.search({ text: 'galaxy s25 ultra smartphone', like: '%galaxy s25 ultra smartphone%' }, null);
+    const g = hits.filter((h) => h.groupKey === 'c800');
+    // 81 has no such words in its shop title: found through its clean name
+    expect(g.map((h) => h.id)).toEqual([81, 80]);
+    expect(g[0]).toMatchObject({ displayName: 'Samsung Galaxy S25 Ultra Smartphone', variantLabel: '256GB, Titanium Black', nameCategory: 'phones', attrs: { storage_gb: 256, colour: ['black'] }, possible: false });
+    expect(g[1].imageUrl).toBe('https://alpha.example/s25.jpg');
+    expect(g[0].groupTitle).toBe('Samsung Galaxy S25 Ultra Smartphone');
+    // the title-only member is never pulled in
+    expect(hits.map((h) => h.id)).not.toContain(82);
+  });
+
+  it('a clean name stored for an older shop title is not used', async () => {
+    const hits = await data.search({ text: 's25 ultra case', like: '%s25 ultra case%' }, null);
+    expect(hits.find((h) => h.id === 82)?.displayName).toBeNull();
+  });
+
+  it('productGroup gives every trusted seller, cheapest first, with variants and history per seller', async () => {
+    const g = await data.productGroup('c800');
+    expect(g?.key).toBe('c800');
+    expect(g?.sellers.map((s) => [s.id, s.shopSlug, s.priceCents, s.productId])).toEqual([
+      [81, 'beta', 119900, 810],
+      [80, 'alpha', 125000, 800],
+    ]);
+    expect(g?.sellers[1]).toMatchObject({ displayName: 'Samsung Galaxy S25 Ultra Smartphone', variantLabel: '256GB, 12GB', wasCents: 140000, bf: false, verdict: 'none', reason: 'r80' });
+    expect(g?.sellers[0].bf).toBe(true);
+    expect(g?.variants.map((v) => [v.sellerId, v.id, v.variantTitle, v.priceCents, v.inStock])).toEqual([
+      [80, 800, 'Black', 125000, true],
+      [80, 801, 'Grey', 126000, false],
+      [81, 810, null, 119900, true],
+    ]);
+    expect(g?.history.map((h) => [h.sellerId, h.productId, h.price])).toEqual([
+      [81, 810, 119900],
+      [80, 800, 130000],
+      [80, 800, 125000],
+      [80, 801, 126000],
+      [81, 810, 119900],
+    ]);
+  });
+
+  it('a trusted listing key gives its product; a title-only listing is its own product', async () => {
+    expect((await data.productGroup('s80'))?.key).toBe('c800');
+    const alone = await data.productGroup('s82');
+    expect(alone?.key).toBe('s82');
+    expect(alone?.sellers.map((s) => s.id)).toEqual([82]);
+    expect(alone?.sellers[0].displayName).toBeNull();
+  });
+
+  it('productGroup is null for unknown, malformed, title-only, hidden and stale keys', async () => {
+    for (const key of ['c999', 's999', 'x80', 'c', 'c800x', 'c200', 's4', 's6', 'c1234567890123456']) expect(await data.productGroup(key), key).toBeNull();
+  });
+
+  it("caps the history per seller, keeping each seller its newest points and its verdict variant's whole 60 days", async () => {
+    const g = await createData(runner(pg), { historyMax: 2 }).productGroup('c800');
+    // per seller the newest reading (800 and 801 read at the same time: the higher id first), and every reading of
+    // the variant its verdict is about within the 60 days (review: a cap never cuts the raise window)
+    expect(g?.history.map((h) => [h.sellerId, h.productId, h.price])).toEqual([
+      [81, 810, 119900],
+      [80, 800, 130000],
+      [80, 800, 125000],
+      [80, 801, 126000],
+      [81, 810, 119900],
+    ]);
+  });
+
+  it('gives each variant the time of its newest reading (review I3)', async () => {
+    const g = await data.productGroup('c800');
+    const seen = g?.variants.map((v) => [v.id, typeof v.seenAt === 'string' && /Z$/.test(v.seenAt)]);
+    expect(seen).toEqual([
+      [800, true],
+      [801, true],
+      [810, true],
+    ]);
+  });
+
+  it("caps the variants per seller, always keeping the seller's verdict variant", async () => {
+    await pg.exec('update site_products set rep_product_id = 801 where id = 80');
+    try {
+      const g = await createData(runner(pg), { variantsMax: 2 }).productGroup('c800');
+      expect(g?.variants.map((v) => [v.sellerId, v.id])).toEqual([
+        [80, 801],
+        [81, 810],
+      ]);
+    } finally {
+      await pg.exec('update site_products set rep_product_id = 800 where id = 80');
+    }
+  });
+
+  it('follows the redirect of a removed product to the one its listings went to (review I4)', async () => {
+    await pg.exec('insert into canonical_redirects (old_id, new_id) values (777, 800), (778, 999)');
+    expect((await data.productGroup('c777'))?.key).toBe('c800');
+    // a redirect to a product that is gone too is not found
+    expect(await data.productGroup('c778')).toBeNull();
+  });
+
+  it("search counts every shop, Black Friday and verdict of a product, past the rows it lists (review)", async () => {
+    const hits = await createData(runner(pg), { searchMembers: 1 }).search({ text: 'galaxy s25 ultra smartphone', like: '%galaxy s25 ultra smartphone%' }, null);
+    const g = hits.filter((h) => h.groupKey === 'c800');
+    expect(g).toHaveLength(1);
+    expect(g[0]).toMatchObject({ groupShops: 2, groupBf: true, groupGood: 0, groupAvoid: 0 });
+  });
+
+  it('the listing page gives the product key it belongs to', async () => {
+    expect((await data.product(80))?.product.key).toBe('c800');
+    expect((await data.product(82))?.product.key).toBe('s82');
+    expect((await data.product(1))?.product.key).toBe('c100');
+  });
+});

@@ -81,7 +81,16 @@ Results are copied into a new `site_products.display_name` column at site-build 
 
 The aim of the clean names: search works by general product, not by product per shop. When the same product is sold by several shops, a search result leads to one product page showing the product and every seller's price.
 
-### What counts as the same product (owner decision: "name + specs")
+### Update 23 Oct: match by canonical normalised names (owner decision)
+
+Review rounds showed that matching on free-form clean names with word rules both merges different products and misses real matches (shops word the same product differently). The owner chose to match "using normalised product names". So:
+
+- The normaliser also returns a **canonical name** per listing, written in a fixed pattern per category from identity fields (for example phones: brand, model line, model number, storage, network edition; games: title, platform, edition; fragrance: brand, line, concentration, audience, volume; drinks: brand, product, age or vintage, volume, pack). Every distinguishing fact (condition, audience, pack size, edition, platform, format, refill, bundle) is part of the pattern, so different products get different canonical names. Colour and size are never part of it (they are variant options).
+- Two listings are the same product when their canonical names are exactly equal within the same category and both are accepted by the checker. A listing without a canonical name never name-matches.
+- Until canonical names exist, name matching is switched off and product pages use barcode, model-number and admin-confirmed matches only. Names saved before the change get canonical names in a catch-up run (owner accepted about $3 of usage).
+- The checker keeps its safety rules for the display name; the canonical name must contain the brand, every model and number token and every distinguishing word of the source title in normalised form.
+
+### What counts as the same product (owner decision: "name + specs", superseded by the update above)
 
 Two shops' listings are the same product when either:
 1. they share a barcode (GTIN) or maker's model number (MPN), as today, or the owner confirmed the match in admin; or

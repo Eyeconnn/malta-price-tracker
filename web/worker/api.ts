@@ -1,18 +1,23 @@
 // API router. Access control already ran (index.ts); this validates parameters, calls Data and caches.
 // Every read except search is cached for 10 minutes (cache.ts; while the site is private only in the browser);
 // errors propagate to the handler's generic 500.
+// Search gives one result per product (design Part 3); /api/product/:key is the product page (every trusted
+// seller of one product), /api/products/:id the older one-listing page (its `key` leads to the product page).
 // The one public write, POST /api/reports, is handed to reports.ts before any read routing and is never cached.
 // /api/admin/* goes to admin.ts (its own auth check, the site_admin role, never cached).
 import { SITE_CATEGORIES } from '../../src/site/categories.js';
 import { computeRating } from '../../src/site/rating.js';
+import { specsSummary } from '../../src/site/identity.js';
+import { attributeList, type Listing, optionLabel, productName } from '../../src/site/product.js';
 import { DEFAULT_SETTINGS } from '../../src/site/settings.js';
+import type { VerdictFacts } from '../../src/site/verdict.js';
 import { type AdminDeps, DEFAULT_ADMIN, handleAdmin } from './admin.js';
 import { type ResponseCache, cached as cachedResponse } from './cache.js';
-import type { Card, Data, GroupItem, GroupResult, SearchHit, SearchPattern } from './data.js';
+import type { Data, Label, ProductGroup, SearchHit, SearchPattern, Seller, SellerHistoryObs } from './data.js';
 import type { Env } from './env.js';
 import { json } from './http.js';
 import { DEFAULT_REPORTS, handleReport, type ReportDeps } from './reports.js';
-import type { AccessSettings, SettingsCache } from './settings.js';
+import type { AccessSettings } from './settings.js';
 
 export interface ApiDeps {
   data: (env: Env) => Data;
@@ -21,8 +26,6 @@ export interface ApiDeps {
   reports?: ReportDeps;
   /** admin store (site_admin role); defaults to Neon */
   admin?: AdminDeps;
-  /** settings cache for search's thresholds (one load per isolate per minute); without it search loads them per call */
-  searchSettings?: SettingsCache;
 }
 
 const PAGE_SIZE = 24;
@@ -59,31 +62,183 @@ function slugParam(url: URL, name: string): string | null | undefined {
 }
 
 /**
- * Hits grouped in data order (best group first), cheapest first inside a group (no price last). A group is
- * titled after its best hit (groupTitle), not after its cheapest member.
- * Each row gets `cheaper`: cheaperAt over the group's rows at other shops (Ruling R36), so a row
- * that is only "possibly the same", a title-only target and an out-of-stock target never count.
+ * One search result: a product (its canonical group, or one listing alone), never one shop's row (design Part 3).
+ * key: the product page (/product/<key>). name: the clean name the listings agree on, else the best hit's shop
+ * title; specs: its identity specs the name does not carry ("256GB"). priceCents: the lowest price of a seller
+ * not known to be out of stock, else the lowest price (inStock false), null when no seller shows one (never 0).
+ * shop: the one shop when only one sells it. good / avoid: how many sellers have that verdict (verdicts stay per
+ * seller, never merged into one product verdict). option: for a product sold as one listing, its variant option
+ * (the colour of a shop that lists each colour on its own), so such listings stay apart; null otherwise.
  */
-export function groupResults(hits: SearchHit[], cheaperPct: number): GroupResult[] {
-  const groups = new Map<string, { canonicalId: number | null; title: string; items: Omit<GroupItem, 'cheaper'>[] }>();
-  for (const { groupKey, groupTitle, canonicalId, ...item } of hits) {
-    let g = groups.get(groupKey);
+export type ProductResult = {
+  key: string;
+  name: string;
+  specs: string | null;
+  priceCents: number | null;
+  inStock: boolean;
+  shops: number;
+  shop: string | null;
+  bf: boolean;
+  imageUrl: string | null;
+  good: number;
+  avoid: number;
+  option: string | null;
+};
+
+/** A link or image address from scraped data, only when it is plain http(s) (no user name or password). */
+export function webAddress(url: string | null): string | null {
+  if (!url) return null;
+  try {
+    const u = new URL(url);
+    return (u.protocol === 'https:' || u.protocol === 'http:') && !u.username && !u.password ? u.href : null;
+  } catch {
+    return null;
+  }
+}
+
+const positive = (n: number | null | undefined): n is number => typeof n === 'number' && Number.isFinite(n) && n > 0;
+
+/** The lowest positive price of the rows not known out of stock, else of all rows. */
+function lowestPrice(rows: { priceCents: number | null; inStock: boolean | null }[]): { priceCents: number | null; inStock: boolean } {
+  const min = (list: typeof rows) => list.reduce<number | null>((m, r) => (positive(r.priceCents) && (m === null || r.priceCents < m) ? r.priceCents : m), null);
+  const stocked = rows.filter((r) => r.inStock !== false);
+  const inStockPrice = min(stocked);
+  if (inStockPrice !== null) return { priceCents: inStockPrice, inStock: true };
+  return { priceCents: min(rows), inStock: stocked.length > 0 };
+}
+
+const listingOf = (r: { shopSlug: string; title: string; displayName: string | null; nameCategory: string | null; attrs: Record<string, unknown> | null }): Listing => ({
+  shopSlug: r.shopSlug,
+  title: r.title,
+  displayName: r.displayName,
+  category: r.nameCategory,
+  attrs: r.attrs,
+});
+
+/** Hits as products in data order (best hit first, max 40); the members of a group are the rows data found for it. */
+export function productResults(hits: SearchHit[]): ProductResult[] {
+  const groups = new Map<string, { title: string; rows: SearchHit[] }>();
+  for (const h of hits) {
+    let g = groups.get(h.groupKey);
     if (!g) {
       if (groups.size >= SEARCH_GROUPS) continue;
-      g = { canonicalId, title: groupTitle, items: [] };
-      groups.set(groupKey, g);
+      g = { title: h.groupTitle, rows: [] };
+      groups.set(h.groupKey, g);
     }
-    g.items.push(item);
+    g.rows.push(h);
   }
-  const price = (c: Card) => (c.priceCents !== null && c.priceCents > 0 ? c.priceCents : Number.POSITIVE_INFINITY);
-  return [...groups.values()].map((g) => {
-    const sorted = [...g.items].sort((a, b) => price(a) - price(b) || a.id - b.id);
-    const items: GroupItem[] = sorted.map((item) => {
-      const target = item.possible ? null : cheaperAt(item, sorted.filter((o) => o.shopSlug !== item.shopSlug), cheaperPct);
-      return { ...item, cheaper: target && { id: target.id, shop: target.shop, shopSlug: target.shopSlug, priceCents: target.priceCents as number } };
-    });
-    return { canonicalId: g.canonicalId, title: g.title, items };
+  return [...groups.entries()].map(([key, g]) => {
+    const { name, category, attrs } = productName(g.rows.map(listingOf), g.title);
+    const shops = new Set(g.rows.map((r) => r.shopSlug));
+    const first = g.rows[0];
+    return {
+      key,
+      name,
+      specs: specsSummary(category, attrs, name),
+      // the whole product (every visible member), not only the rows data listed
+      ...(first.groupLowInStock !== null
+        ? { priceCents: first.groupLowInStock, inStock: true }
+        : { priceCents: first.groupLow, inStock: lowestPrice(g.rows).inStock }),
+      shops: Math.max(first.groupShops, shops.size),
+      shop: Math.max(first.groupShops, shops.size) === 1 ? first.shop : null,
+      bf: first.groupBf || g.rows.some((r) => r.bf),
+      imageUrl: g.rows.map((r) => webAddress(r.imageUrl)).find((u) => u !== null) ?? null,
+      good: Math.max(first.groupGood, g.rows.filter((r) => r.verdict === 'good').length),
+      avoid: Math.max(first.groupAvoid, g.rows.filter((r) => r.verdict === 'avoid').length),
+      option: g.rows.length === 1 ? optionLabel(g.rows[0].variantLabel, g.rows[0].nameCategory, g.rows[0].attrs) : null,
+    };
   });
+}
+
+/** Where the same product is cheaper (a seller of the same product, in stock, at least cheaperPct cheaper). */
+export type SellerCheaper = { id: number; shop: string; shopSlug: string; priceCents: number };
+/** One seller on the product page. url: http(s) only. verdict: this seller's own (a was price is one shop's claim). */
+export type SellerView = Omit<Seller, 'groupKey' | 'shopId' | 'brand' | 'imageUrl' | 'category' | 'matchMethod' | 'verdict' | 'reason' | 'facts' | 'displayName' | 'variantLabel' | 'nameCategory' | 'attrs'> & {
+  verdict: { label: Label; reason: string | null; facts: VerdictFacts | null };
+  cheaper: SellerCheaper | null;
+};
+/** A variant of a seller's listing; label: the shop's variant title, else the clean option (the colour), else null. */
+/** seenAt: its newest reading (ISO), so an old one is never shown as a current price (review I3) */
+export type VariantView = { id: number; sellerId: number; label: string | null; priceCents: number | null; inStock: boolean | null; seenAt: string | null };
+export type ProductPage = {
+  key: string;
+  product: {
+    key: string;
+    name: string;
+    specs: string | null;
+    brand: string | null;
+    imageUrl: string | null;
+    category: string | null;
+    attributes: { key: string; label: string; value: string }[];
+  };
+  /** in stock (or not known out of stock) first, then cheapest first, no price last */
+  sellers: SellerView[];
+  /** the first seller with a price that is not known out of stock, null when none */
+  cheapestId: number | null;
+  variants: VariantView[];
+  history: SellerHistoryObs[];
+  minHistoryDays: number;
+  raiseWindowDays: number;
+};
+
+const plainText = (s: string | null): string | null => (s !== null && s.trim() !== '' && s.length <= 120 ? s.trim() : null);
+
+/** The product page answer from a product group and the stored thresholds. */
+export function productPage(g: ProductGroup, thresholds: { cheaperPct: number; minHistoryDays: number; raiseWindowDays: number }): ProductPage {
+  const order = (s: Seller) => [s.inStock === false ? 1 : 0, positive(s.priceCents) ? s.priceCents : Number.POSITIVE_INFINITY, s.id];
+  const sorted = [...g.sellers].sort((a, b) => {
+    const [x, y] = [order(a), order(b)];
+    return x[0] - y[0] || x[1] - y[1] || x[2] - y[2];
+  });
+  const { name, category, attrs } = productName(sorted.map(listingOf), sorted[0].title);
+  const brand = typeof attrs.brand === 'string' ? plainText(attrs.brand) : null;
+  // every seller of a product page is a trusted member (or the listing alone), so none is "possibly the same"
+  const asTarget = sorted.map((s) => ({ ...s, possible: false }));
+  const sellers: SellerView[] = sorted.map((s) => {
+    const target = cheaperAt(s, asTarget.filter((o) => o.shopSlug !== s.shopSlug), thresholds.cheaperPct);
+    return {
+      id: s.id,
+      productId: s.productId,
+      shop: s.shop,
+      shopSlug: s.shopSlug,
+      title: s.title,
+      url: webAddress(s.url),
+      priceCents: positive(s.priceCents) ? s.priceCents : null,
+      wasCents: positive(s.wasCents) ? s.wasCents : null,
+      inStock: s.inStock,
+      bf: s.bf,
+      verdict: { label: s.verdict, reason: s.reason, facts: s.facts },
+      cheaper: target && { id: target.id, shop: target.shop, shopSlug: target.shopSlug, priceCents: target.priceCents as number },
+    };
+  });
+  const byId = new Map(g.sellers.map((s) => [s.id, s]));
+  const variantCount = new Map<number, number>();
+  for (const v of g.variants) variantCount.set(v.sellerId, (variantCount.get(v.sellerId) ?? 0) + 1);
+  const variants: VariantView[] = g.variants.map((v) => {
+    const s = byId.get(v.sellerId);
+    const own = plainText(v.variantTitle);
+    // a listing with one variant: its option is in the clean variant label (the identity specs taken out)
+    const clean = !own && s && variantCount.get(v.sellerId) === 1 ? optionLabel(s.variantLabel, s.nameCategory, s.attrs) : null;
+    return { id: v.id, sellerId: v.sellerId, label: own ?? clean, priceCents: positive(v.priceCents) ? v.priceCents : null, inStock: v.inStock, seenAt: v.seenAt };
+  });
+  return {
+    key: g.key,
+    product: {
+      key: g.key,
+      name,
+      specs: specsSummary(category, attrs, name),
+      brand,
+      imageUrl: sorted.map((s) => webAddress(s.imageUrl)).find((u) => u !== null) ?? null,
+      category: category ?? sorted[0].category,
+      attributes: attributeList(category, attrs),
+    },
+    sellers,
+    cheapestId: sellers.find((s) => s.priceCents !== null && s.inStock !== false)?.id ?? null,
+    variants,
+    history: g.history,
+    minHistoryDays: thresholds.minHistoryDays,
+    raiseWindowDays: thresholds.raiseWindowDays,
+  };
 }
 
 /**
@@ -125,14 +280,18 @@ async function home(data: Data): Promise<Response> {
   return json({ phrases: settings.phrases, good: good.items, avoid: avoid.items, minHistoryDays: settings.thresholds.minHistoryDays });
 }
 
-async function search(data: Data, url: URL, settingsCache: SettingsCache | undefined): Promise<Response> {
+async function search(data: Data, url: URL): Promise<Response> {
   const shop = slugParam(url, 'shop');
   if (shop === undefined) return badRequest('bad shop');
   const pattern = searchPattern(url.searchParams.get('q') ?? '');
   if (!pattern) return json({ results: [] });
-  const settings = settingsCache ? settingsCache.get(() => data.settings()) : data.settings();
-  const [hits, { thresholds }] = await Promise.all([data.search(pattern, shop), settings]);
-  return json({ results: groupResults(hits, thresholds.cheaperPct) });
+  return json({ results: productResults(await data.search(pattern, shop)) });
+}
+
+async function productByKey(data: Data, key: string): Promise<Response> {
+  const [group, settings] = await Promise.all([data.productGroup(key), data.settings()]);
+  if (!group) return json({ error: 'unknown product' }, 404);
+  return json(productPage(group, settings.thresholds));
 }
 
 async function product(data: Data, id: number): Promise<Response> {
@@ -197,8 +356,9 @@ export async function handleApi(req: Request, env: Env, url: URL, deps: ApiDeps,
   if (p === '/api/reports') return handleReport(req, env, url, deps.reports ?? DEFAULT_REPORTS);
   if (p === '/api/admin' || p.startsWith('/api/admin/')) return handleAdmin(req, env, url, deps.admin ?? DEFAULT_ADMIN);
   const productMatch = /^\/api\/products\/([^/]*)$/.exec(p);
+  const productKeyMatch = /^\/api\/product\/([^/]*)$/.exec(p);
   const shopMatch = /^\/api\/shops\/([^/]*)$/.exec(p);
-  const known = ['/api/home', '/api/search', '/api/deals', '/api/shops', '/api/categories', '/api/thresholds'].includes(p) || productMatch || shopMatch;
+  const known = ['/api/home', '/api/search', '/api/deals', '/api/shops', '/api/categories', '/api/thresholds'].includes(p) || productMatch || productKeyMatch || shopMatch;
   if (!known) return notFound();
   if (req.method === 'HEAD') {
     // same status and headers as GET, no body
@@ -216,7 +376,7 @@ export async function handleApi(req: Request, env: Env, url: URL, deps: ApiDeps,
     return u.toString();
   };
 
-  if (p === '/api/search') return search(data(), url, deps.searchSettings);
+  if (p === '/api/search') return search(data(), url);
 
   if (p === '/api/home') return cached(key(p), () => home(data()));
 
@@ -259,6 +419,13 @@ export async function handleApi(req: Request, env: Env, url: URL, deps: ApiDeps,
     const slug = shopMatch[1];
     if (!SLUG.test(slug)) return notFound();
     return cached(key(p), () => shopPage(data(), slug));
+  }
+
+  if (productKeyMatch) {
+    // c<canonical id> (a product sold by matched shops) or s<site_products id> (a listing alone)
+    const k = productKeyMatch[1];
+    if (!/^[cs]\d{1,15}$/.test(k)) return notFound();
+    return cached(key(`/api/product/${k}`), () => productByKey(data(), k));
   }
 
   if (productMatch) {

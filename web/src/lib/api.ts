@@ -7,9 +7,6 @@ import type {
   Card,
   CategoryCount,
   Change,
-  CheaperTarget,
-  GroupItem,
-  GroupResult,
   HistoryObs,
   Label,
   OtherShop,
@@ -20,14 +17,12 @@ import type {
   ShopSummary,
   Variant,
 } from '../../worker/data.js';
+import type { ProductPage, ProductResult, SellerCheaper, SellerView, VariantView } from '../../worker/api.js';
 import type { ReportBody, ReportReason, ReportTarget } from '../../worker/reports.js';
 
 export type {
   Card,
   Change,
-  CheaperTarget,
-  GroupItem,
-  GroupResult,
   HistoryObs,
   Label,
   OtherShop,
@@ -38,11 +33,13 @@ export type {
   ShopSummary,
   Variant,
 };
+export type { ProductPage, ProductResult, SellerCheaper, SellerView, VariantView };
 export type { ReportBody, ReportReason, ReportTarget };
 
 /** minHistoryDays: days of prices needed before a deal is judged (stored threshold) */
 export type HomeResponse = { phrases: Record<PhraseSlot, string[]>; good: Card[]; avoid: Card[]; minHistoryDays: number };
-export type SearchResponse = { results: GroupResult[] };
+/** one result per product (design Part 3) */
+export type SearchResponse = { results: ProductResult[] };
 export type DealsResponse = { items: Card[]; total: number; minHistoryDays: number };
 export type ShopsResponse = { shops: ShopSummary[] };
 export type ShopResponse = {
@@ -142,6 +139,8 @@ export const api = {
   shops: (signal?: AbortSignal) => get<ShopsResponse>('/api/shops', signal),
   shop: (slug: string, signal?: AbortSignal) => get<ShopResponse>(`/api/shops/${encodeURIComponent(slug)}`, signal),
   product: (id: number, signal?: AbortSignal) => get<ProductResponse>(`/api/products/${encodeURIComponent(String(id))}`, signal),
+  /** the product page: key c<canonical id> or s<listing id> */
+  productPage: (key: string, signal?: AbortSignal) => get<ProductPage>(`/api/product/${encodeURIComponent(key)}`, signal),
   categories: (signal?: AbortSignal) => get<CategoriesResponse>('/api/categories', signal),
   thresholds: (signal?: AbortSignal) => get<ThresholdsResponse>('/api/thresholds', signal),
   report: postReport,

@@ -449,9 +449,9 @@ describe('admin store on PGlite as site_admin', () => {
     expect(items.map((r) => r.id)).toEqual([4, 3, 2, 1]);
     expect(items.map((r) => r.target)).toEqual([
       { link: null, label: null },
-      { link: '/p/4', label: 'Gizmo 2' },
+      { link: '/product/s4?seller=4', label: 'Gizmo 2' },
       { link: '/shops/beta', label: 'Beta' },
-      { link: '/p/1', label: 'Lenovo IdeaPad' },
+      { link: '/product/s1?seller=1', label: 'Lenovo IdeaPad' },
     ]);
     expect(items[3]).toMatchObject({ targetType: 'product', targetId: 11, reason: 'wrong-price', message: '<b>not html</b>', email: 'me@example.com', status: 'open', adminNote: null, resolvedAt: null });
     expect(typeof items[3]!.createdAt).toBe('string');

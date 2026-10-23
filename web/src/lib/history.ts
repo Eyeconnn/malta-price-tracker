@@ -87,20 +87,3 @@ export function recentChange(rows: readonly DayRow[], withinDays: number, today?
   }
   return null;
 }
-
-/**
- * The lowest price among EVERY reading of variant `productId` on the `days` Malta days ending `today`
- * (today counts as one), not only the last reading of each day. null when no reading shows a price.
- */
-export function lowestInLastDays(history: readonly HistoryObs[], productId: number, today: string, days: number): number | null {
-  const to = dayIndex(today);
-  let low: number | null = null;
-  for (const h of history) {
-    if (h.productId !== productId || !positive(h.price)) continue;
-    const t = new Date(h.at);
-    if (Number.isNaN(t.getTime())) continue;
-    const i = dayIndex(maltaDay(t));
-    if (i > to - days && i <= to && (low === null || h.price < low)) low = h.price;
-  }
-  return low;
-}
