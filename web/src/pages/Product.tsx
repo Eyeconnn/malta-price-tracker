@@ -2,7 +2,7 @@ import { ExternalLink } from 'lucide-react';
 import { lazy, type ReactNode, Suspense, useEffect, useId, useMemo, useState } from 'react';
 import { Link, Navigate, useNavigate, useParams } from 'react-router';
 import { DayTable } from '@/components/site/DayTable';
-import { AlarmBanner, avoidFact, BlackFridayMark, NO_PRICE, PriceLine, tagProps } from '@/components/site/DealCard';
+import { AlarmBanner, avoidFact, avoidKind, BlackFridayMark, NO_PRICE, PriceLine, tagProps } from '@/components/site/DealCard';
 import { Notice } from '@/components/site/DealList';
 import { GlassCard } from '@/components/site/GlassCard';
 import { useMode } from '@/components/site/ModeProvider';
@@ -14,12 +14,12 @@ import { Button } from '@/components/ui/button';
 import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group';
 import { ApiError, api, type Card, type ProductPage, type SellerView, type VariantView, useApi } from '@/lib/api';
 import { formatDay, formatEuro, signedPct } from '@/lib/format';
-import { dayRows, lastDays } from '@/lib/history';
+import { type DayRow, dayRows, lastDays, recentChange } from '@/lib/history';
 import { SERIES_MAX, seriesStyle } from '@/lib/sellerSeries';
 import { useMediaQuery } from '@/lib/useMediaQuery';
 import { cn } from '@/lib/utils';
 import { withSpecs } from '../../../src/site/display.js';
-import type { VerdictFacts } from '../../../src/site/verdict.js';
+import { maltaDay, type VerdictFacts } from '../../../src/site/verdict.js';
 
 // Recharts is only downloaded when an Advanced product page shows the chart.
 const SellersChart = lazy(() => import('@/components/site/SellersChart'));
@@ -157,6 +157,36 @@ function NumbersPanel({ shop, facts, judged }: { shop: string; facts: VerdictFac
 
 const days = (n: number) => `${n} ${n === 1 ? 'day' : 'days'}`;
 
+/** Simple: lowest 30 days, usual price and real change, from one seller's stored verdict facts. */
+function ThreeNumbers({ shop, facts }: { shop: string; facts: VerdictFacts }) {
+  const real = facts.realPct;
+  const items: [string, string, string?][] = [
+    ['Lowest 30 days', euroOr(facts.low30, 'Not known yet')],
+    ['Usual price', euroOr(facts.usual, 'Not known yet')],
+    ['Real change', finite(real) ? signedPct(real) : 'Not known yet', finite(real) ? (real > 0 ? 'text-bad' : real < 0 ? 'text-good' : undefined) : undefined],
+  ];
+  return (
+    <ul aria-label={`Price facts at ${shop}`} className="m-0 grid list-none grid-cols-3 gap-2 p-0">
+      {items.map(([label, value, tone]) => (
+        <li key={label} className="flex flex-col gap-0.5 rounded-xl bg-secondary p-3">
+          <span className="text-xs text-muted-foreground">{label}</span>
+          <span className={cn('text-base font-bold tabular-nums', tone)}>{value}</span>
+        </li>
+      ))}
+    </ul>
+  );
+}
+
+/** "Price changed from €709.00 to €799.00 on 22 Oct, while marked Black Friday": a rise in the bad colour. */
+function PriceChangeLine({ change }: { change: { row: DayRow; from: number } }) {
+  return (
+    <p className={cn('font-semibold', change.row.price! > change.from ? 'text-bad' : undefined)}>
+      Price changed from {formatEuro(change.from)} to {formatEuro(change.row.price!)} on {formatDay(change.row.day)}
+      {change.row.bf && ', while marked Black Friday'}
+    </p>
+  );
+}
+
 /**
  * One seller: shop, price and was price, that shop's own tag and verdict sentence (a was price is one shop's
  * claim, so verdicts are never merged), "View on <shop>" and "Something wrong?". The cheapest seller is marked.
@@ -168,6 +198,11 @@ function SellerRow({
   cheapest,
   minHistoryDays,
   matchReport,
+  history,
+  raiseWindowDays,
+  option,
+  factsOpen,
+  onShowFacts,
 }: {
   seller: SellerView;
   shown: Shown;
@@ -177,6 +212,16 @@ function SellerRow({
   minHistoryDays: number;
   /** Advanced, several sellers: report this seller as not the same product (target: its site_products row) */
   matchReport: boolean;
+  /** this seller's readings (every variant) */
+  history: ProductPage['history'];
+  /** days back a price change counts as recent (the stored raise window, R43) */
+  raiseWindowDays: number;
+  /** the seller's option when it sells one (a colour listed on its own) and the product has several */
+  option: string | null;
+  /** the three numbers are shown for this seller (Simple; one seller at a time) */
+  factsOpen: boolean;
+  /** shows the three numbers here; null when this seller has none to show (R44: only a judged verdict) */
+  onShowFacts: (() => void) | null;
 }) {
   const titleId = useId();
   const base = sellerCard(seller);
@@ -189,11 +234,21 @@ function SellerRow({
   const shopUrl = webAddress(seller.url);
   const tooNew = checked && seller.verdict.label === 'insufficient' && base.priceCents !== null;
   const tracked = finite(seller.verdict.facts?.historyDays) ? seller.verdict.facts.historyDays : null;
+  const factsId = useId();
+  const priceRise = checked && avoid && avoidKind(base) === 'price';
+  // A recent change of the shown variant within the raise window (R43). A price-raise avoid already says it in its
+  // tag and fact. Another option of the listing counts from today, so an old price is never called recent.
+  const change = useMemo(() => {
+    if (shown.variantId === null || !finite(raiseWindowDays) || priceRise) return null;
+    const rows = dayRows(history, shown.variantId, null);
+    return checked ? recentChange(rows, raiseWindowDays) : recentChange(rows, raiseWindowDays, maltaDay(new Date()));
+  }, [history, shown.variantId, raiseWindowDays, checked, priceRise]);
   return (
     <li
       aria-labelledby={titleId}
       data-cheapest={cheapest ? 'true' : undefined}
       data-verdict={checked ? seller.verdict.label : undefined}
+      data-alarm={alarm ? 'true' : undefined}
       className={cn('glass overflow-hidden', cheapest && 'border-2 border-good', alarm && 'border-2 border-bad')}
     >
       {alarm && <AlarmBanner card={base} />}
@@ -215,12 +270,18 @@ function SellerRow({
           </h3>
           {cheapest && <span className="rounded-full border border-good px-2 py-0.5 text-xs font-bold text-good">Cheapest</span>}
         </div>
+        {option && (
+          <p data-option className="text-sm font-medium">
+            {option}
+          </p>
+        )}
         {/* the shop's own title stays visible, so a clean name never hides what the shop wrote */}
         <p className="text-xs break-words text-muted-foreground">{seller.title}</p>
         <PriceLine card={card} className="[&>span:first-child]:text-2xl" />
         {shown.inStock === false && <p className="text-sm text-muted-foreground">Out of stock</p>}
         {checked && seller.bf && !alarm && <BlackFridayMark />}
         {fact && <p className="font-semibold text-bad">{fact}</p>}
+        {change && <PriceChangeLine change={change} />}
         {seller.cheaper && checked && (
           <p className="text-sm font-semibold">
             Cheaper at {seller.cheaper.shop}, <span className="text-good tabular-nums">{formatEuro(seller.cheaper.priceCents)}</span>
@@ -235,6 +296,17 @@ function SellerRow({
           </p>
         ) : (
           seller.verdict.reason && <p className="text-[15px] leading-relaxed">{seller.verdict.reason}</p>
+        )}
+        {factsOpen && seller.verdict.facts ? (
+          <div id={factsId}>
+            <ThreeNumbers shop={seller.shop} facts={seller.verdict.facts} />
+          </div>
+        ) : (
+          onShowFacts && (
+            <Button variant="outline" className="min-h-11 w-fit" aria-expanded={false} onClick={onShowFacts}>
+              {`Show the price facts at ${seller.shop}`}
+            </Button>
+          )
         )}
         <div className="flex flex-wrap items-center gap-x-4">
           {shopUrl && (
@@ -406,6 +478,8 @@ function ProductContent({ data }: { data: ProductPage }) {
   const titleId = useId();
   const listId = useId();
   const [option, setOption] = useState<string | null>(null);
+  // Simple: the seller whose three numbers are shown, the cheapest by default (one seller at a time)
+  const [factsFor, setFactsFor] = useState<number | null>(data.cheapestId);
   const [announcement, setAnnouncement] = useState('');
   const { product } = data;
 
@@ -420,16 +494,21 @@ function ProductContent({ data }: { data: ProductPage }) {
   }, [data.sellers, data.variants, option]);
   const sellers = data.sellers.filter((s) => shownBy.has(s.id));
   const labelOf = (id: number | null) => (id === null ? null : (data.variants.find((v) => v.id === id)?.label ?? null));
+  /** R44: only a good or avoid verdict, shown on the variant it is about, has numbers to show */
+  const hasFacts = (s: SellerView) => !!s.verdict.facts && (s.verdict.label === 'good' || s.verdict.label === 'avoid') && shownBy.get(s.id)?.checked === true;
+  /** a seller's own option, when it sells exactly one (a shop that lists each colour on its own) */
+  const ownOption = (s: SellerView) => {
+    if (options.length < 2) return null;
+    const mine = data.variants.filter((v) => v.sellerId === s.id);
+    return mine.length === 1 ? mine[0]!.label : null;
+  };
 
   // the lowest price of a seller not known out of stock, as the search result says it
   const stocked = data.sellers.filter((s) => s.inStock !== false && positive(s.priceCents));
   const lowest = stocked.length > 0 ? Math.min(...stocked.map((s) => s.priceCents as number)) : null;
-  const summary =
-    data.sellers.length > 1
-      ? lowest !== null
-        ? `from ${formatEuro(lowest)} at ${data.sellers.length} shops`
-        : `at ${data.sellers.length} shops`
-      : `at ${data.sellers[0]!.shop}`;
+  // one shop may sell several listings of the product (each colour on its own): count shops, not listings
+  const shops = new Set(data.sellers.map((s) => s.shopSlug)).size;
+  const summary = shops > 1 ? (lowest !== null ? `from ${formatEuro(lowest)} at ${shops} shops` : `at ${shops} shops`) : `at ${data.sellers[0]!.shop}`;
 
   const choose = (key: string | null) => {
     setOption(key);
@@ -496,9 +575,14 @@ function ProductContent({ data }: { data: ProductPage }) {
               seller={s}
               shown={shownBy.get(s.id)!}
               verdictOption={labelOf(s.productId)}
-              cheapest={option === null && s.id === data.cheapestId && data.sellers.length > 1}
+              cheapest={option === null && s.id === data.cheapestId && shops > 1}
               minHistoryDays={data.minHistoryDays}
               matchReport={advanced && data.sellers.length > 1}
+              history={data.history.filter((h) => h.sellerId === s.id)}
+              raiseWindowDays={data.raiseWindowDays}
+              option={ownOption(s)}
+              factsOpen={!advanced && factsFor === s.id && hasFacts(s)}
+              onShowFacts={!advanced && hasFacts(s) ? () => setFactsFor(s.id) : null}
             />
           ))}
         </ol>

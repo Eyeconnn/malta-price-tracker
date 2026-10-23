@@ -605,6 +605,23 @@ describe('GET /api/product/:key', () => {
     expect(body.history).toEqual(history);
   });
 
+  it('gives the colours one shop lists on their own as options, never as a cheaper shop', async () => {
+    const atoz = { shop: 'AtoZ', shopSlug: 'atoz', nameCategory: 'tv-audio', displayName: 'JBL Tune 525BT On-Ear Wireless Headphones' };
+    const sellers = [seller(1, { ...atoz, variantLabel: 'Blue', priceCents: 5000, attrs: { colour: ['blue'] } }), seller(2, { ...atoz, variantLabel: 'Black', priceCents: 4000, attrs: { colour: ['black'] } })];
+    const variants = [
+      { id: 10, sellerId: 1, title: 't', variantTitle: null, priceCents: 5000, inStock: true },
+      { id: 20, sellerId: 2, title: 't', variantTitle: null, priceCents: 4000, inStock: true },
+    ];
+    const w = setup(fakeData({ productGroup: vi.fn(async () => group(sellers, { variants })) }));
+    const body = (await (await w.fetch('/api/product/c5')).json()) as { variants: { label: string }[]; sellers: { id: number; cheaper: unknown }[]; product: { attributes: { key: string; value: string }[] } };
+    expect(body.variants.map((v) => v.label)).toEqual(['Blue', 'Black']);
+    expect(body.sellers.map((s) => [s.id, s.cheaper])).toEqual([
+      [2, null],
+      [1, null],
+    ]);
+    expect(body.product.attributes.find((x) => x.key === 'colour')?.value).toBe('Black, Blue');
+  });
+
   it('is cached publicly for 10 minutes and answers HEAD without a body', async () => {
     const cache = memoryCache();
     const w = setup(fakeData({ productGroup: vi.fn(async () => group([seller(1)])) }), cache);

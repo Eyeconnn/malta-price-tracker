@@ -491,3 +491,103 @@ describe('old listing links /p/:id', () => {
     expect(fn).not.toHaveBeenCalled();
   });
 });
+
+describe('product page, Simple, price changes and facts per seller', () => {
+  /** Alpha with the same readings but a none verdict: its rise is not in a tag, so the change line says it. */
+  const noneAlpha = (extra: Partial<ProductPage> = {}) =>
+    page({ sellers: [beta, { ...alpha, cheaper: null, verdict: { ...alpha.verdict, label: 'none', reason: 'Not marked Black Friday and no discount claimed.' } }, gamma], ...extra });
+  const goodBeta: SellerView = {
+    ...beta,
+    verdict: {
+      label: 'good',
+      reason: '€21.00 below its lowest price in the last 30 days.',
+      facts: { low30: 72000, usual: 72500, claimedPct: null, realPct: -2.9, historyDays: 20, priceChanges: 1, wasChanges: 0, daysWorthBuying: 2, judged: true },
+    },
+  };
+
+  it('says a recent price change on the seller row, marked Black Friday, for a verdict that is not an avoid', async () => {
+    await openProduct(noneAlpha());
+    expect(within(sellerItem('Alpha')).getByText('Price changed from €709.00 to €799.00 on 22 Oct, while marked Black Friday')).toBeTruthy();
+    expect(within(sellerItem('Beta')).queryByText(/Price changed/)).toBeNull();
+  });
+
+  it('names a recent change only within the stored raiseWindowDays of the latest day', async () => {
+    const later = [...page().history, { ...obs(REP, '2026-10-23', 79900, 88900, true), sellerId: 1 }];
+    await openProduct(noneAlpha({ history: later, raiseWindowDays: 2 }));
+    expect(within(sellerItem('Alpha')).getByText(/Price changed from €709.00 to €799.00 on 22 Oct/)).toBeTruthy();
+    cleanup();
+    await openProduct(noneAlpha({ history: later, raiseWindowDays: 1 }));
+    expect(within(sellerItem('Alpha')).queryByText(/Price changed/)).toBeNull();
+  });
+
+  it('a Black Friday price rise stands out on its seller: alarm banner, raised tag with the real earlier price, and the fact', async () => {
+    await openProduct();
+    const a = sellerItem('Alpha');
+    expect(a.getAttribute('data-alarm')).toBe('true');
+    expect(within(a).getByText('Marked Black Friday, price raised')).toBeTruthy();
+    expect(within(a).getByRole('img', { name: 'Raised from €709.00 to €799.00' })).toBeTruthy();
+    expect(within(a).getByText('Price on 21 Oct: €709.00')).toBeTruthy();
+    // the rise is in the tag and the fact: not said a second time
+    expect(within(a).queryByText(/Price changed/)).toBeNull();
+  });
+
+  it('shows the three numbers of the cheapest seller when its verdict is judged', async () => {
+    await openProduct(page({ sellers: [goodBeta, alpha, gamma] }));
+    const facts = within(sellerItem('Beta')).getByRole('list', { name: 'Price facts at Beta' });
+    expect(within(facts).getByText('Lowest 30 days').nextElementSibling!.textContent).toBe('€720.00');
+    expect(within(facts).getByText('Usual price').nextElementSibling!.textContent).toBe('€725.00');
+    expect(within(facts).getByText('Real change').nextElementSibling!.textContent).toBe('-2.9%');
+  });
+
+  it("shows another judged seller's three numbers when asked, one seller at a time", async () => {
+    await openProduct(page({ sellers: [goodBeta, alpha, gamma] }));
+    const button = within(sellerItem('Alpha')).getByRole('button', { name: 'Show the price facts at Alpha' });
+    expect(button.getAttribute('aria-expanded')).toBe('false');
+    fireEvent.click(button);
+    const facts = within(sellerItem('Alpha')).getByRole('list', { name: 'Price facts at Alpha' });
+    expect(within(facts).getByText('Lowest 30 days').nextElementSibling!.textContent).toBe('€709.00');
+    expect(within(facts).getByText('Real change').nextElementSibling!.textContent).toBe('+12.7%');
+    expect(within(sellerItem('Beta')).queryByRole('list', { name: /Price facts/ })).toBeNull();
+    expect(within(sellerItem('Beta')).getByRole('button', { name: 'Show the price facts at Beta' })).toBeTruthy();
+  });
+
+  it('shows no three numbers for a none or insufficient verdict (R44)', async () => {
+    await openProduct();
+    expect(within(sellerItem('Beta')).queryByRole('list', { name: /Price facts/ })).toBeNull();
+    expect(within(sellerItem('Beta')).queryByRole('button', { name: /price facts/ })).toBeNull();
+    expect(within(sellerItem('Gamma')).queryByRole('button', { name: /price facts/ })).toBeNull();
+  });
+
+  it('shows no three numbers for an option the deal check is not about', async () => {
+    await openProduct();
+    fireEvent.click(within(screen.getByRole('radiogroup', { name: 'Option' })).getByRole('radio', { name: 'Grey' }));
+    expect(within(sellerItem('Alpha')).queryByRole('button', { name: /price facts/ })).toBeNull();
+    expect(within(sellerItem('Alpha')).queryByRole('list', { name: /Price facts/ })).toBeNull();
+  });
+
+  it('says plainly that there is not enough history yet, with the stored minimum', async () => {
+    const young: SellerView = { ...gamma, priceCents: 50000, inStock: true, verdict: { label: 'insufficient', reason: 'Not enough price history yet.', facts: { historyDays: 5 } as never } };
+    await openProduct(page({ sellers: [beta, alpha, young] }));
+    expect(within(sellerItem('Gamma')).getByText(/Not enough price history yet\. We judge a deal after 14 days of prices; we have 5 days so far\./)).toBeTruthy();
+  });
+
+  it('lists the colours one shop sells as separate listings as options, each row naming its option', async () => {
+    const blue: SellerView = { ...beta, id: 4, productId: 40, shop: 'AtoZ', shopSlug: 'atoz', title: 'JBL Tune 525BT, Blue' };
+    const black: SellerView = { ...beta, id: 5, productId: 50, shop: 'AtoZ', shopSlug: 'atoz', title: 'JBL Tune 525BT, Black', priceCents: 70900 };
+    await openProduct(
+      page({
+        sellers: [blue, black],
+        cheapestId: 4,
+        variants: [
+          { id: 40, sellerId: 4, label: 'Blue', priceCents: 69900, inStock: true },
+          { id: 50, sellerId: 5, label: 'Black', priceCents: 70900, inStock: true },
+        ],
+        history: [],
+      }),
+    );
+    expect(within(screen.getByRole('radiogroup', { name: 'Option' })).getAllByRole('radio').map((r) => r.textContent)).toEqual(['All', 'Blue', 'Black']);
+    const rows = within(screen.getByRole('list', { name: 'Shops selling this product' })).getAllByRole('listitem');
+    expect(rows.map((r) => r.querySelector('[data-option]')?.textContent)).toEqual(['Blue', 'Black']);
+    expect(screen.getByText('at AtoZ')).toBeTruthy();
+  });
+});

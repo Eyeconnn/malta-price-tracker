@@ -71,3 +71,19 @@ export function lastDays(rows: readonly DayRow[], n: number): DayRow[] {
 
 /** Days since the epoch of a row, for a numeric chart axis. */
 export const rowIndex = (r: DayRow) => dayIndex(r.day);
+
+/**
+ * The latest day whose price differs from the day before, when it is within the last `withinDays`
+ * days of `today` (default: the latest row's day); null otherwise.
+ */
+export function recentChange(rows: readonly DayRow[], withinDays: number, today?: string): { row: DayRow; from: number } | null {
+  const latest = rows.at(-1);
+  if (!latest) return null;
+  const anchor = dayIndex(today ?? latest.day);
+  for (let i = rows.length - 1; i > 0; i--) {
+    const r = rows[i]!;
+    if (anchor - dayIndex(r.day) >= withinDays) return null;
+    if (r.change && r.change.cents !== 0) return { row: r, from: r.price! - r.change.cents };
+  }
+  return null;
+}
