@@ -4,7 +4,7 @@
 import type postgres from 'postgres';
 import { brandStatus, loadBrandContext } from '../names/brand.js';
 import { categorize } from './categories.js';
-import { assignMatches, type MatchInput, nameMatch } from './matching.js';
+import { assignMatches, type Match, type MatchInput, nameMatch } from './matching.js';
 import { computeRating, JUDGED_SQL } from './rating.js';
 import type { SiteSettings } from './settings.js';
 import { computeVerdict, type Obs, type Verdict } from './verdict.js';
@@ -174,6 +174,13 @@ export function pctColumn(v: number | null): number | null {
 /** In the site_products upsert: the shown variant's GTIN or MPN differs from the stored row's. */
 const CODES_CHANGED = `(site_products.gtin is distinct from excluded.gtin or site_products.mpn is distinct from excluded.mpn)`;
 
+/**
+ * In the site_products upsert: the shop renamed a name-matched listing. Its clean name was made for the old title,
+ * so the name match no longer holds (review minor, as CODES_CHANGED).
+ */
+const NAME_CHANGED = `(site_products.match_method = 'name' and site_products.title is distinct from excluded.title)`;
+const MATCH_GONE = `(${CODES_CHANGED} or ${NAME_CHANGED})`;
+
 /** postgres.js types a JS boolean array as a single boolean, so booleans travel as text[] and are cast per row. */
 const boolText = (b: boolean | null) => (b === null ? null : String(b));
 
@@ -201,9 +208,9 @@ async function writeGroups(sql: postgres.Sql, shopId: number, groups: GroupRow[]
       facts = excluded.facts, updated_at = excluded.updated_at,
       -- new codes: the old match (and its confirmation) no longer describes this row; assignCanonicalIds decides
       -- again after every shop is built, and until then the row claims no match (a build may stop in between)
-      canonical_id = case when ${sql.unsafe(CODES_CHANGED)} then null else site_products.canonical_id end,
-      match_method = case when ${sql.unsafe(CODES_CHANGED)} then null else site_products.match_method end,
-      match_confirmed = case when ${sql.unsafe(CODES_CHANGED)} then false else site_products.match_confirmed end`;
+      canonical_id = case when ${sql.unsafe(MATCH_GONE)} then null else site_products.canonical_id end,
+      match_method = case when ${sql.unsafe(MATCH_GONE)} then null else site_products.match_method end,
+      match_confirmed = case when ${sql.unsafe(MATCH_GONE)} then false else site_products.match_confirmed end`;
 
   // History of judged groups only, to keep storage small: one row per good/avoid group per run, all from the
   // variant that produced the label (rep_product_id and prices are that variant's for good/avoid groups).
@@ -292,8 +299,10 @@ type CanonRow = MatchInput & { brand: string | null; canonicalId: string | null;
  * Rows with an accepted clean name (product_names) are also matched by name and key specs (matching.ts
  * matchByName; method 'name', trusted like gtin and mpn on the public site).
  * Returns the number of matched rows per method.
+ * prior: each row's canonical id before this build's shops were built (they may clear it, as for new codes), so a
+ * re-formed product keeps its id and a removed one records where its listings went (review I4).
  */
-export async function assignCanonicalIds(sql: postgres.Sql): Promise<Record<string, number>> {
+export async function assignCanonicalIds(sql: postgres.Sql, prior: Map<number, string> = new Map()): Promise<Record<string, number>> {
   // the accepted clean name of each row (name matching): only one stored for the row's current shop title, so a
   // renamed listing waits for the normaliser instead of matching under its old name
   const raw = await sql<
@@ -307,13 +316,15 @@ export async function assignCanonicalIds(sql: postgres.Sql): Promise<Record<stri
       category: string | null;
       canonical_id: string | null;
       match_method: string | null;
+      variant_count: number;
       display_name: string | null;
+      variant_label: string | null;
       name_category: string | null;
       name_attrs: Record<string, unknown> | null;
     }[]
   >`
-    select sp.id, sp.shop_id, sp.gtin, sp.mpn, sp.title, sp.brand, sp.category, sp.canonical_id, sp.match_method,
-      pn.display_name, pn.category as name_category, pn.attrs as name_attrs
+    select sp.id, sp.shop_id, sp.gtin, sp.mpn, sp.title, sp.brand, sp.category, sp.canonical_id, sp.match_method, sp.variant_count,
+      pn.display_name, pn.variant_label, pn.category as name_category, pn.attrs as name_attrs
     from site_products sp
     left join product_names pn on pn.shop_id = sp.shop_id and pn.group_key = sp.group_key
       and pn.status = 'ok' and pn.display_name is not null and pn.source_title = sp.title
@@ -335,10 +346,18 @@ export async function assignCanonicalIds(sql: postgres.Sql): Promise<Record<stri
       brand: r.brand,
       canonicalId: r.canonical_id,
       matchMethod: r.match_method,
-      name: r.display_name === null ? null : nameMatch(r.display_name, r.name_category ?? r.category, r.name_attrs, reliableBrand(r.brand, r.shop_id)),
+      name:
+        r.display_name === null
+          ? null
+          : nameMatch(r.display_name, r.name_category ?? r.category, r.name_attrs, reliableBrand(r.brand, r.shop_id), {
+              title: r.title,
+              variantLabel: r.variant_label,
+              variantCount: r.variant_count,
+            }),
     }),
   );
-  const matches = assignMatches(rows);
+  const priorOf = (r: CanonRow) => prior.get(r.id) ?? r.canonicalId;
+  const matches = await stableNameKeys(sql, rows, assignMatches(rows), priorOf);
 
   // first member (lowest id) of each key describes the canonical product
   const firstOfKey = new Map<string, CanonRow>();
@@ -379,14 +398,95 @@ export async function assignCanonicalIds(sql: postgres.Sql): Promise<Record<stri
   }
 
   // canonical rows made by site-build that nothing points at any more (e.g. a title group whose first item left)
-  await sql`
+  const removed = await sql<{ id: string }[]>`
     delete from canonical_products c
     where c.match_key is not null
       and not exists (select 1 from site_products sp where sp.canonical_id = c.id)
       and not exists (select 1 from products p where p.canonical_id = c.id)
-      and not exists (select 1 from product_matches pm where pm.canonical_id = c.id)`;
+      and not exists (select 1 from product_matches pm where pm.canonical_id = c.id)
+    returning id`;
+  await recordRedirects(sql, rows, changed, removed.map((r) => r.id), priorOf);
 
   return counts;
+}
+
+/**
+ * Stable product links (review I4): a name group that forms again keeps the canonical product most of its members
+ * already have (the most common one, then the oldest), so /product/c<id> keeps working while its first member
+ * changes. Only a name group's own canonical (match key name:...) is reused, each by one group; a group that gets
+ * a new key never takes over the key of an existing canonical product.
+ */
+async function stableNameKeys(sql: postgres.Sql, rows: CanonRow[], matches: Map<number, Match>, priorOf: (r: CanonRow) => string | null): Promise<Map<number, Match>> {
+  const groups = new Map<string, CanonRow[]>();
+  for (const r of rows) {
+    const m = matches.get(r.id);
+    if (!m || m.method !== 'name' || !m.key.startsWith('name:')) continue;
+    const g = groups.get(m.key);
+    if (g) g.push(r);
+    else groups.set(m.key, [r]);
+  }
+  if (groups.size === 0) return matches;
+  const existing = await sql<{ id: string; match_key: string }[]>`select id, match_key from canonical_products where match_key like 'name:%'`;
+  const keyOfId = new Map(existing.map((e) => [e.id, e.match_key]));
+  const taken = new Set(existing.map((e) => e.match_key));
+  const used = new Set<string>();
+  const rename = new Map<string, string>();
+  const order = [...groups.entries()].sort((a, b) => b[1].length - a[1].length || (a[0] < b[0] ? -1 : 1));
+  for (const [key, members] of order) {
+    const votes = new Map<string, number>();
+    for (const m of members) {
+      const was = priorOf(m);
+      if (was !== null && keyOfId.has(was)) votes.set(was, (votes.get(was) ?? 0) + 1);
+    }
+    const best = [...votes.entries()]
+      .filter(([id]) => !used.has(keyOfId.get(id)!))
+      .sort((a, b) => b[1] - a[1] || Number(a[0]) - Number(b[0]))[0];
+    let next = best ? keyOfId.get(best[0])! : key;
+    if (!best) for (let n = 1; used.has(next) || taken.has(next); n++) next = `${key}.${n}`;
+    used.add(next);
+    if (next !== key) rename.set(key, next);
+  }
+  if (rename.size === 0) return matches;
+  const out = new Map<number, Match>();
+  for (const [id, m] of matches) out.set(id, rename.has(m.key) ? { ...m, key: rename.get(m.key)! } : m);
+  return out;
+}
+
+/**
+ * Where removed canonical products went (review I4): the canonical most of a removed product's former members now
+ * belong to (then the oldest), so its old link can follow them. Earlier redirects to a removed product follow it
+ * too. Skipped until migration 011 has run.
+ */
+async function recordRedirects(
+  sql: postgres.Sql,
+  rows: CanonRow[],
+  changed: { id: number; cid: string | null }[],
+  removed: string[],
+  priorOf: (r: CanonRow) => string | null,
+): Promise<void> {
+  if (removed.length === 0) return;
+  const [{ t }] = await sql<{ t: string | null }[]>`select to_regclass('canonical_redirects')::text as t`;
+  if (t === null) return;
+  const gone = new Set(removed);
+  const before = new Map(rows.map((r) => [r.id, priorOf(r)]));
+  const votes = new Map<string, Map<string, number>>();
+  for (const c of changed) {
+    const old = before.get(c.id);
+    if (!old || !gone.has(old) || c.cid === null) continue;
+    const v = votes.get(old) ?? new Map<string, number>();
+    v.set(c.cid, (v.get(c.cid) ?? 0) + 1);
+    votes.set(old, v);
+  }
+  const pairs = [...votes.entries()].map(([old, v]) => [old, [...v.entries()].sort((a, b) => b[1] - a[1] || Number(a[0]) - Number(b[0]))[0][0]] as const);
+  if (pairs.length === 0) return;
+  await sql`
+    update canonical_redirects r set new_id = t.new_id
+    from unnest(${pairs.map(([o]) => o)}::bigint[], ${pairs.map(([, n]) => n)}::bigint[]) as t(old_id, new_id)
+    where r.new_id = t.old_id`;
+  await sql`
+    insert into canonical_redirects (old_id, new_id)
+    select * from unnest(${pairs.map(([o]) => o)}::bigint[], ${pairs.map(([, n]) => n)}::bigint[])
+    on conflict (old_id) do update set new_id = excluded.new_id, created_at = now()`;
 }
 
 export type BuildOptions = { shop?: string; log?: (line: string) => void };
@@ -410,6 +510,10 @@ export async function buildSiteProducts(
     order by slug`;
   if (opts.shop !== undefined && shops.length === 0) throw new Error(`No active, visible shop with slug ${opts.shop}`);
 
+  // each row's canonical id before the shops are built: a shop build clears it for new codes (CODES_CHANGED)
+  const prior = new Map(
+    (await sql<{ id: string; canonical_id: string }[]>`select id, canonical_id from site_products where canonical_id is not null`).map((r) => [Number(r.id), r.canonical_id]),
+  );
   let products = 0;
   let judged = 0;
   for (const shop of shops) {
@@ -421,7 +525,7 @@ export async function buildSiteProducts(
   }
 
   const started = Date.now();
-  const matched = await assignCanonicalIds(sql);
+  const matched = await assignCanonicalIds(sql, prior);
   log(`matching: ${JSON.stringify(matched)}, ${((Date.now() - started) / 1000).toFixed(1)}s`);
   return { products, judged };
 }

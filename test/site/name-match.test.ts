@@ -4,7 +4,7 @@ import { readdir, readFile } from 'node:fs/promises';
 import path from 'node:path';
 import postgres from 'postgres';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { buildSiteProducts } from '../../src/site/build.js';
+import { buildShop, buildSiteProducts } from '../../src/site/build.js';
 import { DEFAULT_SETTINGS } from '../../src/site/settings.js';
 
 const PORT = 55463;
@@ -24,6 +24,10 @@ type Listing = {
   attrs?: Record<string, unknown>;
   /** source_title differs from the shop title (the shop renamed it since) */
   stale?: boolean;
+  /** the clean variant label */
+  label?: string;
+  /** variant titles: one products row each under the key */
+  variants?: string[];
 };
 
 const LISTINGS: Listing[] = [
@@ -50,6 +54,20 @@ const LISTINGS: Listing[] = [
   { key: 'BUDS-G', shop: 'gamma', title: 'JBL Tune Buds 2 earbuds', brand: 'JBL', category: 'tv-audio', name: 'JBL Tune Buds 2 In-Ear Wireless Earphones', attrs: {} },
   // one shop that lists each colour as its own product: one product with two colour options
   { key: 'JBL-BLUE', shop: 'alpha', title: 'JBL Tune 525BT On-Ear Wireless Headphones, Blue', brand: 'JBL', category: 'tv-audio', name: 'JBL Tune 525BT On-Ear Wireless Headphones', attrs: { colour: ['blue'], wireless: 'yes' } },
+  { key: 'JBL-WHITE', shop: 'alpha', title: 'JBL Tune 525BT On-Ear Wireless Headphones, White', brand: 'JBL', category: 'tv-audio', name: 'JBL Tune 525BT On-Ear Wireless Headphones', attrs: { colour: ['white'], wireless: 'yes' } },
+  // a new game and a pre-owned one; a name stored before the condition rule still has its title
+  { key: 'FC-NEW', shop: 'alpha', title: 'Far Cry Instincts (Xbox)', category: 'gaming', name: 'Far Cry Instincts (Xbox)', attrs: { platform: 'multi' } },
+  { key: 'FC-USED', shop: 'beta', title: 'Far Cry Instincts (Xbox) (Pre-owned)', category: 'gaming', name: 'Far Cry Instincts (Xbox) (Pre-owned)', attrs: { platform: 'multi' } },
+  { key: 'FC-OLD', shop: 'gamma', title: 'Far Cry Instincts (Xbox) (Pre-owned)', category: 'gaming', name: 'Far Cry Instincts (Xbox)', attrs: { platform: 'multi' } },
+  // gift cards: two values at one shop, the same value at another
+  { key: 'GC-A20', shop: 'alpha', title: 'Steam Gift Card €20', brand: 'Steam', category: 'gaming', name: 'Steam Gift Card', attrs: {} },
+  { key: 'GC-A50', shop: 'alpha', title: 'Steam Gift Card €50', brand: 'Steam', category: 'gaming', name: 'Steam Gift Card', attrs: {} },
+  { key: 'GC-B50', shop: 'beta', title: 'STEAM GIFT CARD 50 EUR', brand: 'Steam', category: 'gaming', name: 'Steam Gift Card', attrs: {} },
+  // a refurbished grade A iPhone and a new one
+  { key: 'IP13-R', shop: 'alpha', title: 'Apple iPhone 13 128GB (Refurbished, Grade A)', brand: 'Apple', name: 'Apple iPhone 13 Smartphone', attrs: { storage_gb: 128 } },
+  { key: 'IP13-N', shop: 'beta', title: 'Apple iPhone 13 128GB', brand: 'Apple', name: 'Apple iPhone 13 Smartphone', attrs: { storage_gb: 128 } },
+  // a 256GB and 512GB group with the storage only in its label, next to the 512GB listing of another shop
+  { key: 'S25M', shop: 'beta', title: 'Samsung Galaxy S25 Ultra', brand: 'Samsung', variants: ['256GB', '512GB'], name: 'Samsung Galaxy S25 Ultra Smartphone', label: '256GB, 512GB', attrs: {} },
   { key: 'JBL-BLACK', shop: 'alpha', title: 'JBL Tune 525BT On-Ear Wireless Headphones, Black', brand: 'JBL', category: 'tv-audio', name: 'JBL Tune 525BT On-Ear Wireless Headphones', attrs: { colour: ['black'], wireless: 'yes' } },
   // 256GB and 512GB at one shop: two products
   { key: 'RN-256', shop: 'gamma', title: 'XIAOMI Redmi Note 14 Pro+ 256GB-Storage 8GB Smartphone, Black', brand: 'XIAOMI', name: 'Xiaomi Redmi Note 14 Pro+ Smartphone', attrs: { storage_gb: 256, ram_gb: 8 } },
@@ -83,14 +101,18 @@ describe.skipIf(!process.env.SITE_BUILD_TEST_DB)('site-build name matching on PG
     }
     const [{ id: runId }] = await sql<{ id: string }[]>`insert into name_runs (model) values ('test') returning id`;
     for (const l of LISTINGS) {
-      await sql`
-        insert into products (shop_id, external_id, title, brand, gtin, category_path, last_seen)
-        values (${shopIds[l.shop]}, ${l.key}, ${l.title}, ${l.brand ?? null}, ${l.gtin ?? null},
-          ${l.category === 'drinks' ? 'Drinks > Beer' : l.category === 'tv-audio' ? 'Audio > Earphones' : 'Mobile Phones'}, ${new Date(NOW.getTime() - HOUR)})`;
+      const path = l.category === 'drinks' ? 'Drinks > Beer' : l.category === 'tv-audio' ? 'Audio > Earphones' : l.category === 'gaming' ? 'Games > Xbox' : 'Mobile Phones';
+      // a listing with variants: one products row per variant under the listing's key
+      for (const [i, v] of (l.variants ?? [null]).entries()) {
+        await sql`
+          insert into products (shop_id, external_id, parent_external_id, title, variant_title, brand, gtin, category_path, last_seen)
+          values (${shopIds[l.shop]}, ${v === null ? l.key : `${l.key}-${i}`}, ${v === null ? null : l.key}, ${l.title}, ${v}, ${l.brand ?? null}, ${l.gtin ?? null},
+            ${path}, ${new Date(NOW.getTime() - HOUR)})`;
+      }
       if (l.name === undefined) continue;
       await sql`
-        insert into product_names (shop_id, group_key, source_title, title_hash, category, display_name, attrs, status, model, run_id)
-        values (${shopIds[l.shop]}, ${l.key}, ${l.stale ? 'an older title' : l.title}, 'h', ${l.category ?? 'phones'}, ${l.name},
+        insert into product_names (shop_id, group_key, source_title, title_hash, category, display_name, variant_label, attrs, status, model, run_id)
+        values (${shopIds[l.shop]}, ${l.key}, ${l.stale ? 'an older title' : l.title}, 'h', ${l.category ?? 'phones'}, ${l.name}, ${l.label ?? null},
           ${sql.json((l.attrs ?? {}) as postgres.JSONValue)}, 'ok', 'test', ${runId})`;
     }
     // an earlier build title-matched and the admin confirmed the Samsung pair (Ruling R50 applies when it changes)
@@ -169,6 +191,60 @@ describe.skipIf(!process.env.SITE_BUILD_TEST_DB)('site-build name matching on PG
     expect(r.get('RN-256')!.match_method).not.toBe('name');
     expect(r.get('RN-256')!.canonical_id === null || r.get('RN-256')!.canonical_id !== r.get('RN-512')!.canonical_id).toBe(true);
   });
+
+  it('keeps a pre-owned game apart from a new one, also under a name stored before the rule (review C1)', async () => {
+    const r = await rows();
+    // FC-OLD has the new game's clean name but its title says pre-owned: the two are never one product
+    for (const k of ['FC-NEW', 'FC-USED', 'FC-OLD']) expect(r.get(k)!.match_method, k).not.toBe('name');
+    expect(r.get('FC-NEW')!.canonical_id).toBeNull();
+  });
+
+  it('keeps gift cards of different values apart, at one shop and across shops (review C1)', async () => {
+    const r = await rows();
+    expect(r.get('GC-A50')!.match_method).toBe('name');
+    expect(r.get('GC-A50')!.canonical_id).toBe(r.get('GC-B50')!.canonical_id);
+    expect(r.get('GC-A20')!.canonical_id).toBeNull();
+  });
+
+  it('keeps a refurbished grade A iPhone apart from a new one (review C1)', async () => {
+    const r = await rows();
+    expect(r.get('IP13-R')!.canonical_id).toBeNull();
+    expect(r.get('IP13-N')!.canonical_id).toBeNull();
+  });
+
+  it('never matches a 256GB and 512GB group with a 512GB listing (review C2)', async () => {
+    const r = await rows();
+    expect(r.get('S25M')!.match_method).not.toBe('name');
+    expect(r.get('S25-512')!.match_method).not.toBe('name');
+  });
+
+  it('keeps the canonical id of a name group when its first member leaves (review I4)', async () => {
+    const before = (await rows()).get('JBL-BLACK')!.canonical_id;
+    expect((await rows()).get('JBL-BLUE')!.canonical_id).toBe(before);
+    // the shop renames the blue listing: its stored name no longer applies, and its match goes at once
+    await sql`update products set title = 'JBL Tune 525BT Blue NEW' where external_id = 'JBL-BLUE'`;
+    await buildShop(sql, { id: shopIds.alpha, slug: 'alpha', category: 'electronics' }, DEFAULT_SETTINGS, new Date(NOW.getTime() + 30_000));
+    const mid = await rows();
+    expect(mid.get('JBL-BLUE')).toMatchObject({ canonical_id: null, match_method: null });
+    await buildSiteProducts(sql, DEFAULT_SETTINGS, new Date(NOW.getTime() + 60_000));
+    const after = await rows();
+    expect(after.get('JBL-BLACK')!.canonical_id).toBe(before);
+    expect(after.get('JBL-WHITE')!.canonical_id).toBe(before);
+    expect(after.get('JBL-BLUE')!.match_method).not.toBe('name');
+  }, 60_000);
+
+  it('records where a removed product went, so its old link can follow (review I4)', async () => {
+    const old = (await rows()).get('S25-A')!.canonical_id!;
+    await sql`update products set gtin = '4006381333931' where external_id in ('S25-A', 'S25-B')`;
+    await buildSiteProducts(sql, DEFAULT_SETTINGS, new Date(NOW.getTime() + 90_000));
+    const r = await rows();
+    expect(r.get('S25-A')!.match_method).toBe('gtin');
+    const now = r.get('S25-A')!.canonical_id!;
+    expect(now).not.toBe(old);
+    expect(await sql`select id from canonical_products where id = ${old}`).toHaveLength(0);
+    const [redirect] = await sql<{ new_id: string }[]>`select new_id from canonical_redirects where old_id = ${old}`;
+    expect(redirect.new_id).toBe(now);
+  }, 60_000);
 
   it('keeps the grouping on a rebuild', async () => {
     const before = await rows();
