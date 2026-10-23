@@ -1,14 +1,16 @@
 // The veto in code (design "Update 23 Oct, afternoon: Claude judges candidate groups side by side", point 3). When
 // Claude says listings are the same product, the code overrules it whenever their titles or data disagree on a
-// number with a unit, a model code (colour suffixes stripped), a bare model number, model words (Pro, Plus, Ultra),
-// condition, money, pack or piece count (variant titles included), audience, gender (also from the shop's category
-// path), platform, edition, format, bundle words, OS family, Windows version and edition, storage type, SIM, region
-// (plug, version, voltage), material, size words, the variety of a drink, food or toiletry (Light, Zero, Pink,
-// Merlot, Cucumber), the brand, or the site category. It reuses the title guard of name matching (guardOf) and the
-// text helpers of the name checks. Pure: the judge run and the site build both call it.
-import { canonText } from '../names/canon-text.js';
-import { conditions, packCounts, prep, quantityClass, QUANTITY, tokens, UNIT } from '../names/text.js';
-import { guardOf, MODEL } from '../site/matching.js';
+// number with a unit, a model code or part number (colour suffixes stripped), a barcode, a bare model number (also in
+// words or Roman numerals), model words (Pro, Plus, Ultra), condition, money, pack or piece count, audience, gender,
+// platform, concentration, edition, format, bundle, accessory or part words, OS family, Windows version and edition,
+// storage type, SIM, region (version, import, PAL or NTSC, plug, voltage), material, size words, the variety of a
+// drink, food or toiletry (Light, Zero, Pink, Merlot, Cucumber), the brand, the price (more than 3 times), or the site
+// category. Every fact is read from the title and every variant title; the shop's category path adds gender,
+// children's audience, accessory and model words. It reuses the title guard of name matching (guardOf) and the text
+// helpers of the name checks. Pure: the judge run and the site build both call it.
+import { bundleWords, canonText, PRICE_INCLUDES } from '../names/canon-text.js';
+import { conditions, inRun, packCounts, prep, quantityClass, QUANTITY, tokens, UNIT } from '../names/text.js';
+import { COLOUR_SUFFIX, gtinIdentity, guardOf, MODEL, mpnIdentity } from '../site/matching.js';
 
 export type VetoListing = {
   title: string;
@@ -16,10 +18,14 @@ export type VetoListing = {
   brand?: string | null;
   /** site category slug */
   category: string;
-  /** the shop's own category path (its gender words count) */
+  /** the shop's own category path (its gender, children's, accessory and model words count) */
   categoryPath?: string | null;
   gtin?: string | null;
   mpn?: string | null;
+  /** the shop: two colours one shop lists on their own may have their own barcodes */
+  shopId?: number;
+  /** current price in integer cents */
+  priceCents?: number | null;
 };
 
 /** Categories whose listings may be one product although the shops filed them differently (also used for candidates). */
@@ -43,7 +49,7 @@ export const sameOrNeighbour = (a: string, b: string) => a === b || (NEIGHBOURS[
 
 const escapeRe = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
-/** The title without the brands of the pair (so "Moet & Chandon" or "Black+Decker" is no bundle and "Red Bull" no variety). */
+/** A text without the brands of the pair (so "Moet & Chandon" or "Black+Decker" is no bundle and "Red Bull" no variety). */
 function withoutBrands(text: string, brands: string[]): string {
   let s = text;
   for (const b of brands) s = s.replace(new RegExp(`(^|[^\\p{L}\\p{N}])${escapeRe(b)}(?=$|[^\\p{L}\\p{N}])`, 'giu'), '$1 ');
@@ -52,7 +58,9 @@ function withoutBrands(text: string, brands: string[]): string {
     .replace(/\bgps\s*\+\s*(cellular|lte)\b/gi, 'gps $1')
     .replace(/\bfree\s+(?:delivery|shipping|postage|gift|returns?)\b/gi, ' ')
     .replace(/\bspecial\s+(?:offer|price|deal|sale)s?\b/gi, ' ')
-    .replace(/\b(\d)\s*-?\s*in\s*-?\s*(\d)\b/gi, '$1in$2');
+    .replace(/\b(\d)\s*-?\s*in\s*-?\s*(\d)\b/gi, '$1in$2')
+    // a dotted brand is one name (b.box), not the pack word "box"
+    .replace(/\b([a-z])\.([a-z]{2,})\b/gi, '$1$2');
 }
 
 /** Colour words (a colour or a marketing colour name next to "titanium" keeps it a colour). */
@@ -61,9 +69,6 @@ const COLOURS = new Set(
     'graphite space sage mist lavender cream rose violet teal mint coral obsidian porcelain jet onyx phantom cobalt icy amber marble ' +
     'silverblue jetblack titaniumblack whitesilver').split(' '),
 );
-
-/** Colour abbreviations at the end of a model code (T500WHT and T500BLK are one product in two colours). */
-const COLOUR_SUFFIX = /(\d)(?:wht|wh|blk|bk|blu|bl|red|rd|grn|gn|gry|gy|slv|sv|sil|pnk|pk|pur|ppl|gld|gd|brn|bei|nvy|org|ylw|yel)$/;
 
 const isQuantity = (t: string) => {
   const m = QUANTITY.exec(t);
@@ -134,6 +139,10 @@ function quantities(texts: string[]): Map<string, Set<number>> {
   return out;
 }
 
+/** Storage within 3% is one size: 1TB is sold as 1000GB and as 1024GB. */
+const near = (cls: string) => (x: number, y: number) => (cls === 'gb' ? Math.abs(x - y) <= 0.03 * Math.max(x, y) : x === y);
+const subsetBy = (a: Set<number>, b: Set<number>, eq: (x: number, y: number) => boolean) => [...a].every((x) => [...b].some((y) => eq(x, y)));
+
 const PIECES = /\b(\d+)\s*-?\s*(?:pcs?|pieces?|pce|pz|pezzi|teile)\b/g;
 function pieces(texts: string[]): Set<number> {
   const out = new Set<number>();
@@ -141,35 +150,76 @@ function pieces(texts: string[]): Set<number> {
   return out;
 }
 
-/** Pack counts of the title and every variant title; a listing that states none is a single item. */
-function packs(texts: string[]): Set<number> {
+/** Things counted in a pack that the name checks' count words lack (3 Bulbs is a pack of 3). */
+const COUNT_NOUNS = /\b(\d+)\s*-?\s*(?:bulbs?|batteries|pairs?|tins?|jars?|cartridges?|packets?|units|refills|blades|heads|bars|sticks|tubes|pouches|capsules?|tablets?)\b/g;
+
+/**
+ * Pack counts the texts state, written any way: Pack of 6, 6 Pack, 2-Pack, x2, 2x, 43g x4, 6 x 330ml, Set of 4,
+ * 3 Bulbs, Twin, Duo, Two Pack, Single. Only counts a text states; none stated is a single item (see packs).
+ */
+function statedPacks(texts: string[]): Set<number> {
   const out = new Set<number>();
   for (const text of texts) {
     const t = prep(text);
     for (const p of packCounts(text, { pieces: false })) out.add(p.n);
+    // x2, 43g x4 (a standalone x, not the x of a size such as 40 x 30)
+    for (const m of t.matchAll(/(^|\s)x\s?(\d+)\b/g)) {
+      const before = t.slice(0, m.index).trimEnd();
+      if (!/[\d.]$/.test(before)) out.add(Number(m[2]));
+    }
+    // 2x Duracell (not 6 x 330ml, which packCounts reads)
+    for (const m of t.matchAll(/\b(\d+)\s?x(?=\s|$)(?!\s*\d)/g)) out.add(Number(m[1]));
+    for (const m of t.matchAll(/\bset\s+of\s+(\d+)\b/g)) out.add(Number(m[1]));
+    for (const m of t.matchAll(COUNT_NOUNS)) out.add(Number(m[1]));
     if (/\b(?:two|2)[\s-]?pack\b|\bduo\b|\bdouble[\s-]?pack\b/.test(t)) out.add(2);
     if (/\bsingle\b(?!\s*(?:malt|origin|serve|sim|bed|duvet|sheet|estate|cream|grain|oven|door|use))/.test(t)) out.add(1);
   }
+  return out;
+}
+
+function packs(texts: string[]): Set<number> {
+  const out = statedPacks(texts);
   if (out.size === 0) out.add(1);
   return out;
 }
 
 const NUMBER = /^\d+(?:\.\d+)?$/;
+const NUMBER_WORDS: Record<string, number> = {
+  two: 2, three: 3, four: 4, five: 5, six: 6, seven: 7, eight: 8, nine: 9, ten: 10, eleven: 11, twelve: 12, thirteen: 13, fourteen: 14,
+  fifteen: 15, sixteen: 16, seventeen: 17, eighteen: 18, nineteen: 19, twenty: 20, thirty: 30, forty: 40, fifty: 50, sixty: 60, seventy: 70,
+  eighty: 80, ninety: 90,
+};
+const ROMAN_VALUE: Record<string, number> = { i: 1, v: 5, x: 10 };
+/** A Roman numeral of 2 to 6 letters up to 39 (VII, XVI), or null; single letters are words (X, V). */
+function roman(t: string): number | null {
+  if (!/^x{0,3}(?:ix|iv|v?i{0,3})$/.test(t) || t.length < 2 || t.length > 6) return null;
+  let n = 0;
+  for (let i = 0; i < t.length; i++) {
+    const v = ROMAN_VALUE[t[i]];
+    const next = ROMAN_VALUE[t[i + 1]] ?? 0;
+    n += v < next ? -v : v;
+  }
+  return n;
+}
 
-/** Bare numbers of the title (iPhone 15, LEGO 42115, Size 4), not counts, and not clothing or shoe sizes. */
-function bareNumbers(title: string, category: string): Set<number> {
-  const counted = new Set([...packCounts(title).map((p) => p.n), ...pieces([title])]);
-  const toks = words(title);
+/** Bare numbers (iPhone 15, LEGO 42115, Size 4, Twelve Year Old, Final Fantasy XVI), not counts or clothing sizes. */
+function bareNumbers(texts: string[], category: string): Set<number> {
+  const counted = new Set([...statedPacks(texts), ...pieces(texts)]);
   const out = new Set<number>();
-  toks.forEach((t, i) => {
-    if (!NUMBER.test(t)) return;
-    const n = Number(t);
-    if (counted.has(n)) return;
-    if ((category === 'fashion' || category === 'sports') && /^(?:size|eu|uk|us|it|fr)$/.test(toks[i - 1] ?? '')) return;
-    out.add(n);
-  });
+  for (const text of texts) {
+    const toks = words(text);
+    toks.forEach((t, i) => {
+      const n = NUMBER.test(t) ? Number(t) : Object.hasOwn(NUMBER_WORDS, t) ? NUMBER_WORDS[t] : roman(t);
+      if (n === null || counted.has(n)) return;
+      if ((category === 'fashion' || category === 'sports') && /^(?:size|eu|uk|us|it|fr)$/.test(toks[i - 1] ?? '')) return;
+      out.add(n);
+    });
+  }
   return out;
 }
+
+/** Path segments of a shop category path ("Laptops > MacBook Pro"). */
+const segments = (path: string | null | undefined) => (path ?? '').split(/\s*(?:>|\/|\||»)\s*/).filter((s) => s.trim() !== '');
 
 /** Words that name another model when one listing has them and the other not. */
 function modelWords(texts: string[], category: string): Set<string> {
@@ -213,6 +263,55 @@ function classWords(texts: string[], map: Record<string, string>): Set<string> {
   return out;
 }
 
+/** Accessory and part words: a case is not the phone, replacement heads are not the toothbrush. */
+const ACCESSORY: Record<string, string> = {
+  case: 'case', cases: 'case', cover: 'cover', covers: 'cover', protector: 'protector', protectors: 'protector', strap: 'strap', straps: 'strap',
+  band: 'band', bands: 'band', charger: 'charger', chargers: 'charger', cable: 'cable', cables: 'cable', controller: 'controller', controllers: 'controller',
+  replacement: 'replacement', refill: 'refill', refills: 'refill', heads: 'heads', filter: 'filter', filters: 'filter', stand: 'stand', stands: 'stand',
+  adapter: 'adapter', adaptor: 'adapter', adapters: 'adapter', mount: 'mount', sleeve: 'sleeve', sleeves: 'sleeve', skin: 'skin', skins: 'skin',
+  accessories: 'accessory', accessory: 'accessory',
+};
+/** Phrases where an accessory word names part of the product itself. */
+const NOT_ACCESSORY = /\b(?:charging\s+case|stand\s+mixer|filter\s+coffee|smart\s*band|fitness\s+band|wrist\s*band|skin\s*care|for\s+\w+\s+skin|\w+\s+skin\s+type)\b/g;
+
+function accessories(listing: VetoListing, title: string): Set<string> {
+  const out = new Set<string>();
+  const add = (text: string) => {
+    for (const t of words(prep(text).replace(NOT_ACCESSORY, ' '))) {
+      if (!Object.hasOwn(ACCESSORY, t)) continue;
+      if (t === 'skin' || t === 'skins') {
+        if (listing.category === 'beauty-health') continue;
+      }
+      out.add(ACCESSORY[t]);
+    }
+  };
+  add(title);
+  // the leaf of the shop's category path ("Accessories > Phone Cases"); "Phones & Accessories" is no accessory leaf
+  const leaf = segments(listing.categoryPath).at(-1) ?? '';
+  if (/&|\band\b/i.test(leaf)) add(leaf.replace(/\baccessor(?:y|ies)\b/gi, ' '));
+  else add(leaf);
+  return out;
+}
+
+/** Things a bundle adds after "with" (not features: "with Active Noise Cancellation" is no bundle). */
+const PRODUCT_NOUN =
+  /^(?:case|bag|controllers?|games?|charger|cables?|headphones|headset|earbuds|stand|mouse|keyboard|sleeve|cover|strap|lens|lenses|bottles?|glass(?:es)?|mugs?|kit|accessories|batter(?:y|ies)|adapter|dock|remote|protector|voucher|card|pen|stylus|mat|bowl|tripod|microphone|mic|speaker|printer|monitor|tv|console|phone|tablet|laptop|watch|refills?|pods|capsules|heads|blades|brush|toothbrush|gift|box|set|pack|bundle)$/;
+
+/**
+ * Whether a text names a bundle: + item, incl., includes, bundle or multipack, or "with" (or w/) a product (review
+ * 23 Oct: "with <feature>" and "and" are no bundle).
+ */
+function bundle(text: string): boolean {
+  const plain = canonText(text.replace(/\bcharging\s+case\b/gi, ' ')).replace(PRICE_INCLUDES, ' ').replace(/\bw\s*\/\s*/g, ' with ');
+  if (bundleWords(plain)) return true;
+  const toks = words(plain);
+  for (let i = 0; i < toks.length; i++) {
+    if (toks[i] !== 'with') continue;
+    for (const t of toks.slice(i + 1, i + 4)) if (PRODUCT_NOUN.test(t)) return true;
+  }
+  return false;
+}
+
 /** Categories where a flavour, scent or colour word names another product (Coca-Cola Light, Gordon's Pink Gin). */
 const VARIETY_CATEGORIES = new Set(['drinks', 'other', 'beauty-health', 'baby']);
 const COLOUR_VARIETY_CATEGORIES = new Set(['drinks', 'other']);
@@ -229,7 +328,8 @@ function varieties(texts: string[], category: string): Set<string> {
   const out = new Set<string>();
   if (!VARIETY_CATEGORIES.has(category)) return out;
   for (const text of texts) {
-    const t = prep(text);
+    // "White Wine" after a grape names the kind of drink, not another product
+    const t = prep(text).replace(/\b(?:red|white|rose|pink)\s+wine\b/g, ' wine ');
     for (const m of t.matchAll(/\b(light|medium|dark|blonde)\s+roast\b/g)) out.add(`${m[1]} roast`);
     const plain = t.replace(/\b(?:light|medium|dark|blonde)\s+roast\b/g, ' ');
     for (const w of words(plain)) {
@@ -239,14 +339,29 @@ function varieties(texts: string[], category: string): Set<string> {
   return out;
 }
 
-/** Regions a title names: plug type and version or stock words. */
-function regions(text: string): Set<string> {
-  const t = prep(text);
+/** Version and import regions (a Chinese version, a Japanese import, NTSC); the European default ones say nothing. */
+const REGION_DEFAULT = new Set(['global', 'eu', 'pal']);
+function versionRegions(texts: string[]): Set<string> {
   const out = new Set<string>();
-  const NAME: Record<string, string> = { usa: 'us', intl: 'global', international: 'global', cn: 'china', jp: 'japan' };
-  for (const m of t.matchAll(/\b(eu|uk|us|usa|au|global|international|intl|asia|china|cn|hk|japan|jp|in)\s*[-/]?\s*(?:plug|version|ver|model|spec|stock|import)\b/g)) out.add(NAME[m[1]] ?? m[1]);
-  if (/\b3[\s-]?pin\b/.test(t)) out.add('uk');
-  if (/\bschuko\b/.test(t)) out.add('eu');
+  const NAME: Record<string, string> = { usa: 'us', intl: 'global', international: 'global', cn: 'china', chinese: 'china', jp: 'japan', japanese: 'japan', asian: 'asia', hk: 'hong kong' };
+  for (const text of texts) {
+    const t = prep(text);
+    for (const m of t.matchAll(/\b(eu|uk|us|usa|au|global|international|intl|asia|asian|china|chinese|cn|hk|japan|japanese|jp|korea|korean|india|indian)\s*[-/]?\s*(?:version|ver|model|spec|stock|rom|edition|import(?:ed)?|region)\b/g)) out.add(NAME[m[1]] ?? m[1]);
+    if (/\bchinese\b/.test(t)) out.add('china');
+    if (/\bimport(?:ed)?\b/.test(t)) out.add('import');
+    if (/\bntsc\b/.test(t)) out.add('ntsc');
+    if (/\bpal\b/.test(t)) out.add('pal');
+  }
+  return new Set([...out].filter((r) => !REGION_DEFAULT.has(r)));
+}
+function plugs(texts: string[]): Set<string> {
+  const out = new Set<string>();
+  for (const text of texts) {
+    const t = prep(text);
+    for (const m of t.matchAll(/\b(eu|euro|uk|us|au|swiss|ch)\s*-?\s*plug\b/g)) out.add({ euro: 'eu', ch: 'swiss' }[m[1]] ?? m[1]);
+    if (/\b3[\s-]?pin\b/.test(t)) out.add('uk');
+    if (/\bschuko\b/.test(t)) out.add('eu');
+  }
   return out;
 }
 
@@ -269,15 +384,14 @@ const OS: [string, RegExp][] = [
   ['no os', /\bno\s+os\b|\bwithout\s+os\b|\bnon[\s-]?os\b/],
   ['linux', /\blinux\b|\bubuntu\b/],
 ];
-function osFamilies(text: string): Set<string> {
-  const t = prep(text);
-  return new Set(OS.filter(([, re]) => re.test(t)).map(([k]) => k));
+function osFamilies(texts: string[]): Set<string> {
+  return new Set(texts.flatMap((text) => OS.filter(([, re]) => re.test(prep(text))).map(([k]) => k)));
 }
-function windowsVersions(text: string): Set<string> {
-  return new Set([...prep(text).matchAll(/\bw(?:in(?:dows)?)?\s*(7|8|10|11)\b/g)].map((m) => m[1]));
+function windowsVersions(texts: string[]): Set<string> {
+  return new Set(texts.flatMap((text) => [...prep(text).matchAll(/\bw(?:in(?:dows)?)?\s*(7|8|10|11)\b/g)].map((m) => m[1])));
 }
 
-/** Condition words the name checks do not read (Italian, Spanish, French, German). */
+/** Condition words the name checks do not read (Italian, Spanish, French, German, box damaged). */
 const MORE_CONDITIONS: [string, RegExp][] = [
   ['refurbished', /\b(?:ricondizionat[oaie]|rigenerat[oaie]|reacondicionad[oa]s?|reconditionn[ee]e?s?|generaluberholt|recondicionad[oa])\b/],
   ['used', /\b(?:usat[oaie]|usad[oa]s?|occasion|gebraucht|seminuov[oa])\b/],
@@ -294,33 +408,52 @@ function allConditions(texts: string[]): string[] {
 
 /** Edition words beyond the guard's (special, anniversary, ...): one listing with one names another edition. */
 const MORE_EDITIONS = new Set('special anniversary illustrated signed exclusive definitive remastered complete legendary'.split(' '));
-function editions(text: string): Set<string> {
-  return new Set(words(text).filter((w) => MORE_EDITIONS.has(w)));
+function editions(texts: string[]): Set<string> {
+  return new Set(texts.flatMap((text) => words(text).filter((w) => MORE_EDITIONS.has(w))));
 }
 
-const GENDER: Record<string, string> = {
+const PATH_GENDER: Record<string, string> = {
   men: 'men', mens: 'men', man: 'men', male: 'men', homme: 'men', uomo: 'men', women: 'women', womens: 'women', woman: 'women', ladies: 'women',
-  female: 'women', femme: 'women', donna: 'women', boys: 'boys', boy: 'boys', girls: 'girls', girl: 'girls', kids: 'kids', children: 'kids',
-  unisex: 'unisex', baby: 'baby',
+  female: 'women', femme: 'women', donna: 'women', unisex: 'unisex',
 };
-function pathGender(path: string | null | undefined): Set<string> {
-  return new Set(words(path ?? '').flatMap((w) => (Object.hasOwn(GENDER, w) ? [GENDER[w]] : [])));
-}
+const PATH_AUDIENCE: Record<string, string> = {
+  kids: 'kids', kid: 'kids', children: 'kids', childrens: 'kids', child: 'kids', junior: 'junior', juniors: 'junior', boys: 'boys', boy: 'boys', girls: 'girls',
+  girl: 'girls', toddler: 'toddler', toddlers: 'toddler', youth: 'youth', baby: 'baby', infant: 'baby',
+};
+const pathWords = (path: string | null | undefined, map: Record<string, string>) => new Set(words(path ?? '').flatMap((w) => (Object.hasOwn(map, w) ? [map[w]] : [])));
 
 /** Letters of another script inside a Latin word (Ultrа with a Cyrillic a): a look-alike title. */
 const LOOKALIKE = /\p{Script=Latin}[\p{Script=Cyrillic}\p{Script=Greek}]|[\p{Script=Cyrillic}\p{Script=Greek}]\p{Script=Latin}/u;
 
-const compactBrand = (b: string | null | undefined) => (b ?? '').normalize('NFKD').replace(/\p{M}+/gu, '').toLowerCase().replace(/[^\p{L}\p{N}]+/gu, '');
+/** Names of a brand people write instead (Coke for Coca-Cola), compact spelling. */
+const BRAND_ALIASES: Record<string, string[]> = { cocacola: ['coke'], hewlettpackard: ['hp'], hp: ['hewlettpackard'], volkswagen: ['vw'] };
+
+const brandWords = (b: string | null | undefined) => (b ?? '').normalize('NFKD').replace(/\p{M}+/gu, '').toLowerCase().split(/[^\p{L}\p{N}]+/u).filter((w) => w !== '');
+const titleWords = (s: string) => brandWords(s);
+
+/** Whether a title names the brand as whole words (Sharp is not in "Sharper Image"), before any "for ...". */
+function namesBrand(title: string, brand: string[]): boolean {
+  if (brand.length === 0) return false;
+  // "Case for Apple iPhone 15": the brand after "for" is what it fits, not its maker
+  const head = title.split(/\s(?:for|fits|compatible\s+with)\s/i)[0];
+  const toks = titleWords(head);
+  const compact = brand.join('');
+  return inRun(toks, compact) || (BRAND_ALIASES[compact] ?? []).some((a) => toks.includes(a));
+}
+
+/** One brand's words include the other's (Apple and Apple Inc, Philips and Philips Hue). */
+const sameBrand = (a: string[], b: string[]) => a.every((w) => b.includes(w)) || b.every((w) => a.includes(w));
 
 function brandConflict(a: VetoListing, b: VetoListing): string | null {
-  const ba = compactBrand(a.brand);
-  const bb = compactBrand(b.brand);
-  const ta = compactText(a.title);
-  const tb = compactText(b.title);
-  if (ba !== '' && bb !== '' && ba !== bb && !tb.includes(ba) && !ta.includes(bb) && !ba.includes(bb) && !bb.includes(ba)) return `brand ${a.brand} vs ${b.brand}`;
-  // one shop names a brand the other listing neither has nor writes (an Apple case and a case for an iPhone)
-  if (ba !== '' && bb === '' && !tb.includes(ba)) return `brand ${a.brand} vs none`;
-  if (bb !== '' && ba === '' && !ta.includes(bb)) return `brand none vs ${b.brand}`;
+  const ba = brandWords(a.brand);
+  const bb = brandWords(b.brand);
+  if (ba.length > 0 && bb.length > 0) {
+    if (sameBrand(ba, bb) || namesBrand(b.title, ba) || namesBrand(a.title, bb)) return null;
+    return `brand ${a.brand} vs ${b.brand}`;
+  }
+  // a brand field on one side only: the other title must name it (an Apple case and a case for an iPhone)
+  if (ba.length > 0 && !namesBrand(b.title, ba)) return `brand ${a.brand} vs none`;
+  if (bb.length > 0 && !namesBrand(a.title, bb)) return `brand none vs ${b.brand}`;
   return null;
 }
 
@@ -331,8 +464,28 @@ const subset = <T>(a: Set<T>, b: Set<T>) => [...a].every((x) => b.has(x));
 const bothDiffer = <T>(a: Set<T>, b: Set<T>) => a.size > 0 && b.size > 0 && !equalSets(a, b);
 /** Each has a value the other lacks. */
 const eachLacks = <T>(a: Set<T>, b: Set<T>) => !subset(a, b) && !subset(b, a);
+const disjoint = <T>(a: Set<T>, b: Set<T>) => a.size > 0 && b.size > 0 && [...a].every((x) => !b.has(x));
 
+/** The guard fields compared over the title and every variant title (condition and bundle are read on their own). */
 const GUARD_FIELDS = ['condition', 'money', 'gender', 'audience', 'platform', 'concentration', 'edition', 'format', 'bundle', 'pack words', 'GPU memory', 'Windows edition', 'dose form'];
+const SKIP_GUARD = new Set(['condition', 'gender', 'audience', 'bundle']);
+
+/** Each guard field as the set of values the title and the variant titles name. */
+function guardSets(texts: string[], category: string): Set<string>[] {
+  const out = GUARD_FIELDS.map(() => new Set<string>());
+  for (const text of texts) {
+    guardOf(text, category, []).split('|').forEach((v, i) => {
+      for (const x of v.split(',')) if (x !== '') out[i].add(x);
+    });
+  }
+  // a title without a condition or money says "new" and "none"; only the values named count
+  out[0].delete('new');
+  out[1].delete('none');
+  return out;
+}
+
+/** A price more than this many times another of the same condition is another product (a case at a phone's price). */
+const PRICE_RATIO = 3;
 
 /**
  * Why two listings cannot be one product, as short reasons; empty when nothing in their data disagrees. Text in a
@@ -343,17 +496,15 @@ export function vetoReasons(a: VetoListing, b: VetoListing): string[] {
   const brands = [a.brand, b.brand].filter((x): x is string => typeof x === 'string' && x.trim() !== '').map((x) => x.trim());
   const ta = withoutBrands(a.title, brands);
   const tb = withoutBrands(b.title, brands);
-  const va = (a.variantTitles ?? []).map((t) => withoutBrands(t, brands));
-  const vb = (b.variantTitles ?? []).map((t) => withoutBrands(t, brands));
-  const xa = [ta, ...va];
-  const xb = [tb, ...vb];
+  const xa = [ta, ...(a.variantTitles ?? []).map((t) => withoutBrands(t, brands))];
+  const xb = [tb, ...(b.variantTitles ?? []).map((t) => withoutBrands(t, brands))];
   const add = (r: string | null) => {
     if (r) reasons.push(r);
   };
 
   // the category: neighbours only when a model code ties them (AirPods filed under phones at one shop)
-  const codesA = modelCodes(ta);
-  const codesB = modelCodes(tb);
+  const codesA = [...new Set(xa.flatMap(modelCodes))].sort();
+  const codesB = [...new Set(xb.flatMap(modelCodes))].sort();
   if (a.category !== b.category) {
     const tied = codesA.some((c) => c.length >= 4 && codesB.includes(c));
     if (!sameOrNeighbour(a.category, b.category) || !tied) add(`category ${a.category} vs ${b.category}`);
@@ -364,25 +515,37 @@ export function vetoReasons(a: VetoListing, b: VetoListing): string[] {
   if (LOOKALIKE.test(a.title.normalize('NFKC')) || LOOKALIKE.test(b.title.normalize('NFKC'))) add('look-alike letters of another script');
   add(brandConflict(a, b));
 
+  // barcodes and part numbers: two valid barcodes at two shops, or two part numbers, name two products
+  const ga = gtinIdentity(a.gtin);
+  const gb = gtinIdentity(b.gtin);
+  if (ga && gb && ga !== gb && (a.shopId === undefined || b.shopId === undefined || a.shopId !== b.shopId)) add(`barcode ${ga} vs ${gb}`);
+  const pa = mpnIdentity(a.mpn);
+  const pb = mpnIdentity(b.mpn);
+  if (pa && pb && pa !== pb) add(`part number ${pa} vs ${pb}`);
+
   const qa = quantities(xa);
   const qb = quantities(xb);
   for (const cls of new Set([...qa.keys(), ...qb.keys()])) {
     const x = qa.get(cls) ?? new Set<number>();
     const y = qb.get(cls) ?? new Set<number>();
-    if (x.size > 0 && y.size > 0 && eachLacks(x, y)) add(`${cls} ${show(x)} vs ${show(y)}`);
+    const eq = near(cls);
+    if (x.size > 0 && y.size > 0 && !subsetBy(x, y, eq) && !subsetBy(y, x, eq)) add(`${cls} ${show(x)} vs ${show(y)}`);
   }
-  add(codeConflict(codesA, codesB, compactText(ta), compactText(tb)));
-  const na = bareNumbers(ta, cat);
-  const nb = bareNumbers(tb, cat);
+  add(codeConflict(codesA, codesB, xa.map(compactText).join(' '), xb.map(compactText).join(' ')));
+  const na = bareNumbers(xa, cat);
+  const nb = bareNumbers(xb, cat);
   if (na.size > 0 && nb.size > 0 && eachLacks(na, nb)) add(`model number ${show(na)} vs ${show(nb)}`);
 
   const ma = modelWords(xa, cat);
   const mb = modelWords(xb, cat);
   if (!equalSets(ma, mb)) add(`model words ${show(ma)} vs ${show(mb)}`);
+  const pma = modelWords(segments(a.categoryPath), cat);
+  const pmb = modelWords(segments(b.categoryPath), cat);
+  if (disjoint(pma, pmb)) add(`shop category model ${show(pma)} vs ${show(pmb)}`);
 
-  const pa = packs(xa);
-  const pb = packs(xb);
-  if (!equalSets(pa, pb)) add(`pack count ${show(pa)} vs ${show(pb)}`);
+  const pka = packs(xa);
+  const pkb = packs(xb);
+  if (!equalSets(pka, pkb)) add(`pack count ${show(pka)} vs ${show(pkb)}`);
   const pca = pieces(xa);
   const pcb = pieces(xb);
   if (bothDiffer(pca, pcb)) add(`pieces ${show(pca)} vs ${show(pcb)}`);
@@ -391,46 +554,61 @@ export function vetoReasons(a: VetoListing, b: VetoListing): string[] {
   const cb = allConditions(xb);
   if (ca.join(',') !== cb.join(',')) add(`condition ${show(ca)} vs ${show(cb)}`);
 
-  // the title guard of name matching: condition, money, gender, audience, platform, concentration, edition, format,
-  // bundle, pack words, GPU memory, Windows edition and dose form must all agree
-  const ga = guardOf(ta, cat, va).split('|');
-  const gb = guardOf(tb, cat, vb).split('|');
+  // the title guard of name matching over the title and every variant title
+  const ga2 = guardSets(xa, cat);
+  const gb2 = guardSets(xb, cat);
   GUARD_FIELDS.forEach((field, i) => {
-    if (field === 'condition') return;
-    if (ga[i] !== gb[i]) add(`${field} ${ga[i] || 'none'} vs ${gb[i] || 'none'}`);
+    if (SKIP_GUARD.has(field)) return;
+    if (!equalSets(ga2[i], gb2[i])) add(`${field} ${show(ga2[i])} vs ${show(gb2[i])}`);
   });
+  // gender: the title's, else the shop category's (a Men's title and a Mens path agree)
+  const genderOf = (g: Set<string>, l: VetoListing) => (g.size > 0 ? g : pathWords(l.categoryPath, PATH_GENDER));
+  const gna = genderOf(ga2[2], a);
+  const gnb = genderOf(gb2[2], b);
+  if (!equalSets(gna, gnb)) add(`gender ${show(gna)} vs ${show(gnb)}`);
+  const pga = pathWords(a.categoryPath, PATH_GENDER);
+  const pgb = pathWords(b.categoryPath, PATH_GENDER);
+  if (bothDiffer(pga, pgb) && equalSets(gna, gnb)) add(`shop category ${show(pga)} vs ${show(pgb)}`);
+  // children's audience: the titles' and, for clothing and shoes, the shop category's
+  const clothing = cat === 'fashion' || cat === 'sports';
+  const audA = new Set([...ga2[3], ...(clothing ? pathWords(a.categoryPath, PATH_AUDIENCE) : [])]);
+  const audB = new Set([...gb2[3], ...(clothing ? pathWords(b.categoryPath, PATH_AUDIENCE) : [])]);
+  if (!equalSets(audA, audB)) add(`audience ${show(audA)} vs ${show(audB)}`);
 
-  const ea = editions(ta);
-  const eb = editions(tb);
+  const ba = xa.some(bundle);
+  const bb = xb.some(bundle);
+  if (ba !== bb) add(`bundle ${ba ? 'bundle' : 'none'} vs ${bb ? 'bundle' : 'none'}`);
+  const aca = accessories(a, ta);
+  const acb = accessories(b, tb);
+  if ((aca.size === 0) !== (acb.size === 0)) add(`accessory ${show(aca)} vs ${show(acb)}`);
+
+  const ea = editions(xa);
+  const eb = editions(xb);
   if (!equalSets(ea, eb)) add(`edition ${show(ea)} vs ${show(eb)}`);
 
-  const pgA = pathGender(a.categoryPath);
-  const pgB = pathGender(b.categoryPath);
-  const tgA = new Set(ga[2] ? ga[2].split(',') : []);
-  const tgB = new Set(gb[2] ? gb[2].split(',') : []);
-  if (bothDiffer(pgA, pgB)) add(`shop category ${show(pgA)} vs ${show(pgB)}`);
-  else if (bothDiffer(pgA, tgB) || bothDiffer(tgA, pgB)) add(`gender ${show(pgA.size > 0 ? pgA : tgA)} vs ${show(pgB.size > 0 ? pgB : tgB)}`);
-
-  const oa = osFamilies(ta);
-  const ob = osFamilies(tb);
+  const oa = osFamilies(xa);
+  const ob = osFamilies(xb);
   if (bothDiffer(oa, ob)) add(`OS ${show(oa)} vs ${show(ob)}`);
-  const wa = windowsVersions(ta);
-  const wb = windowsVersions(tb);
+  const wa = windowsVersions(xa);
+  const wb = windowsVersions(xb);
   if (bothDiffer(wa, wb)) add(`Windows ${show(wa)} vs ${show(wb)}`);
 
-  const sa = classWords([ta], STORAGE_TYPE);
-  const sb = classWords([tb], STORAGE_TYPE);
+  const sa = classWords(xa, STORAGE_TYPE);
+  const sb = classWords(xb, STORAGE_TYPE);
   if (bothDiffer(sa, sb)) add(`storage type ${show(sa)} vs ${show(sb)}`);
   const sim1 = sims(xa);
   const sim2 = sims(xb);
-  if (!equalSets(sim1, sim2)) add(`SIM ${show(sim1)} vs ${show(sim2)}`);
-  const ra = regions(ta);
-  const rb = regions(tb);
-  if (bothDiffer(ra, rb)) add(`region ${show(ra)} vs ${show(rb)}`);
+  if (bothDiffer(sim1, sim2)) add(`SIM ${show(sim1)} vs ${show(sim2)}`);
+  const ra = versionRegions(xa);
+  const rb = versionRegions(xb);
+  if (!equalSets(ra, rb)) add(`region ${show(ra)} vs ${show(rb)}`);
+  const pla = plugs(xa);
+  const plb = plugs(xb);
+  if (bothDiffer(pla, plb)) add(`plug ${show(pla)} vs ${show(plb)}`);
   const mta = classWords(xa, MATERIAL);
   const mtb = classWords(xb, MATERIAL);
   if (bothDiffer(mta, mtb)) add(`material ${show(mta)} vs ${show(mtb)}`);
-  if (cat !== 'fashion' && cat !== 'sports') {
+  if (!clothing) {
     const za = classWords([ta], SIZE_WORD);
     const zb = classWords([tb], SIZE_WORD);
     if (bothDiffer(za, zb)) add(`size ${show(za)} vs ${show(zb)}`);
@@ -438,6 +616,10 @@ export function vetoReasons(a: VetoListing, b: VetoListing): string[] {
   const vya = varieties(xa, cat);
   const vyb = varieties(xb, cat);
   if (!equalSets(vya, vyb)) add(`variety ${show(vya)} vs ${show(vyb)}`);
+
+  const pra = a.priceCents ?? 0;
+  const prb = b.priceCents ?? 0;
+  if (pra > 0 && prb > 0 && ca.join(',') === cb.join(',') && Math.max(pra, prb) > PRICE_RATIO * Math.min(pra, prb)) add(`price ${pra} vs ${prb} cents`);
   return reasons;
 }
 

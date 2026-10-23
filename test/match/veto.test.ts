@@ -6,6 +6,7 @@ import { describe, expect, it } from 'vitest';
 import { applyVeto, modelCodes, vetoReasons, type VetoListing } from '../../src/match/veto.js';
 import { PAIRS, SAME, type L } from '../names/adversarial-pairs.js';
 import { APART, TOGETHER, type PairListing } from '../site/review-pairs.js';
+import { PROBE_DIFF, PROBE_MORE, PROBE_SAME } from './probe-pairs.js';
 
 const fromAdversarial = (x: L): VetoListing => ({ title: x.title, brand: x.brand, category: x.cat, variantTitles: x.variants ?? [], mpn: x.mpn ?? null });
 const fromReview = (x: PairListing): VetoListing => ({ title: x.title, brand: x.brand, category: x.category });
@@ -29,11 +30,14 @@ function expectKept(list: VetoListing[]) {
 
 const id = (what: string) => what.split(' ')[0];
 
+/** Adversarial pairs the veto keeps by ruling: N40 (review 23 Oct: Dual SIM on one side only is no difference). */
+const VETO_KEEPS = new Set(['N40']);
+
 describe('veto: the adversarial pairs (test/names/adversarial-pairs.ts)', () => {
-  for (const [what, a, b] of PAIRS.filter(([w]) => !SAME.has(id(w)))) {
+  for (const [what, a, b] of PAIRS.filter(([w]) => !SAME.has(id(w)) && !VETO_KEEPS.has(id(w)))) {
     it(`vetoes ${what}`, () => expectVetoed(fromAdversarial(a), fromAdversarial(b)));
   }
-  for (const [what, a, b] of PAIRS.filter(([w]) => SAME.has(id(w)))) {
+  for (const [what, a, b] of PAIRS.filter(([w]) => SAME.has(id(w)) || VETO_KEEPS.has(id(w)))) {
     it(`keeps ${what}`, () => expectKept([fromAdversarial(a), fromAdversarial(b)]));
   }
 });
@@ -160,4 +164,51 @@ describe('modelCodes', () => {
 describe('veto: the Windows edition is read once', () => {
   it('keeps W11P and Windows 11 Pro together', () =>
     expectKept([v('laptops', 'Lenovo ThinkPad E14 G6 i5-1335U 16GB 512GB W11P', 'Lenovo'), v('laptops', 'Lenovo ThinkPad E14 G6 i5-1335U 16GB 512GB Windows 11 Pro', 'Lenovo')]));
+});
+
+/** Probe pairs that are no veto case: A9 differs only in its image, A39 is one company (Apple, Apple Inc). */
+const PROBE_KEPT = new Set(['A9', 'A39']);
+/** A38: the maker only in the category path, both brand fields empty: needs a list of makers, left to Claude. */
+const PROBE_GAP = new Set(['A38']);
+
+describe('veto: the reviewer probes of 23 Oct (test/match/probe-pairs.ts)', () => {
+  for (const [what, a, b] of PROBE_DIFF.filter(([w]) => !PROBE_KEPT.has(id(w)) && !PROBE_GAP.has(id(w)))) it(`vetoes ${what}`, () => expectVetoed(a, b));
+  for (const [what, a, b] of PROBE_DIFF.filter(([w]) => PROBE_KEPT.has(id(w)))) it(`keeps ${what}`, () => expectKept([a, b]));
+  for (const [what, a, b] of PROBE_SAME) it(`keeps ${what}`, () => expectKept([a, b]));
+  for (const [what, a, b] of PROBE_MORE.filter(([w]) => id(w) !== 'B13')) it(`vetoes ${what}`, () => expectVetoed(a, b));
+  for (const [what, a, b] of PROBE_MORE.filter(([w]) => id(w) === 'B13')) it(`keeps ${what}`, () => expectKept([a, b]));
+});
+
+describe('veto: barcodes, part numbers and prices', () => {
+  it('vetoes different valid barcodes at different shops, not the colours one shop lists on their own', () => {
+    expectVetoed(v('toys', 'Hot Wheels Truck', 'Mattel', { gtin: '5000112637922', shopId: 1 }), v('toys', 'Hot Wheels Truck', 'Mattel', { gtin: '5449000000996', shopId: 2 }));
+    expectKept([v('toys', 'Hot Wheels Truck Red', 'Mattel', { gtin: '5000112637922', shopId: 1 }), v('toys', 'Hot Wheels Truck Blue', 'Mattel', { gtin: '5449000000996', shopId: 1 })]);
+  });
+  it('vetoes different part numbers, colour suffixes stripped', () => {
+    expectVetoed(v('laptops', 'Lenovo IdeaPad Slim 3', 'Lenovo', { mpn: '82XM00ABUK' }), v('laptops', 'Lenovo IdeaPad Slim 3', 'Lenovo', { mpn: '83ER0012UK' }));
+    expectKept([v('tv-audio', 'JBL Tune 500 White', 'JBL', { mpn: 'JBLT500WHT' }), v('tv-audio', 'JBL Tune 500 Black', 'JBL', { mpn: 'JBLT500BLK' })]);
+  });
+  it('vetoes a price more than 3 times another of the same condition', () => {
+    expectVetoed(v('tv-audio', 'Sony WH-1000XM5', 'Sony', { priceCents: 9000 }), v('tv-audio', 'Sony WH-1000XM5', 'Sony', { priceCents: 30000 }));
+    expectKept([v('tv-audio', 'Sony WH-1000XM5', 'Sony', { priceCents: 25000 }), v('tv-audio', 'Sony WH-1000XM5', 'Sony', { priceCents: 34900 })]);
+  });
+});
+
+describe('veto: pack counts written every way', () => {
+  const blades = (s: string) => v('beauty-health', `Gillette Fusion5 Razor Blades ${s}`, 'Gillette');
+  it('reads x2, 2x, 2-Pack, 2 Pack and Twin Pack as the same count', () => expectKept([blades('x2'), blades('2-Pack'), blades('2 Pack'), blades('Twin Pack'), v('beauty-health', '2x Gillette Fusion5 Razor Blades', 'Gillette')]));
+  it('keeps 40 x 30 cm a size, not a pack', () => expectKept([v('home-kitchen', 'IKEA Frame 40 x 30 cm', 'IKEA'), v('home-kitchen', 'IKEA Frame 40x30cm', 'IKEA')]));
+});
+
+describe('veto: true matches from the pilot of 23 Oct', () => {
+  it('reads a dotted brand as a name, not a pack word (b.box)', () =>
+    expectKept([v('baby', 'Straw Bottle 500ml, Insulated - Blush Crush', null), v('baby', 'b.box Insulated Straw Bottle 500ml - Blush Crush', null)]));
+  it('reads w/ as with', () =>
+    expectKept([v('tv-audio', 'JBL BAR 500 M2 5.1 750W SOUNDBAR W/SUBWOOFER', 'JBL'), v('tv-audio', 'JBL Bar 500 M2 5.1 Channel Soundbar with Subwoofer', 'JBL')]));
+  it('reads "and" as a word, not a bundle', () =>
+    expectKept([v('tv-audio', 'Philips 55" 4K Smart TV HDR10+ with Titan OS', 'Philips'), v('tv-audio', 'Philips 55-inch 4K UHD LED Smart TV with HDR10+ and Ambilight', 'Philips')]));
+  it('keeps a 2.1 speaker system with and without "with Subwoofer"', () =>
+    expectKept([v('tv-audio', 'Logitech Z623 2.1 Speaker System with THX Certified Audio', 'Logitech'), v('tv-audio', 'Logitech Z623 2.1 Speakers with Subwoofer', 'Logitech')]));
+  it('still vetoes a console with and without a second controller', () =>
+    expectVetoed(v('gaming', 'Sony PS5 Slim Console with 2 Controllers', 'Sony'), v('gaming', 'Sony PS5 Slim Console', 'Sony')));
 });
