@@ -77,12 +77,35 @@ Results are copied into a new `site_products.display_name` column at site-build 
 5. **Agreement across shops.** When several shops sell the same barcode or model number (trusted matches only), the group's name is the clean name most shops agree on, else the shortest clean name that keeps the brand and every model and number token.
 6. **Safety.** A cleaned name is used only if it keeps the brand (when known) and every model and number token of the original; otherwise the original title is shown. Names are never invented.
 
-## Part 3: search presentation
+## Part 3: search by product, one page per product (owner decision, 23 Oct)
 
-- Search and deal lists show `display_name`; the shop's title is shown in Advanced mode and on the product page.
-- Within one shop, groups whose clean names match are shown once with variant chips instead of several rows.
-- Search ranking uses both the clean name and the shop title.
-- Filters by attribute (size, colour, material, dimensions) are a later task; this design only stores the data they need.
+The aim of the clean names: search works by general product, not by product per shop. When the same product is sold by several shops, a search result leads to one product page showing the product and every seller's price.
+
+### What counts as the same product (owner decision: "name + specs")
+
+Two shops' listings are the same product when either:
+1. they share a barcode (GTIN) or maker's model number (MPN), as today, or the owner confirmed the match in admin; or
+2. **name match:** both have an accepted clean name, the same reliable brand (or both none), the same clean name after case, spacing and unit spelling are made equal, and the same values for the category's key specs where both have them (for example storage_gb, ram_gb and screen_in for laptops and phones; size, volume or pack count for drinks and beauty; pieces and set number for toys). A spec present on one side and different on the other blocks the match. Colour and size are variant options, not part of the product's identity.
+
+Name matches are stored as a new match method `name` in the canonical grouping at site-build. They count as trusted for listing sellers side by side and for "Cheaper at", because the clean name already passed the safety check (brand, model and number tokens kept) and the specs must agree. Title-only matches (`title`, the old word-overlap rule) stay "possibly the same" and are never shown as the same product.
+
+### Search
+
+- One result per product (canonical group), titled with the clean name, showing the lowest current price, how many shops sell it, and a Black Friday marker if any seller marks it.
+- A product sold by one shop is still one result.
+- Ranking uses the clean name first, then the shop titles.
+
+### Product page
+
+- Keyed by the product (canonical id), with a stable link; old `/p/:id` links for a shop listing redirect to their product.
+- Shows the clean name, image, key attributes, and a sellers table: shop, current price, was price, stock, link to the shop, and that seller's verdict (Good Deal, Deal to Avoid or none). Verdicts stay per seller, because a "was" price is one shop's claim.
+- Variant options (colour, size) are shown as choices; choosing one filters the sellers table.
+- The price chart shows each seller's line (Advanced), and the day table works per seller.
+- "Something wrong?" can report the whole product or one seller's listing.
+
+### Filters
+
+Filters by attribute (size, colour, material, dimensions) remain a later task; this design stores the data they need.
 
 ## Not in scope
 
