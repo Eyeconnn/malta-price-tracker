@@ -6,6 +6,7 @@ import postgres from 'postgres';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { buildShop, buildSiteProducts } from '../../src/site/build.js';
 import { DEFAULT_SETTINGS } from '../../src/site/settings.js';
+import { APART, TOGETHER } from './review-pairs.js';
 
 const PORT = 55463;
 // real time: the brand rule reads fresh rows with the database's now()
@@ -72,6 +73,8 @@ const LISTINGS: Listing[] = [
   // 256GB and 512GB at one shop: two products
   { key: 'RN-256', shop: 'gamma', title: 'XIAOMI Redmi Note 14 Pro+ 256GB-Storage 8GB Smartphone, Black', brand: 'XIAOMI', name: 'Xiaomi Redmi Note 14 Pro+ Smartphone', attrs: { storage_gb: 256, ram_gb: 8 } },
   { key: 'RN-512', shop: 'gamma', title: 'XIAOMI Redmi Note 14 Pro+ 512GB-Storage 12GB Smartphone, Black', brand: 'XIAOMI', name: 'Xiaomi Redmi Note 14 Pro+ Smartphone', attrs: { storage_gb: 512, ram_gb: 12 } },
+  // the re-review pairs (test/site/review-pairs.ts)
+  ...[...APART, ...TOGETHER].flatMap(({ pair }) => pair.map((l) => ({ ...l, label: l.label ?? undefined }))),
 ];
 
 describe.skipIf(!process.env.SITE_BUILD_TEST_DB)('site-build name matching on PGlite', () => {
@@ -245,6 +248,21 @@ describe.skipIf(!process.env.SITE_BUILD_TEST_DB)('site-build name matching on PG
     const [redirect] = await sql<{ new_id: string }[]>`select new_id from canonical_redirects where old_id = ${old}`;
     expect(redirect.new_id).toBe(now);
   }, 60_000);
+
+  for (const { what, pair } of APART) {
+    it(`keeps apart (re-review): ${what}`, async () => {
+      const r = await rows();
+      for (const l of pair) expect(r.get(l.key)!.match_method, l.key).not.toBe('name');
+    });
+  }
+
+  for (const { what, pair } of TOGETHER) {
+    it(`still matches (re-review): ${what}`, async () => {
+      const r = await rows();
+      expect(r.get(pair[0].key)!.match_method).toBe('name');
+      expect(r.get(pair[0].key)!.canonical_id).toBe(r.get(pair[1].key)!.canonical_id);
+    });
+  }
 
   it('keeps the grouping on a rebuild', async () => {
     const before = await rows();

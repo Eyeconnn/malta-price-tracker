@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { assignMatches, nameMatch, sameTitle, titleTokens, type MatchInput } from '../../src/site/matching.js';
+import { APART, type PairListing, TOGETHER } from './review-pairs.js';
 
 function item(id: number, shopId: number, title: string, over: Partial<MatchInput> = {}): MatchInput {
   return { id, shopId, gtin: null, mpn: null, title, ...over };
@@ -467,4 +468,32 @@ describe('assignMatches by clean name and key specs (design Part 3, "name + spec
     const m = assignMatches([named(1, 10, 'Galaxy Watch Strap 20', {}, { category: 'phones' }), named(2, 20, 'Galaxy Watch Strap 20', {}, { category: 'fashion' })]);
     expect(m.size).toBe(0);
   });
+});
+
+describe('name matching: the re-review pairs', () => {
+  const input = (l: PairListing, id: number): MatchInput => ({
+    id,
+    shopId: l.shop === 'alpha' ? 1 : 2,
+    gtin: null,
+    mpn: null,
+    title: l.title,
+    brand: l.brand,
+    name: nameMatch(l.name, l.category, l.attrs, l.brand, { title: l.title, variantLabel: l.label, variantCount: 1 }),
+  });
+
+  for (const { what, pair } of APART) {
+    it(`keeps apart: ${what}`, () => {
+      const m = assignMatches([input(pair[0], 1), input(pair[1], 2)]);
+      expect(m.get(1)?.method).not.toBe('name');
+      expect(m.get(2)?.method).not.toBe('name');
+    });
+  }
+
+  for (const { what, pair } of TOGETHER) {
+    it(`still matches: ${what}`, () => {
+      const m = assignMatches([input(pair[0], 1), input(pair[1], 2)]);
+      expect(m.get(1)).toEqual({ key: 'name:1', method: 'name' });
+      expect(m.get(2)?.key).toBe('name:1');
+    });
+  }
 });

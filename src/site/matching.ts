@@ -2,9 +2,9 @@
 // specs (design Part 3, "name + specs"), else similar titles. The title rule is ported from dashboard/src/page.ts
 // (tokens and sameProduct).
 import { hasBrand } from '../names/brand.js';
-import { compact, conditions, moneyValues } from '../names/text.js';
+import { compact, conditions, moneyValues, packCounts, prep } from '../names/text.js';
 import { cleanGtin } from '../util/normalise.js';
-import { identityValues, nameKey, nameTokens, sameIdentity, specParts } from './identity.js';
+import { COLOURS, IDENTITY, identityValues, nameKey, nameTokens, sameIdentity } from './identity.js';
 
 /**
  * A row's accepted clean name (product_names, status ok) as the name rule reads it. brand: the row's reliable
@@ -154,7 +154,9 @@ function nameConflict(members: MatchInput[], it: MatchInput): boolean {
       ((m.name.key === n.key && !sameNamedProduct(m as Named, it as Named)) ||
         // a used or refurbished item is not possibly the same as a new one, nor a €20 card a €50 one (review C1)
         m.name.identity.condition !== n.identity.condition ||
-        m.name.identity.money !== n.identity.money),
+        m.name.identity.money !== n.identity.money ||
+        m.name.identity.audience !== n.identity.audience ||
+        m.name.identity.bundle !== n.identity.bundle),
   );
 }
 
@@ -229,22 +231,84 @@ function matchByTitle(items: MatchInput[], out: Map<number, Match>): void {
   }
 }
 
-/** Words that name the kind of spec in a variant label ("1TB SSD", "12GB RAM"). */
-const SPEC_WORDS = new Set(['ssd', 'hdd', 'emmc', 'ram', 'rom', 'storage', 'memory']);
+/** Words that name the kind of spec in a variant label ("1TB SSD", "12GB RAM"), and joiners. */
+const SPEC_WORDS = new Set(['ssd', 'hdd', 'emmc', 'ram', 'rom', 'storage', 'memory', 'and', 'with']);
+
+/** Colour words: the shared colour list and the shop colour names of the title rule (Graphite, Midnight, ...). */
+const COLOUR_WORDS = new Set([
+  ...COLOURS.flatMap((c) => nameTokens(c)),
+  ...'black white silver grey gray blue red green pink purple gold yellow orange beige brown navy titanium natural desert midnight starlight graphite space sage mist lavender cream rose violet teal mint coral obsidian porcelain phantom dark light pastel multicolor multi transparent clear'.split(
+    ' ',
+  ),
+]);
+/** Letter sizes and size words: variant options, never identity. */
+const SIZE_WORDS = new Set(['xxxs', 'xxs', 'xs', 's', 'm', 'l', 'xl', 'xxl', 'xxxl', '2xl', '3xl', 'size', 'one', 'eu', 'uk', 'us']);
+
+/** A quantity in one unit class: storage in GB, volume in ml, weight in g, length in cm, screens in inches. */
+function quantityOf(t: string): { cls: string; value: number } | null {
+  const m = /^(\d+(?:\.\d+)?)(\p{L}+)$/u.exec(t);
+  if (!m) return null;
+  const n = Number(m[1]);
+  const scale: Record<string, [string, number]> = {
+    gb: ['gb', 1], tb: ['gb', 1024], ml: ['ml', 1], cl: ['ml', 10], dl: ['ml', 100], l: ['ml', 1000],
+    g: ['g', 1], kg: ['g', 1000], mm: ['cm', 0.1], cm: ['cm', 1], m: ['cm', 100], in: ['in', 1], w: ['w', 1], kw: ['w', 1000],
+  };
+  const s = scale[m[2]];
+  return s ? { cls: s[0], value: Math.round(n * s[1] * 100) / 100 } : { cls: m[2], value: n };
+}
+
+/** The unit class of a number spec of the attribute schema, and its factor to that class (L is 1000 ml). */
+const SPEC_CLASS: Record<string, [string, number]> = { GB: ['gb', 1], ml: ['ml', 1], L: ['ml', 1000], g: ['g', 1], kg: ['g', 1000], cm: ['cm', 1], inch: ['in', 1], W: ['w', 1] };
 
 /**
- * Numbers with a unit in a clean variant label ("256GB" of "256GB, Black") that the attributes do not give: a
- * listing whose storage is only in its label is still told apart from another storage (review C2b). Colour and
- * size words and bare numbers (sizes) are not counted, nor sizes the attributes list.
+ * What a clean variant label adds to a listing's identity (review C2b, re-review). A number with a unit becomes the
+ * category spec it measures when that is the only spec of its unit the attributes lack ("70cl" is volume_ml 700),
+ * is dropped when the attributes already give it, and otherwise counts as it is. For a listing with one variant,
+ * every other word and bare number of the label counts too (Plus, Ultra, Pro, OLED, Digital, Twin, 44), except
+ * colour and size words, sizes the attributes list and a number after "size": the label of a single listing names
+ * what this listing is, the label of a group lists its variants.
  */
-function labelSpecs(variantLabel: string | null, category: string | null, attrs: Record<string, unknown> | null): string {
-  if (!variantLabel) return '';
-  const covered = new Set(specParts(category, attrs).flatMap((p) => nameTokens(p.text)));
-  const sizes = attrs && Array.isArray(attrs.sizes) ? attrs.sizes : [];
-  for (const s of sizes) if (typeof s === 'string') for (const t of nameTokens(s)) covered.add(t);
-  const own = nameTokens(variantLabel).filter((t) => /^\d+(?:\.\d+)?\p{L}+$/u.test(t) && !SPEC_WORDS.has(t) && !covered.has(t));
-  return [...new Set(own)].sort().join(',');
+function labelIdentity(variantLabel: string | null, category: string | null, attrs: Record<string, unknown> | null, single: boolean): { fill: Record<string, string>; rest: string } {
+  const fill: Record<string, string> = {};
+  if (!variantLabel) return { fill, rest: '' };
+  const specs = category !== null && Object.hasOwn(IDENTITY, category) ? IDENTITY[category] : [];
+  const given = (key: string) => !!attrs && Object.hasOwn(attrs, key) && attrs[key] !== null && attrs[key] !== undefined;
+  const covered = (cls: string, value: number) =>
+    specs.some((s) => {
+      const c = s.unit ? SPEC_CLASS[s.unit] : undefined;
+      const v = attrs?.[s.key];
+      return c !== undefined && c[0] === cls && typeof v === 'number' && Math.round(v * c[1] * 100) / 100 === value;
+    });
+  const sizes = new Set((attrs && Array.isArray(attrs.sizes) ? attrs.sizes : []).flatMap((x) => (typeof x === 'string' ? nameTokens(x) : [])));
+  const toks = nameTokens(variantLabel);
+  const rest: string[] = [];
+  toks.forEach((t, i) => {
+    if (SPEC_WORDS.has(t) || COLOUR_WORDS.has(t) || SIZE_WORDS.has(t) || sizes.has(t) || toks[i - 1] === 'size') return;
+    const q = /\d/.test(t) && /\p{L}/u.test(t) ? quantityOf(t) : null;
+    if (q) {
+      if (covered(q.cls, q.value)) return;
+      const open = specs.filter((s) => s.unit && SPEC_CLASS[s.unit]?.[0] === q.cls && !given(s.key));
+      if (open.length === 1) {
+        const factor = SPEC_CLASS[open[0].unit!][1];
+        fill[open[0].key] = String(Math.round((q.value / factor) * 100) / 100);
+        return;
+      }
+      rest.push(`${q.value}${q.cls}`);
+      return;
+    }
+    if (single) rest.push(t);
+  });
+  return { fill, rest: [...new Set(rest)].sort().join(',') };
 }
+
+/** Audience words: a kids' or junior product is another product than the adult one (re-review). */
+const AUDIENCE: Record<string, string> = {
+  kid: 'kids', kids: 'kids', child: 'kids', children: 'kids', junior: 'junior', jr: 'junior', boys: 'boys', boy: 'boys', girls: 'girls',
+  girl: 'girls', baby: 'baby', babies: 'baby', infant: 'baby', toddler: 'toddler', toddlers: 'toddler', youth: 'youth', gs: 'gs', ps: 'ps', td: 'td',
+};
+
+/** A bundle (a console with two controllers, a set + a bag) is another product than the plain item (re-review). */
+const BUNDLE = [/(?:^|\s)\+\s*[\p{L}\p{N}]/u, /\bbundle\b/, /\bwith\s+\p{L}/u];
 
 export type NameExtra = {
   /** the shop's title: its condition and values with a currency count even when an older clean name lost them */
@@ -258,9 +322,10 @@ export type NameExtra = {
 /**
  * The name rule's view of a clean name: its category and nameKey, the row's reliable brand (null when the brand
  * field is missing, unreliable or a placeholder; judged by the caller) and its identity: the category's key specs
- * from the attributes, plus three that every listing has (review C1, C2b): the condition (new when none is named),
- * the values with a currency (none when none) and the numbers with a unit its variant label alone gives.
- * Null when the name has no letters or digits.
+ * from the attributes, plus what every listing has (review C1, C2b, re-review): the condition (new when none is
+ * named), the values with a currency (none), the audience (adult), whether it is a bundle, the pack count (from
+ * the attributes, else the title and label, else 1; a pack count in the text replaces a schema default) and what its
+ * variant label adds (labelIdentity). Null when the name has no letters or digits.
  */
 export function nameMatch(
   displayName: string,
@@ -273,17 +338,30 @@ export function nameMatch(
   if (key === '') return null;
   const brand = reliableBrand && compact(reliableBrand) !== '' ? compact(reliableBrand) : null;
   const texts = [displayName, extra.variantLabel ?? '', extra.title ?? ''].join(' \n ');
+  const single = (extra.variantCount ?? 1) <= 1;
+  const label = labelIdentity(extra.variantLabel ?? null, category, attrs, single);
+  const identity = { ...identityValues(category, attrs), ...label.fill };
+  const num = (v: unknown) => (typeof v === 'number' && Number.isFinite(v) ? String(v) : null);
+  const textPacks = [...new Set(packCounts(texts, { pieces: false }).map((p) => p.n))].sort((a, b) => a - b);
+  const pack = num(attrs?.pack_count) ?? num(attrs?.count) ?? (textPacks.length > 0 ? textPacks.join(',') : '1');
+  // a pack count the title or label names replaces the schema default (a 6-pack is never one bottle)
+  if (num(attrs?.pack_count) === null && textPacks.length > 0) delete identity.pack_count;
+  const audience = [...new Set(nameTokens(texts).flatMap((t) => (Object.hasOwn(AUDIENCE, t) ? [AUDIENCE[t]] : [])))].sort();
+  const bundleText = prep(`${displayName}\n${extra.title ?? ''}`);
   return {
     key,
     category: category ?? '',
     brand,
     brandInName: reliableBrand !== null && brand !== null && hasBrand(nameTokens(displayName), reliableBrand),
-    multi: (extra.variantCount ?? 1) > 1,
+    multi: !single,
     identity: {
-      ...identityValues(category, attrs),
+      ...identity,
       condition: conditions(texts).join(',') || 'new',
       money: moneyValues(texts).join(',') || 'none',
-      label_specs: labelSpecs(extra.variantLabel ?? null, category, attrs),
+      audience: audience.join(',') || 'adult',
+      bundle: BUNDLE.some((re) => re.test(bundleText)) ? 'yes' : 'no',
+      pack,
+      label_specs: label.rest,
     },
   };
 }

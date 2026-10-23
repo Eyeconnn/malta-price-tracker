@@ -52,6 +52,9 @@ export function parseIdentity(file: unknown): IdentityConfig {
 
 export const IDENTITY: IdentityConfig = parseIdentity(raw);
 
+/** The shared colour list of the attribute schemas (lists.colours). */
+export const COLOURS: string[] = ((raw as { lists?: { colours?: string[] } }).lists?.colours ?? []).slice();
+
 /** A quantity token in one spelling ("512ssd" and "512.0gb" are "512gb"); other tokens unchanged. */
 function unitForm(t: string): string {
   const m = QUANTITY.exec(t);

@@ -118,9 +118,10 @@ export function moneyValues(text: string): string[] {
 }
 
 const COUNT_WORDS = 'pack|pk|pcs?|pieces|count|ct|nappies|diapers|capsules|caps|tablets|tabs|pods|sachets|wipes|rolls|cans|bottles|bags';
+const PIECE_WORDS = new Set(['pcs', 'pc', 'pieces']);
 const PACK_PATTERNS: RegExp[] = [
   /\bpack\s+of\s+(\d+)\b/g,
-  new RegExp(`\\b(\\d+)\\s*-?\\s*(?:${COUNT_WORDS})\\b`, 'g'),
+  new RegExp(`\\b(\\d+)\\s*-?\\s*(${COUNT_WORDS})\\b`, 'g'),
   // 6 x 330ml, 24x0.5l: a count of a volume or weight (not 40 x 30 cm)
   /\b(\d+)\s*x\s*\d+(?:\.\d+)?\s*(?:ml|cl|l|ltr|g|kg|oz)\b/g,
 ];
@@ -129,10 +130,16 @@ const PACK_PATTERNS: RegExp[] = [
  * Pack and count numbers a text names ("Pack of 6", "6x330ml", "44 Nappies"; "Twin Pack" is 2), each once. word: a
  * word that says the count by itself (twin, triple), which a name may keep instead of the number.
  */
-export function packCounts(text: string): { n: number; word: string | null }[] {
+export function packCounts(text: string, opts: { pieces?: boolean } = {}): { n: number; word: string | null }[] {
   const t = prep(text);
   const out = new Map<number, string | null>();
-  for (const re of PACK_PATTERNS) for (const m of t.matchAll(re)) if (!out.has(Number(m[1]))) out.set(Number(m[1]), null);
+  for (const re of PACK_PATTERNS) {
+    for (const m of t.matchAll(re)) {
+      // pieces: the size of a set (LEGO 3696 pcs), not a pack; left out with { pieces: false }
+      if (opts.pieces === false && m[2] !== undefined && PIECE_WORDS.has(m[2])) continue;
+      if (!out.has(Number(m[1]))) out.set(Number(m[1]), null);
+    }
+  }
   if (/\btwin[\s-]?pack\b/.test(t)) out.set(2, 'twin');
   if (/\btriple[\s-]?pack\b/.test(t)) out.set(3, 'triple');
   return [...out.entries()].map(([n, word]) => ({ n, word }));
