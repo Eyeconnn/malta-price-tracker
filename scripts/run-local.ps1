@@ -18,6 +18,8 @@ foreach ($w in 'scrape-shopify', 'scrape-woo', 'scrape-magento', 'scrape-html') 
   gh workflow run $w --repo Eyeconnn/malta-price-tracker *>> $log
 }
 
+# product photos: small WebP copies to R2 (src/pipeline/images.ts)
+$env:IMAGES_ENABLED = 'on'
 pnpm scrape --runner local *>> $log
 
 # Build the public site's tables. The cloud scrapes started above may still be running; the workflow's own
