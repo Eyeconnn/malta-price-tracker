@@ -3,7 +3,7 @@ import { BlockList, isIP } from 'node:net';
 import { Agent, buildConnector, fetch as undiciFetch } from 'undici';
 
 // Address ranges we never connect to: loopback, private, link-local, CGNAT, documentation,
-// benchmarking, multicast/reserved, and their IPv6 equivalents (incl. NAT64 and 6to4).
+// benchmarking, multicast/reserved, and their IPv6 equivalents (incl. NAT64, 6to4, Teredo, site-local).
 const blocked = new BlockList();
 for (const [net, prefix] of [
   ['0.0.0.0', 8], ['10.0.0.0', 8], ['100.64.0.0', 10], ['127.0.0.0', 8], ['169.254.0.0', 16],
@@ -13,6 +13,8 @@ for (const [net, prefix] of [
 for (const [net, prefix] of [
   ['::', 128], ['::1', 128], ['fc00::', 7], ['fe80::', 10], ['ff00::', 8], ['64:ff9b::', 96],
   ['2002::', 16], ['100::', 64], ['2001:db8::', 32],
+  // local-use NAT64, deprecated site-local, IPv4-compatible (::a.b.c.d) and Teredo
+  ['64:ff9b:1::', 48], ['fec0::', 10], ['::', 96], ['2001::', 32],
 ] as const) blocked.addSubnet(net, prefix, 'ipv6');
 
 /** True if the address is not on the public internet. IPv4-mapped IPv6 is judged by its IPv4 part. */

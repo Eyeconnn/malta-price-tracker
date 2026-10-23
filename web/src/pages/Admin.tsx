@@ -3,6 +3,7 @@
 import { NavLink, Route, Routes } from 'react-router';
 import { cn } from '@/lib/utils';
 import { NotFoundPage } from '@/pages/NotFound';
+import { AdminAddShopPage } from '@/pages/admin/AddShop';
 import { AdminMatchesPage } from '@/pages/admin/Matches';
 import { AdminPhrasesPage } from '@/pages/admin/Phrases';
 import { AdminReportsPage } from '@/pages/admin/Reports';
@@ -17,6 +18,7 @@ const SECTIONS = [
   { to: '/admin/thresholds', label: 'Thresholds' },
   { to: '/admin/reports', label: 'Reports' },
   { to: '/admin/shops', label: 'Shops' },
+  { to: '/admin/add-shop', label: 'Add shop' },
   { to: '/admin/matches', label: 'Matches' },
 ];
 
@@ -53,6 +55,7 @@ export function AdminPage() {
           <Route path="thresholds" element={<AdminThresholdsPage />} />
           <Route path="reports" element={<AdminReportsPage />} />
           <Route path="shops" element={<AdminShopsPage />} />
+          <Route path="add-shop" element={<AdminAddShopPage />} />
           <Route path="matches" element={<AdminMatchesPage />} />
           <Route path="*" element={<NotFoundPage />} />
         </Routes>

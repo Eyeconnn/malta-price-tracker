@@ -1,8 +1,9 @@
 // Admin API under /api/admin/*: settings (public switch, phrases, thresholds, category overrides), report triage,
-// hiding shops and confirming title matches. index.ts already required ADMIN_PASSWORD for these paths; every
-// request here checks it again (Ruling R26), so the handler is safe even if it is ever reached another way.
-// SQL runs only with the site_admin role (Env.ADMIN_DATABASE_URL, Rulings R7/R48). Responses are never cached;
-// writes (PUT/PATCH) need the site's Origin and application/json (Ruling R45). Store errors become the generic 500.
+// hiding shops, confirming title matches and shop requests (Add shop page, shop-requests.ts). index.ts already
+// required ADMIN_PASSWORD for these paths; every request here checks it again (Ruling R26), so the handler is safe
+// even if it is ever reached another way. SQL runs only with the site_admin role (Env.ADMIN_DATABASE_URL, Rulings
+// R7/R48). Responses are never cached; writes (PUT/PATCH/POST) need the site's Origin and application/json
+// (Ruling R45). Store errors become the generic 500.
 import { neon } from '@neondatabase/serverless';
 import { z } from 'zod';
 import { SITE_CATEGORIES } from '../../src/site/categories.js';
@@ -23,6 +24,7 @@ import type { Env } from './env.js';
 import { json, readJsonWrite } from './http.js';
 import { MESSAGE_MAX, cleanText } from './reports.js';
 import { resetSiteSettingsCache } from './settings.js';
+import { type ShopRequestStore, handleShopRequests, shopRequestStore } from './shop-requests.js';
 
 export const REPORT_STATUSES = ['open', 'fixed', 'kept', 'hidden'] as const;
 export type ReportStatus = (typeof REPORT_STATUSES)[number];
@@ -116,7 +118,8 @@ export type MatchMember = { id: number; title: string; shop: string; shopSlug: s
 export type MatchGroup = { canonicalId: number; members: MatchMember[] };
 export type UnmappedCategory = { path: string; count: number };
 
-export interface AdminStore {
+/** shopRequests, createShopRequest, setShopRequestStatus come from ShopRequestStore (shop-requests.ts) */
+export interface AdminStore extends ShopRequestStore {
   settingsRows(): Promise<{ key: string; value: unknown }[]>;
   /** one upserted row per top-level key, in one transaction */
   saveSettings(s: SiteSettings): Promise<void>;
@@ -185,6 +188,8 @@ function toReport(r: Row): AdminReport {
 
 export function createAdminStore(db: AdminRunner): AdminStore {
   return {
+    ...shopRequestStore(db),
+
     async settingsRows() {
       const rows = await db.query('select key, value from site_settings', []);
       return rows.map((r) => ({ key: String(r.key), value: r.value }));
@@ -344,6 +349,9 @@ export async function handleAdmin(req: Request, env: Env, url: URL, deps: AdminD
 
   const p = url.pathname;
   const store = () => deps.store(env);
+
+  const shopRequests = await handleShopRequests(req, env, url, store);
+  if (shopRequests) return shopRequests;
 
   if (p === '/api/admin/settings') {
     if (req.method === 'GET') return json({ settings: settingsFromRows(await store().settingsRows()) });

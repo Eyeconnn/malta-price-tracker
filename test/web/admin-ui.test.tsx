@@ -71,7 +71,7 @@ describe('admin settings', () => {
     expect(document.querySelector('meta[name="robots"]')?.getAttribute('content')).toBe('noindex, nofollow');
     expect(screen.getAllByRole('heading', { level: 1 }).map((h) => h.textContent)).toEqual(['Admin']);
     const nav = screen.getByRole('navigation', { name: 'Admin sections' });
-    expect(within(nav).getAllByRole('link').map((l) => l.textContent)).toEqual(['Settings', 'Phrases', 'Thresholds', 'Reports', 'Shops', 'Matches']);
+    expect(within(nav).getAllByRole('link').map((l) => l.textContent)).toEqual(['Settings', 'Phrases', 'Thresholds', 'Reports', 'Shops', 'Add shop', 'Matches']);
   });
 
   it('the public switch asks first, says what changes, and saves only on confirm', async () => {

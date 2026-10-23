@@ -11,9 +11,34 @@ export class DisallowedError extends Error {
 export class ShopAbortError extends Error {}
 
 export class HttpError extends Error {
-  constructor(public url: string, public status: number) {
-    super(`HTTP ${status} for ${url}`);
+  /** retryAfterMs: the answer's Retry-After in ms (null when absent); waitTooLong: it was longer than the backoff cap */
+  constructor(
+    public url: string,
+    public status: number,
+    public retryAfterMs: number | null = null,
+    waitTooLong = false,
+  ) {
+    super(`HTTP ${status} for ${url}${waitTooLong && retryAfterMs !== null ? ` (asked to wait ${Math.round(retryAfterMs / 1000)} s)` : ''}`);
   }
+}
+
+/** The longest backoff (and the longest Retry-After) a fetcher waits before retrying. */
+export const MAX_BACKOFF_MS = 10 * 60_000;
+/** robots.txt is read up to this size (RFC 9309 allows stopping at 500 KiB). */
+export const ROBOTS_MAX_BYTES = 500 * 1024;
+
+/** Spacing key: the host without www., so www. and the apex of a shop share one request gap. */
+export function spacingKey(url: string): string {
+  return new URL(url).hostname.toLowerCase().replace(/^www\./, '');
+}
+
+/** Retry-After as milliseconds (seconds or an HTTP date); null when absent or unreadable. */
+export function parseRetryAfter(value: string | null): number | null {
+  if (!value) return null;
+  const secs = Number(value.trim());
+  if (Number.isFinite(secs)) return Math.max(0, secs * 1000);
+  const at = Date.parse(value);
+  return Number.isFinite(at) ? Math.max(0, at - Date.now()) : null;
 }
 
 export interface FetchResult {
@@ -36,6 +61,8 @@ export interface FetcherOptions {
   /** only these hosts (and their subdomains) may be fetched; undefined means any public host */
   allowedHosts?: string[];
   maxBodyBytes?: number;
+  /** hard cap on requests (robots.txt and every attempt included); past it the run stops with ShopAbortError */
+  maxRequests?: number;
   log?: (msg: string) => void;
 }
 
@@ -68,6 +95,8 @@ function compilePatterns(list: unknown, log: (m: string) => void): RegExp[] {
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 const RETRYABLE = new Set([408, 425, 429, 500, 502, 503, 504, 520, 521, 522, 523, 524]);
+/** Statuses the fetcher retries with backoff (timeouts, 429, server errors, Cloudflare 52x). */
+export const isRetryableStatus = (status: number): boolean => RETRYABLE.has(status);
 
 /**
  * Polite HTTP client for one shop: one request at a time, a random 2 to 5 s gap
@@ -84,6 +113,8 @@ export class ShopFetcher {
   private extraDisallow: RegExp[];
   private allowedHosts?: string[];
   private maxBodyBytes: number;
+  private maxRequests?: number;
+  private abortReason?: string;
   private log: (msg: string) => void;
   private robots = new Map<string, Promise<RobotsRules>>();
   private queue: Promise<unknown> = Promise.resolve();
@@ -91,7 +122,8 @@ export class ShopFetcher {
   private consecutiveFailures = 0;
   private aborted = false;
 
-  stats = { requests: 0, failed: 0, retries: 0, disallowed: 0 };
+  /** rateLimited: requests that finally failed with 429 or 5xx; retryAfterMs: the last such answer's Retry-After */
+  stats = { requests: 0, failed: 0, retries: 0, disallowed: 0, rateLimited: 0, retryAfterMs: null as number | null };
   disallowedUrls: string[] = [];
 
   constructor(opts: FetcherOptions) {
@@ -104,10 +136,12 @@ export class ShopFetcher {
     this.extraDisallow = opts.extraDisallow ?? [];
     this.allowedHosts = opts.allowedHosts?.map((h) => h.toLowerCase());
     this.maxBodyBytes = opts.maxBodyBytes ?? 30 * 1024 * 1024;
+    this.maxRequests = opts.maxRequests;
     this.log = opts.log ?? (() => {});
   }
 
-  static fromConfig(cfg: ShopConfig, userAgent: string, baseUrl: string, log?: (m: string) => void): ShopFetcher {
+  /** extra: options a caller sets for one run only (e.g. the shop-request test scrape's maxRequests) */
+  static fromConfig(cfg: ShopConfig, userAgent: string, baseUrl: string, log?: (m: string) => void, extra: Pick<FetcherOptions, 'maxRequests'> = {}): ShopFetcher {
     const extraHosts = Array.isArray(cfg.extra_hosts) ? (cfg.extra_hosts as string[]) : [];
     return new ShopFetcher({
       allowedHosts: [scopeHost(baseUrl), ...extraHosts],
@@ -118,6 +152,7 @@ export class ShopFetcher {
       maxConsecutiveFailures: cfg.max_consecutive_failures,
       extraDisallow: compilePatterns(cfg.extra_disallow, log ?? (() => {})),
       log,
+      ...extra,
     });
   }
 
@@ -153,17 +188,22 @@ export class ShopFetcher {
 
   private async loadRobots(origin: string): Promise<RobotsRules> {
     const robotsUrl = `${origin}/robots.txt`;
+    const key = spacingKey(origin);
+    let httpStatus: number | undefined;
+    let retryAfterMs: number | null = null;
     for (let attempt = 0; attempt <= this.maxRetries; attempt++) {
+      await this.waitTurn(key, 0);
+      // outside the try: reaching the request cap stops the run instead of being retried
+      this.spend();
       try {
-        await this.waitTurn(origin, 0);
-        this.stats.requests++;
         const res = await safeFetch(robotsUrl, {
           headers: { 'user-agent': this.ua, accept: 'text/plain,*/*' },
           signal: AbortSignal.timeout(Math.min(this.timeoutMs, 60_000)),
           redirect: 'follow',
         });
-        const text = await res.text();
-        this.lastRequestEnd.set(origin, Date.now());
+        // RFC 9309: crawlers may stop reading after 500 KiB
+        const text = await readTruncated(res, ROBOTS_MAX_BYTES);
+        this.lastRequestEnd.set(key, Date.now());
         if (res.ok) {
           const rules = parseRobots(origin, text, this.ua, 'ok');
           this.log(`robots.txt ${origin}: ok, crawl-delay ${rules.crawlDelayMs / 1000}s`);
@@ -173,17 +213,27 @@ export class ShopFetcher {
           this.log(`robots.txt ${origin}: HTTP ${res.status}, treating as allow all`);
           return parseRobots(origin, '', this.ua, 'none');
         }
-        this.log(`robots.txt ${origin}: HTTP ${res.status}, retrying`);
+        httpStatus = res.status;
+        retryAfterMs = parseRetryAfter(res.headers.get('retry-after'));
+        if (retryAfterMs !== null && retryAfterMs > MAX_BACKOFF_MS) {
+          this.log(`robots.txt ${origin}: HTTP ${res.status}, asked to wait ${Math.round(retryAfterMs / 1000)} s, not retrying`);
+          break;
+        }
+        this.log(`robots.txt ${origin}: HTTP ${res.status}${attempt < this.maxRetries ? ', retrying' : ''}`);
       } catch (e) {
-        this.lastRequestEnd.set(origin, Date.now());
-        this.log(`robots.txt ${origin}: ${(e as Error).message}, retrying`);
+        this.lastRequestEnd.set(key, Date.now());
+        this.log(`robots.txt ${origin}: ${(e as Error).message}${attempt < this.maxRetries ? ', retrying' : ''}`);
       }
-      await sleep(10_000 * 2 ** attempt);
+      if (attempt < this.maxRetries) await sleep(Math.max(retryAfterMs ?? 0, 10_000 * 2 ** attempt));
     }
     // RFC 9309: if robots.txt is unreachable because of server errors, assume full disallow.
     this.log(`robots.txt ${origin}: unreachable, treating as disallow all`);
     this.stats.failed++;
-    return parseRobots(origin, '', this.ua, 'unreachable');
+    if (httpStatus === 429 || (httpStatus !== undefined && httpStatus >= 500)) {
+      this.stats.rateLimited++;
+      this.stats.retryAfterMs = retryAfterMs;
+    }
+    return { ...parseRobots(origin, '', this.ua, 'unreachable'), httpStatus, retryAfterMs };
   }
 
   async isAllowed(url: string): Promise<boolean> {
@@ -192,8 +242,19 @@ export class ShopFetcher {
     return rules.isAllowed(url);
   }
 
-  private async waitTurn(origin: string, crawlDelayMs: number) {
-    const last = this.lastRequestEnd.get(origin);
+  /** Counts one request; past maxRequests the run is abandoned (ShopAbortError). */
+  private spend() {
+    if (this.maxRequests !== undefined && this.stats.requests >= this.maxRequests) {
+      this.aborted = true;
+      this.abortReason = `request cap of ${this.maxRequests} reached`;
+      throw new ShopAbortError(this.abortReason);
+    }
+    this.stats.requests++;
+  }
+
+  /** key: the shop host without www. (spacingKey), so www. and the apex share one gap */
+  private async waitTurn(key: string, crawlDelayMs: number) {
+    const last = this.lastRequestEnd.get(key);
     if (last === undefined) return;
     const gap = Math.max(crawlDelayMs, this.minDelay + Math.random() * (this.maxDelay - this.minDelay));
     const wait = last + gap - Date.now();
@@ -211,7 +272,7 @@ export class ShopFetcher {
     startUrl: string,
     opts: { accept?: string; timeoutMs?: number; allowStatus?: number[]; retries?: number },
   ): Promise<FetchResult> {
-    if (this.aborted) throw new ShopAbortError('shop run already abandoned after repeated failures');
+    if (this.aborted) throw new ShopAbortError(this.abortReason ?? 'shop run already abandoned after repeated failures');
     let url = startUrl;
     if (!this.inScope(url)) throw new OutOfScopeError(url);
     if (!(await this.isAllowed(url))) {
@@ -220,52 +281,55 @@ export class ShopFetcher {
       this.log(`skip (robots.txt): ${url}`);
       throw new DisallowedError(url);
     }
-    const origin = new URL(url).origin;
+    const key = spacingKey(url);
     const rules = await this.robotsFor(url);
     // 202 is deliberately not success: some shops answer bot challenges with 202 and an HTML page
     const allow = new Set([200, 203, 204, 206, 404, 410, ...(opts.allowStatus ?? [])]);
 
     for (let attempt = 0; ; attempt++) {
-      await this.waitTurn(origin, rules.crawlDelayMs);
-      this.stats.requests++;
+      await this.waitTurn(key, rules.crawlDelayMs);
+      this.spend();
       let status = 0;
-      let retryAfterMs = 0;
+      let retryAfterMs: number | null = null;
       let errMsg = '';
       try {
         const res = await this.fetchFollowingRedirects(url, opts);
         status = res.status;
         if (allow.has(status)) {
-          this.lastRequestEnd.set(origin, Date.now());
+          this.lastRequestEnd.set(key, Date.now());
           this.consecutiveFailures = 0;
           return res;
         }
-        const ra = res.headers.get('retry-after');
-        if (ra) {
-          const secs = Number(ra);
-          retryAfterMs = Number.isFinite(secs) ? secs * 1000 : Math.max(0, Date.parse(ra) - Date.now());
-        }
+        retryAfterMs = parseRetryAfter(res.headers.get('retry-after'));
         errMsg = `HTTP ${status}`;
       } catch (e) {
         if (e instanceof DisallowedError) throw e;
         errMsg = (e as Error).name === 'TimeoutError' ? `timeout after ${opts.timeoutMs ?? this.timeoutMs}ms` : (e as Error).message;
       }
-      this.lastRequestEnd.set(origin, Date.now());
+      this.lastRequestEnd.set(key, Date.now());
 
-      const retryable = status === 0 || RETRYABLE.has(status);
+      // a Retry-After longer than the backoff cap is not waited for: the request fails now
+      const waitTooLong = retryAfterMs !== null && retryAfterMs > MAX_BACKOFF_MS;
+      if (waitTooLong) errMsg = `${errMsg} (asked to wait ${Math.round(retryAfterMs! / 1000)} s)`;
+      const retryable = (status === 0 || RETRYABLE.has(status)) && !waitTooLong;
       if (retryable && attempt < (opts.retries ?? this.maxRetries)) {
         this.stats.retries++;
-        const backoff = Math.min(Math.max(retryAfterMs, 15_000 * 2 ** attempt), 10 * 60_000);
+        const backoff = Math.min(Math.max(retryAfterMs ?? 0, 15_000 * 2 ** attempt), MAX_BACKOFF_MS);
         this.log(`${errMsg} on ${url}, retry ${attempt + 1}/${opts.retries ?? this.maxRetries} in ${Math.round(backoff / 1000)}s`);
         await sleep(backoff + Math.random() * 2000);
         continue;
       }
       this.stats.failed++;
+      if (status === 429 || status >= 500) {
+        this.stats.rateLimited++;
+        this.stats.retryAfterMs = retryAfterMs;
+      }
       this.consecutiveFailures++;
       if (this.consecutiveFailures >= this.maxConsecutiveFailures) {
         this.aborted = true;
         throw new ShopAbortError(`giving up on shop after ${this.consecutiveFailures} consecutive failures (last: ${errMsg} on ${url})`);
       }
-      throw status ? new HttpError(url, status) : new Error(`${errMsg} for ${url}`);
+      throw status ? new HttpError(url, status, retryAfterMs, waitTooLong) : new Error(`${errMsg} for ${url}`);
     }
   }
 
@@ -308,6 +372,19 @@ export class ShopFetcher {
     }
     throw new Error(`too many redirects from ${startUrl}`);
   }
+}
+
+/** The body as text, at most max bytes (the rest is not read). */
+async function readTruncated(res: Awaited<ReturnType<typeof safeFetch>>, max: number): Promise<string> {
+  if (!res.body) return '';
+  const chunks: Buffer[] = [];
+  let size = 0;
+  for await (const chunk of res.body) {
+    chunks.push(Buffer.from(chunk));
+    size += chunk.length;
+    if (size >= max) break;
+  }
+  return Buffer.concat(chunks).subarray(0, max).toString('utf8');
 }
 
 async function readCapped(res: Awaited<ReturnType<typeof safeFetch>>, max: number): Promise<Buffer> {
