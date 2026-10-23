@@ -98,6 +98,10 @@ describe('systemPrompt', () => {
     expect(p).toMatch(/never replace it with another brand/i);
     expect(p).toContain('Therabody');
   });
+
+  it('says to keep the not_the_brand value when the title contains it', () => {
+    expect(systemPrompt('toys', schemas.toys)).toMatch(/not_the_brand[^.]*\. When the title contains it, keep it/);
+  });
 });
 
 describe('userMessage', () => {

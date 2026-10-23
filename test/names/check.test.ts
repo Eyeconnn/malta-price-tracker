@@ -363,6 +363,18 @@ describe('checkName: review fixes', () => {
   });
 });
 
+describe('checkName: a + glued to a title word survives (re-review H1)', () => {
+  it('rejects a name that drops it and accepts "plus" after the same word', () => {
+    const r = (title: string, n: string) => checkName({ title, brand: null }, name(n));
+    expect(r('Samsung Galaxy S23+ 256GB', 'Samsung Galaxy S23 256GB').ok).toBe(false);
+    expect(r('Apple iPhone 15+', 'Apple iPhone 15').ok).toBe(false);
+    expect(r('Galaxy Tab S9 FE+', 'Galaxy Tab S9 FE').ok).toBe(false);
+    expect(r('Childs Farm Sun Cream SPF 50+', 'Childs Farm Sun Cream SPF 50').ok).toBe(false);
+    expect(r('Galaxy S23+', 'Galaxy S23 Plus')).toEqual({ ok: true });
+    expect(r('Galaxy S23+', 'Galaxy S23+')).toEqual({ ok: true });
+  });
+});
+
 describe('checkAttrs', () => {
   it('drops keys outside the category schema and records them', () => {
     const r = checkAttrs({ ram_gb: 16, flavour: 'mint' }, laptops);

@@ -26,8 +26,10 @@ export type CategoryRule = {
   on: CategorySource[];
   /** tried on the title before the category path (a toy maker's device is a toy, whatever the path says) */
   first?: boolean;
-  /** applies only for a shop without a specialist category or a title with laptop specs (LAPTOP_SPECS) */
+  /** applies only when the title has laptop specs (LAPTOP_SPECS): "notebook" also names paper notebooks */
   laptopPathOnly?: boolean;
+  /** on the category path, tried on the leaf segment only, and not when the leaf names a device (DEVICE_WORD) */
+  leafOnly?: boolean;
 };
 
 /** After a device word: something to carry or stand the device in (a laptop bag, a tablet stand), or its peripherals, so the device word decides nothing. */
@@ -37,26 +39,30 @@ const PHONE_CARRY = String.raw`(?!\s*(?:&\s*\w+\s+)?(?:bags?|backpacks?|sleeves?
 /** After a kids' device word: a bag, case or stand for it is no device. */
 const DEVICE_CARRY = String.raw`(?!\s*(?:bags?|cases?|backpacks?|sleeves?|covers?|stands?)\b)`;
 /** Words before "bag" or "belt" that make it no fashion item (a tea bag, a tool belt). */
-const NOT_FASHION_BAG = String.raw`(?<!\b(?:gig|cooler|dry|sleeping|bean|gift|freezer|vacuum|tea|coffee|bin|rubbish|refuse|dust|cleaner|storage|sandwich|camera|tool|seat|laundry)\s?)`;
+const NOT_FASHION_BAG = String.raw`(?<!\b(?:gig|cooler|dry|sleeping|bean|gift|freezer|vacuum|tea|coffee|bin|rubbish|refuse|dust|cleaner|storage|sandwich|camera|tool|seat|laundry|garbage|trash|plastic|paper|poop|lunch|wash|shopping|zip|pencil|nappy|diaper)\s?)`;
 /** Toy makers whose devices are toys (a VTech or Lexibook camera), and "my first". Real tablets for kids are not. */
-const TOY_DEVICE_MAKERS = String.raw`vtech|leap ?frog|lexibook|clementoni|kidi\w*|winfun|fisher[- ]?price|playskool|chicco|smoby|my first`;
-/** Laptop specs in a title: a CPU, RAM or SSD size, or a laptop screen size. */
-export const LAPTOP_SPECS = /\b(i[3579]|ryzen|celeron|pentium|core ultra|\d+\s?gb|ssd|1[1-7](?:\.\d)?\s*(?:"|''|\u2033|inch|in\b))|\b1[1-7]\.\d\b/i;
+const TOY_DEVICE_MAKERS = String.raw`vtech|leap ?frog|lexibook|clementoni|kidi\w*|winfun|fisher[- ]?price|playskool|smoby|my first`;
+/** Laptop specs in a title: a CPU, or a RAM or SSD signal (a bare GB or inch size is not enough: USB sticks, paper). */
+export const LAPTOP_SPECS = /\b(i[3579](?:[\s-]\d{4,5}\w*)?|core i[3579]|core ultra|ryzen|celeron|pentium|\d+\s?gb\s?(?:ram|ddr\d?)|ssd|ram)\b/i;
+/** Device words that keep a path leaf from the stationery and printer rule ("Tablets & Printers" is about tablets). */
+const DEVICE_WORD = /\b(laptops?|macbooks?|tablets?|ipads?|phones?|smart ?phones?)\b(?!\s*peripherals)/i;
 const ci = (source: string) => new RegExp(source, 'i');
 
 /**
  * Ordered: within a source, the first matching rule wins. Sources are tried category, tags, title; the title only for
  * shops without a specialist category (see TITLE_SHOP_CATEGORIES). Rules marked first are tried on the title before
- * everything else. A rule with laptopPathOnly applies only for a generalist shop or a title with laptop specs.
+ * everything else. A rule with laptopPathOnly applies only to a title with laptop specs; a leafOnly rule reads only
+ * the leaf segment of the category path.
  */
 export const CATEGORY_RULES: CategoryRule[] = [
   { slug: 'toys', pattern: ci(String.raw`\b(${TOY_DEVICE_MAKERS})\b.{0,40}?\b(cameras?|laptops?|tablets?|smart ?watch(es)?|walkie[ -]talkies?|karaoke|microphones?|phones?)\b${DEVICE_CARRY}`), on: ['title'], first: true },
+  { slug: 'other', pattern: /\b(stationery|stationary|notepads?|note books?|journals?|diar(y|ies)|(computer|pc|laptop) peripherals|keycaps?|printers?|toners?|ink cartridges?|ink)\b/i, on: ['category', 'tags'], leafOnly: true },
   { slug: 'phones', pattern: /\b(smart ?watch(es)?|smart ?bands?|fitness trackers?|wearables?)\b/i, on: ['category', 'tags', 'title'] },
   { slug: 'laptops', pattern: ci(String.raw`\b(laptops?|macbooks?|chromebooks?|ultrabooks?)\b${CARRY}`), on: ['category', 'tags'] },
   { slug: 'laptops', pattern: ci(String.raw`\bnotebooks?\b(?!\s*(?:&|,)\s*(?:notepads?|journals?|diar))${CARRY}`), on: ['category', 'tags'], laptopPathOnly: true },
-  { slug: 'laptops', pattern: ci(String.raw`(?<!\bmy\s(?:first\s)?)\b(laptops?|notebooks?|macbooks?|chromebooks?|ultrabooks?)\b${CARRY}`), on: ['title'] },
+  { slug: 'laptops', pattern: ci(String.raw`(?<!\bmy\s(?:first\s)?)\b(laptops?|macbooks?|chromebooks?|ultrabooks?)\b${CARRY}`), on: ['title'] },
+  { slug: 'laptops', pattern: ci(String.raw`\bnotebooks?\b${CARRY}`), on: ['title'], laptopPathOnly: true },
   { slug: 'phones', pattern: ci(String.raw`\b(smart ?phones?|mobile phones?|phones?|iphones?|tablets?|ipads?|galaxy (s|a|z)\d+|galaxy tab|matepad|fire hd|redmi pad|xiaomi pad|lenovo tab)\b${PHONE_CARRY}`), on: ['category', 'tags', 'title'] },
-  { slug: 'other', pattern: /\b(stationery|stationary|notepads?|note books?|notebooks?|journals?|diar(y|ies)|(computer|pc|laptop) peripherals|keycaps?|printers?|toners?|ink cartridges?)\b/i, on: ['category', 'tags'] },
   { slug: 'tv-audio', pattern: /\b(televisions?|tvs?(?!\s*(?:stands?|cabinets?|units?|tables?|benches?)\b)|soundbars?|headphones?|earbuds?|speakers?|audio|hi-?fi|home cinema|projectors?)\b/i, on: ['category', 'tags', 'title'] },
   { slug: 'gaming', pattern: /\b(gaming|consoles?|video games?|playstation|ps[45]|xbox|nintendo)\b/i, on: ['category', 'tags', 'title'] },
   { slug: 'appliances', pattern: /\b(appliances?|fridges?|refrigerators?|freezers?|washing machines?|washers?|(?<!hair\s)dryers?|dishwashers?|ovens?|microwaves?|cookers?|hobs?|vacuums?|air fryers?|coffee machines?|espresso machines?|kettles?|toasters?|air conditioners?|heaters?|heating|dehumidifiers?|wine coolers?)\b/i, on: ['category', 'tags', 'title'] },
@@ -130,8 +136,12 @@ export function categorize(
 
   const shopCategory = (input.shopCategory ?? '').toLowerCase();
   const titleDecides = TITLE_SHOP_CATEGORIES.has(shopCategory) || !Object.hasOwn(SHOP_CATEGORY_MAP, shopCategory);
+  const pathSegs = segs.filter((s) => !GENERIC_SEGMENT.test(s));
+  // the leaf segment (the most specific one) for leafOnly rules; a leaf that names a device leaves them out
+  const leaf = ruleText(pathSegs[pathSegs.length - 1] ?? '');
+  const leafText = DEVICE_WORD.test(leaf) ? '' : leaf;
   const texts: [CategorySource, string][] = [
-    ['category', ruleText(segs.filter((s) => !GENERIC_SEGMENT.test(s)).join(' | '))],
+    ['category', ruleText(pathSegs.join(' | '))],
     ['tags', input.tags.filter((t) => !GENERIC_SEGMENT.test(t)).join(' | ')],
     ['title', titleDecides ? title : ''],
   ];
@@ -139,8 +149,9 @@ export function categorize(
     if (text === '') continue;
     for (const rule of CATEGORY_RULES) {
       if (rule.first || !rule.on.includes(source)) continue;
-      if (rule.laptopPathOnly && !titleDecides && !LAPTOP_SPECS.test(title)) continue;
-      if (rule.pattern.test(text)) return rule.slug;
+      if (rule.laptopPathOnly && !LAPTOP_SPECS.test(title)) continue;
+      const subject = rule.leafOnly && source === 'category' ? leafText : text;
+      if (subject !== '' && rule.pattern.test(subject)) return rule.slug;
     }
   }
 

@@ -70,7 +70,7 @@ export function systemPrompt(category: string, schema: CategorySchema): string {
   return [
     `You clean product names for a price comparison site in Malta. Every product below is in the category "${categoryName(category)}".`,
     'Each input line is one product group from one shop, as JSON: key, title (the shop title), and when known brand, not_the_brand, shop_category, gtin, mpn and variants (the titles of its variants).',
-    'brand is the maker. not_the_brand is what the shop put in its brand field when that is its own name, a web address, a company or a distributor, not the maker: never add it to display_name or attrs; use it only where the title itself has it.',
+    'brand is the maker. not_the_brand is what the shop put in its brand field when that is its own name, a web address, a company or a distributor, not the maker: never add it to display_name or attrs when the title lacks it. When the title contains it, keep it as the title writes it (Sony of brand "Sony Group" in a Sony title).',
     'For every input line return exactly one item with the same key: display_name, variant_label and attrs.',
     '',
     'Rules for display_name:',

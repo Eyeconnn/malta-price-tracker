@@ -289,6 +289,12 @@ export function checkName(source: NameSource, a: NameAnswer): NameCheck {
   // a + glued to a word (S24+) only when the title or variants have one
   const gluedPlus = /[\p{L}\p{N}]\+/u;
   if (gluedPlus.test(`${name} ${label}`) && !gluedPlus.test(wordData)) newTokens.push('+');
+  // a + glued to a title word (S23+, iPhone 15+, FE+, SPF 50+) survives as "+" or "plus" right after the same word
+  const keptText = prep(`${name} ${label}`);
+  for (const m of prep(source.title).matchAll(/([\p{L}\p{N}]+)\+/gu)) {
+    const w = m[1].replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    if (!new RegExp(`(?:^|[^\\p{L}\\p{N}])${w}\\s*(?:\\+|plus\\b)`, 'u').test(keptText)) lost.push(`${m[1]}+`);
+  }
   for (const t of new Set(keptAll)) {
     if (isCode(t) && !dataLists.some((l) => inRun(l, t))) newTokens.push(t);
   }

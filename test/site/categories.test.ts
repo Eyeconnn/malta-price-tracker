@@ -195,3 +195,28 @@ describe('categorize: review fixes', () => {
     expect(categorize(input({ title: 'VTech Kids Tablet Case', categoryPath: 'Tablet Accessories', shopCategory: 'electronics' }))).toBe('phones');
   });
 });
+
+describe('categorize: re-review of 39e5672', () => {
+  it('printers and stationery decide on the leaf path segment only', () => {
+    expect(categorize(input({ title: 'Brother HL-L2350DW Mono Laser Printer', categoryPath: 'Laptops & Computers > Printers & Ink', shopCategory: 'electronics' }))).toBe('other');
+    expect(categorize(input({ title: 'Brother HL-L2350DW Mono Laser Printer', categoryPath: 'Computers > Laptops, Tablets & Printers > Printers', shopCategory: 'electronics' }))).toBe('other');
+    expect(categorize(input({ title: 'Dell XPS 13 9340 Core Ultra 7 16GB 512GB', categoryPath: 'Computers & Printers > Laptops', shopCategory: 'electronics' }))).toBe('laptops');
+  });
+
+  it('a Chicco baby monitor is baby, not a toy device', () => {
+    expect(categorize(input({ title: 'Chicco Smart Baby Monitor Camera', shopCategory: 'electronics' }))).toBe('baby');
+  });
+
+  it('garbage, trash, plastic, paper, poop, lunch, wash, shopping, zip, pencil, nappy and diaper bags are no fashion', () => {
+    for (const w of ['Garbage', 'Trash', 'Plastic', 'Paper', 'Poop', 'Lunch', 'Wash', 'Shopping', 'Zip', 'Pencil', 'Nappy', 'Diaper']) {
+      expect(categorize(input({ title: `${w} bags`, categoryPath: `${w} Bags`, shopCategory: 'home' }))).not.toBe('fashion');
+    }
+  });
+
+  it('a Notebooks path needs a CPU, RAM or SSD in the title, not a bare inch or GB size', () => {
+    expect(categorize(input({ title: 'Spiral Notebook A5', categoryPath: 'Notebooks', shopCategory: 'electronics' }))).toBe('other');
+    expect(categorize(input({ title: 'Ruled Notebook 15" 80 Sheets', categoryPath: 'Notebooks', shopCategory: 'electronics' }))).toBe('other');
+    expect(categorize(input({ title: 'Memo Notebook with 2GB USB Stick', categoryPath: 'Notebooks', shopCategory: 'electronics' }))).toBe('other');
+    expect(categorize(input({ title: 'HP 255 G9 15.6 Ryzen 5', categoryPath: 'Notebooks', shopCategory: 'electronics' }))).toBe('laptops');
+  });
+});
