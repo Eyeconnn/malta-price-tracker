@@ -67,7 +67,7 @@ export type ReportRow = {
   canonicalReason?: string | null;
 };
 
-const esc = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+export const esc = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
 
 export function formatAttrs(attrs: Record<string, unknown>): string {
   return Object.entries(attrs)
@@ -162,7 +162,7 @@ export const CSV_HEADER = [
 ];
 
 /** A cell that a spreadsheet could read as a formula gets a leading apostrophe; cells are quoted when needed. */
-function csvCell(v: string): string {
+export function csvCell(v: string): string {
   const safe = /^[=+\-@\t\r]/.test(v) ? `'${v}` : v;
   return /[",\r\n]/.test(safe) || safe !== v ? `"${safe.replace(/"/g, '""')}"` : safe;
 }
