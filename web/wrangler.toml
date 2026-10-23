@@ -1,6 +1,7 @@
 # Public Black Friday Guide (Cloudflare Worker: static web app + JSON API).
 # Secrets: DATABASE_URL (read-only role dashboard_ro), REPORTER_DATABASE_URL (site_reporter),
 # ADMIN_DATABASE_URL (site_admin), SITE_PASSWORD, ADMIN_PASSWORD, SITE_ORIGIN, IP_SALT, TURNSTILE_SECRET (optional).
+# Bindings: ASSETS (the built web app) and BUCKET (R2 photos).
 # Build the assets first: `pnpm web:build` writes ../dist/web.
 name = "bf-guide"
 main = "worker/index.ts"
@@ -14,3 +15,9 @@ binding = "ASSETS"
 not_found_handling = "single-page-application"
 # the Worker runs before every asset so private mode protects the HTML too
 run_worker_first = true
+
+# Our small product photo copies (img/<sha256>.webp), served at /img/<sha256>.webp behind the same access check.
+# The bucket is the one the scraper writes to (R2_BUCKET in .env); the Worker only reads it.
+[[r2_buckets]]
+binding = "BUCKET"
+bucket_name = "malta-bfg"

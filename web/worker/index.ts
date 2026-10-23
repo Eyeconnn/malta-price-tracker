@@ -1,17 +1,20 @@
 // Black Friday Guide: one Worker serves the built web app (static assets) and the JSON API.
 // run_worker_first is on, so access control runs before any asset (private mode protects the HTML too).
 import { type ApiDeps, handleApi } from './api.js';
-import { checkAccess, isAdminPath } from './auth.js';
+import { canonicalPath, checkAccess, isAdminPath } from './auth.js';
 import { defaultCache } from './cache.js';
 import { neonData } from './data.js';
 import type { Env } from './env.js';
 import { json } from './http.js';
+import { type PhotoBucket, servePhoto } from './photo.js';
 import { injectNonce, newNonce, withSecurityHeaders } from './security.js';
 import { type AccessSettings, loadSiteSettings } from './settings.js';
 
-/** Env plus the static assets binding declared in wrangler.toml. */
+/** Env plus the static assets and R2 photo bindings declared in wrangler.toml. */
 export interface Bindings extends Env {
   ASSETS: { fetch(req: Request): Promise<Response> };
+  /** our small product photo copies (img/<sha256>.webp) */
+  BUCKET?: PhotoBucket;
 }
 
 export { json };
@@ -56,6 +59,9 @@ export function createHandler(deps: HandlerDeps) {
       if (denied) return finish(denied);
 
       try {
+        // photos: /img/<sha256>.webp from R2; any other /img path (any spelling) is 404, never the app
+        const canonical = canonicalPath(url.pathname);
+        if (canonical === '/img' || canonical.startsWith('/img/')) return finish(await servePhoto(req, url.pathname, env.BUCKET, settings));
         if (url.pathname === '/api' || url.pathname.startsWith('/api/')) return finish(await handleApi(req, env, url, deps.api ?? DEFAULT_API, settings));
         const { res, nonce } = await serveAsset(req, env);
         return finish(res, nonce);

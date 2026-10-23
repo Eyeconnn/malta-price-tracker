@@ -1,7 +1,7 @@
 // Product photos are served from our own small copies in R2 (owner decision 23 Oct): never the shop's original,
 // never hot-linked. One copy per original: WebP, at most 480 px on the long side, no metadata, named after the
 // sha256 of the original so the same picture is stored once.
-import sharp from 'sharp';
+import sharp, { type Metadata } from 'sharp';
 
 /** Longest side of a stored copy, in pixels. */
 export const MAX_SIDE = 480;
@@ -32,7 +32,7 @@ export const isPhotoKey = (key: string | null | undefined): key is string => typ
  */
 export async function makeSmallCopy(original: Buffer): Promise<SmallCopy> {
   if (original.length > MAX_IMAGE_BYTES) throw new Error('image over 15 MB');
-  let meta: sharp.Metadata;
+  let meta: Metadata;
   try {
     meta = await sharp(original, { limitInputPixels: MAX_INPUT_PIXELS }).metadata();
   } catch {

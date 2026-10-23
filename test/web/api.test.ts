@@ -6,6 +6,9 @@ import type { ResponseCache } from '../../web/worker/cache.js';
 import type { Card, Data, OtherShop, ProductDetail, ProductGroup, Seller } from '../../web/worker/data.js';
 import type { Bindings } from '../../web/worker/index.js';
 
+/** One of our stored photos, as data.ts gives it. */
+const PHOTO = '/img/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.webp';
+
 const env = { DATABASE_URL: 'postgres://ro@example/db' } as Bindings;
 
 function card(id: number, extra: Partial<Card> = {}): Card {
@@ -194,7 +197,7 @@ describe('GET /api/search', () => {
     const hits = [
       { ...card(1, { shop: 'Alpha', shopSlug: 'alpha', priceCents: 90000, bf: false, verdict: 'none' }), ...c5, ...named, inStock: true, imageUrl: 'javascript:alert(1)' },
       { ...card(2, { shop: 'Beta', shopSlug: 'beta', priceCents: 70000, bf: true, verdict: 'avoid' }), ...c5, ...named, inStock: false, imageUrl: 'https://beta.example/s25.jpg' },
-      { ...card(3, { shop: 'Gamma', shopSlug: 'gamma', priceCents: 80000, bf: false, verdict: 'good' }), ...c5, displayName: null, attrs: null, inStock: null },
+      { ...card(3, { shop: 'Gamma', shopSlug: 'gamma', priceCents: 80000, bf: false, verdict: 'good' }), ...c5, displayName: null, attrs: null, inStock: null, imageUrl: PHOTO },
       ...Array.from({ length: 45 }, (_, i) => ({
         ...card(100 + i, { priceCents: 0 }),
         groupKey: `s${100 + i}`,
@@ -223,8 +226,8 @@ describe('GET /api/search', () => {
       shops: 3,
       shop: null,
       bf: true,
-      // http(s) only
-      imageUrl: 'https://beta.example/s25.jpg',
+      // our own photo only, never a shop's image address
+      imageUrl: PHOTO,
       option: null,
       good: 1,
       avoid: 1,
@@ -536,7 +539,7 @@ describe('GET /api/product/:key', () => {
       seller(1, { priceCents: 90000, inStock: false }),
       seller(2, { priceCents: 120000, imageUrl: 'https://shop2.example/i.jpg', bf: true, verdict: 'avoid', facts: { raisedFrom: { price: 100000, at: '2026-10-20' } } as never }),
       seller(3, { priceCents: 110000, url: 'javascript:alert(1)', attrs: { storage_gb: 256, ram_gb: 12, colour: ['black'] } }),
-      seller(4, { priceCents: null }),
+      seller(4, { priceCents: null, imageUrl: PHOTO }),
     ];
     const w = setup(fakeData({ productGroup: vi.fn(async () => group(sellers)) }));
     const body = (await (await w.fetch('/api/product/c5')).json()) as {
@@ -553,7 +556,8 @@ describe('GET /api/product/:key', () => {
       name: 'Samsung Galaxy S25 Ultra Smartphone',
       specs: '256GB, 12GB RAM',
       brand: 'Samsung',
-      imageUrl: 'https://shop2.example/i.jpg',
+      // the shop's image address of seller 2 is never handed out: our photo of seller 4
+      imageUrl: PHOTO,
       category: 'phones',
       attributes: [
         { key: 'storage_gb', label: 'Storage', value: '256GB' },
@@ -808,5 +812,46 @@ describe('routing and caching', () => {
     const res = await w2.fetch('/api/shops');
     expect(res.status).toBe(200);
     spy.mockRestore();
+  });
+});
+
+describe('photos: the API never hands out a shop image address (owner decision 23 Oct)', () => {
+  const SHOP_IMG = 'https://shopimg.example/p.jpg';
+  /** Every field named like an image, anywhere in the answer. */
+  function imageFields(v: unknown, out: unknown[] = []): unknown[] {
+    if (Array.isArray(v)) for (const x of v) imageFields(x, out);
+    else if (v && typeof v === 'object') {
+      for (const [k, x] of Object.entries(v)) {
+        if (/image|photo|img/i.test(k)) out.push(x);
+        imageFields(x, out);
+      }
+    }
+    return out;
+  }
+
+  it('gives only /img/<sha256>.webp or null on every route', async () => {
+    const hit = (id: number, imageUrl: string | null) => ({
+      ...card(id), groupKey: `s${id}`, groupTitle: `Product ${id}`, canonicalId: null, possible: false, inStock: true, displayName: null,
+      variantLabel: null, nameCategory: null, attrs: null, imageUrl, groupShops: 1, groupBf: false, groupGood: 1, groupAvoid: 0,
+      groupLowInStock: 10000, groupLow: 10000,
+    });
+    const data = fakeData({
+      search: vi.fn(async () => [hit(1, SHOP_IMG), hit(2, PHOTO), hit(3, '//shopimg.example/x.webp'), hit(4, `/img/${'a'.repeat(64)}.webp?x=${SHOP_IMG}`)]),
+      productGroup: vi.fn(async () => group([seller(1, { imageUrl: SHOP_IMG }), seller(2, { imageUrl: 'data:image/svg+xml,<svg/>' })])),
+      product: vi.fn(async () => ({ ...detail(70900, []), product: { ...detail(70900, []).product, imageUrl: SHOP_IMG } })),
+    });
+    const w = setup(data);
+    const answers: unknown[] = [];
+    for (const path of ['/api/search?q=lenovo', '/api/product/c5', '/api/products/7', '/api/home', '/api/deals?type=avoid']) {
+      const res = await w.fetch(path);
+      expect(res.status, path).toBe(200);
+      const text = await res.text();
+      expect(text, path).not.toContain('shopimg.example');
+      answers.push(JSON.parse(text));
+    }
+    const images = imageFields(answers);
+    expect(images.length).toBeGreaterThan(0);
+    for (const v of images) expect(v === null || (typeof v === 'string' && /^\/img\/[0-9a-f]{64}\.webp$/.test(v)), String(v)).toBe(true);
+    expect(images).toContain(PHOTO);
   });
 });

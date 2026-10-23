@@ -16,6 +16,7 @@ import { type ResponseCache, cached as cachedResponse } from './cache.js';
 import type { Data, Label, ProductGroup, SearchHit, SearchPattern, Seller, SellerHistoryObs } from './data.js';
 import type { Env } from './env.js';
 import { json } from './http.js';
+import { sitePhoto } from './photo.js';
 import { DEFAULT_REPORTS, handleReport, type ReportDeps } from './reports.js';
 import type { AccessSettings } from './settings.js';
 
@@ -85,7 +86,7 @@ export type ProductResult = {
   option: string | null;
 };
 
-/** A link or image address from scraped data, only when it is plain http(s) (no user name or password). */
+/** A link from scraped data, only when it is plain http(s) (no user name or password). Never used for images. */
 export function webAddress(url: string | null): string | null {
   if (!url) return null;
   try {
@@ -142,7 +143,7 @@ export function productResults(hits: SearchHit[]): ProductResult[] {
       shops: Math.max(first.groupShops, shops.size),
       shop: Math.max(first.groupShops, shops.size) === 1 ? first.shop : null,
       bf: first.groupBf || g.rows.some((r) => r.bf),
-      imageUrl: g.rows.map((r) => webAddress(r.imageUrl)).find((u) => u !== null) ?? null,
+      imageUrl: g.rows.map((r) => sitePhoto(r.imageUrl)).find((u) => u !== null) ?? null,
       good: Math.max(first.groupGood, g.rows.filter((r) => r.verdict === 'good').length),
       avoid: Math.max(first.groupAvoid, g.rows.filter((r) => r.verdict === 'avoid').length),
       option: g.rows.length === 1 ? optionLabel(g.rows[0].variantLabel, g.rows[0].nameCategory, g.rows[0].attrs) : null,
@@ -228,7 +229,7 @@ export function productPage(g: ProductGroup, thresholds: { cheaperPct: number; m
       name,
       specs: specsSummary(category, attrs, name),
       brand,
-      imageUrl: sorted.map((s) => webAddress(s.imageUrl)).find((u) => u !== null) ?? null,
+      imageUrl: sorted.map((s) => sitePhoto(s.imageUrl)).find((u) => u !== null) ?? null,
       category: category ?? sorted[0].category,
       attributes: attributeList(category, attrs),
     },
@@ -299,7 +300,7 @@ async function product(data: Data, id: number): Promise<Response> {
   if (!detail) return json({ error: 'unknown product' }, 404);
   const { verdict, reason, facts, ...info } = detail.product;
   return json({
-    product: info,
+    product: { ...info, imageUrl: sitePhoto(info.imageUrl) },
     variants: detail.variants,
     history: detail.history,
     verdict: { label: verdict, reason, facts },
