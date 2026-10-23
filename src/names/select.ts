@@ -26,8 +26,11 @@ export type GroupInput = {
   storedHash: string | null;
   /** product_names.status of the last normalisation, null when never done */
   storedStatus?: 'ok' | 'rejected' | null;
-  /** the stored name has a canonical name (migration 012; --backfill-canonical runs the ok names without one) */
-  storedCanonical?: boolean;
+  /** product_names.canonical_status (migration 012): ok, rejected, or null when never tried (--backfill-canonical) */
+  storedCanonicalStatus?: 'ok' | 'rejected' | null;
+  /** product_names.attrs and category of the stored name (--backfill-canonical builds the canonical name from them) */
+  storedAttrs?: Record<string, unknown>;
+  storedNameCategory?: string | null;
   /** whether brand names the maker (src/names/brand.ts); set by the CLI, judged from the brand text alone when missing */
   brandStatus?: BrandStatus;
   /** why the brand is unreliable or none */
@@ -51,8 +54,13 @@ export function titleHash(title: string, variantTitles: string[]): string {
 
 /** Groups never normalised or whose title or variant titles changed since. */
 export function changedGroups(groups: GroupInput[], opts: { retryRejected?: boolean; backfillCanonical?: boolean } = {}): GroupInput[] {
-  // the catch-up run: names stored as ok before canonical names existed, whether their title changed or not
-  if (opts.backfillCanonical) return groups.filter((g) => g.storedStatus === 'ok' && g.storedCanonical !== true);
+  // the catch-up run: names stored as ok whose canonical name was never tried (saved before migration 012), whether
+  // their title changed or not; tried and rejected ones only with --retry-rejected
+  if (opts.backfillCanonical) {
+    return groups.filter(
+      (g) => g.storedStatus === 'ok' && ((g.storedCanonicalStatus ?? null) === null || (opts.retryRejected === true && g.storedCanonicalStatus === 'rejected')),
+    );
+  }
   return groups.filter((g) => g.storedHash !== titleHash(g.title, g.variantTitles) || (opts.retryRejected === true && g.storedStatus === 'rejected'));
 }
 
@@ -70,7 +78,9 @@ type GroupRow = {
   mpn: string | null;
   stored_hash: string | null;
   stored_status: 'ok' | 'rejected' | null;
-  stored_canonical: boolean | null;
+  stored_canonical_status: 'ok' | 'rejected' | null;
+  stored_attrs: Record<string, unknown> | null;
+  stored_name_category: string | null;
 };
 
 /**
@@ -87,7 +97,7 @@ export async function loadGroups(sql: postgres.Sql, opts: { categories?: string[
     select sp.shop_id, s.slug as shop_slug, sp.group_key, sp.title, sp.brand, coalesce(sp.category, 'other') as category,
       p.category_path, p.tags, s.category as shop_category, sp.gtin, sp.mpn, pn.title_hash as stored_hash, pn.status as stored_status,
       -- read through to_jsonb so this works before migration 012 adds the column
-      (to_jsonb(pn) ->> 'canonical_name') is not null as stored_canonical
+      to_jsonb(pn) ->> 'canonical_status' as stored_canonical_status, pn.attrs as stored_attrs, pn.category as stored_name_category
     from site_products sp
     join shops s on s.id = sp.shop_id
     left join products p on p.id = sp.rep_product_id
@@ -115,7 +125,9 @@ export async function loadGroups(sql: postgres.Sql, opts: { categories?: string[
       variantTitles: [],
       storedHash: r.stored_hash,
       storedStatus: r.stored_status,
-      storedCanonical: r.stored_canonical === true,
+      storedCanonicalStatus: r.stored_canonical_status ?? null,
+      ...(r.stored_attrs ? { storedAttrs: r.stored_attrs } : {}),
+      storedNameCategory: r.stored_name_category,
     }));
 
   // variant titles, one query per shop (uses the (shop_id, external_id) index prefix)

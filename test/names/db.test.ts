@@ -5,7 +5,7 @@ import postgres from 'postgres';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { brandStatus, loadBrandContext } from '../../src/names/brand.js';
 import { changedGroups, loadGroups, titleHash } from '../../src/names/select.js';
-import { finishRun, loadStoredOk, markRejected, saveResults, startRun } from '../../src/names/store.js';
+import { finishRun, hasCanonicalColumns, loadStoredOk, markRejected, saveCanonical, saveResults, startRun } from '../../src/names/store.js';
 
 const PORT = 55461;
 
@@ -94,7 +94,9 @@ describe.skipIf(!process.env.SITE_BUILD_TEST_DB)('name normaliser on PGlite', ()
     await saveResults(sql, runId, 'haiku', [
       { group: g, category: 'laptops', status: 'ok', displayName: 'Lenovo IdeaPad Slim 5', variantLabel: null, attrs: { ram_gb: [8, 16] }, reason: null, canonicalName: 'lenovo ideapadslim5' },
     ]);
-    expect((await loadGroups(sql, { categories: ['laptops'] }))[0].storedCanonical).toBe(true);
+    const stored = (await loadGroups(sql, { categories: ['laptops'] }))[0];
+    expect(stored.storedCanonicalStatus).toBe('ok');
+    expect(stored.storedAttrs).toEqual({ ram_gb: [8, 16] });
     await finishRun(sql, runId, {
       batches: 1, items: 1, accepted: 1, rejected: 0, failedBatches: 0,
       inputTokens: 10, outputTokens: 5, cacheReadTokens: 0, cacheWriteTokens: 0, costUsd: 0.001, reportPath: 'out/names/x.html',
@@ -102,6 +104,7 @@ describe.skipIf(!process.env.SITE_BUILD_TEST_DB)('name normaliser on PGlite', ()
     const [row] = await sql`select * from product_names`;
     expect(row.display_name).toBe('Lenovo IdeaPad Slim 5');
     expect(row.canonical_name).toBe('lenovo ideapadslim5');
+    expect(row.canonical_status).toBe('ok');
     expect(row.attrs).toEqual({ ram_gb: [8, 16] });
     expect(row.title_hash).toBe(titleHash('Lenovo IdeaPad Slim 5', ['8GB', '16GB']));
     expect(Number(row.run_id)).toBe(runId); // bigint comes back as a string
@@ -116,8 +119,8 @@ describe.skipIf(!process.env.SITE_BUILD_TEST_DB)('name normaliser on PGlite', ()
     await saveResults(sql, runId, 'sonnet', [
       { group: g, category: 'laptops', status: 'rejected', displayName: null, variantLabel: null, attrs: {}, reason: 'lost tokens: 5' },
     ]);
-    const rows = await sql`select status, reject_reason, model, display_name, canonical_name from product_names`;
-    expect(rows).toEqual([{ status: 'rejected', reject_reason: 'lost tokens: 5', model: 'sonnet', display_name: null, canonical_name: null }]);
+    const rows = await sql`select status, reject_reason, model, display_name, canonical_name, canonical_status from product_names`;
+    expect(rows).toEqual([{ status: 'rejected', reject_reason: 'lost tokens: 5', model: 'sonnet', display_name: null, canonical_name: null, canonical_status: null }]);
   });
 
   it('loads the stored status, re-queues rejected groups on request, and lets --recheck-stored retire ok names', async () => {
@@ -133,6 +136,13 @@ describe.skipIf(!process.env.SITE_BUILD_TEST_DB)('name normaliser on PGlite', ()
     expect(await loadStoredOk(sql)).toEqual([
       { shopId: shopA, groupKey: 'P1', category: 'laptops', displayName: 'Lenovo IdeaPad Slim 5', variantLabel: '8GB', attrs: { ram_gb: [8] } },
     ]);
+    // --backfill-canonical writes only the canonical columns: the accepted display name stays
+    await saveCanonical(sql, [{ shopId: shopA, groupKey: 'P1', canonicalName: null, reason: 'lost tokens: irl' }]);
+    const [kept] = await sql`select display_name, variant_label, status, canonical_name, canonical_status, canonical_reason from product_names where group_key = 'P1'`;
+    expect(kept).toEqual({ display_name: 'Lenovo IdeaPad Slim 5', variant_label: '8GB', status: 'ok', canonical_name: null, canonical_status: 'rejected', canonical_reason: 'lost tokens: irl' });
+    await saveCanonical(sql, [{ shopId: shopA, groupKey: 'P1', canonicalName: 'lenovo ideapadslim5', reason: null }]);
+    expect((await sql`select canonical_name, canonical_status from product_names where group_key = 'P1'`)[0]).toEqual({ canonical_name: 'lenovo ideapadslim5', canonical_status: 'ok' });
+    expect(await hasCanonicalColumns(sql)).toBe(true);
     expect(await markRejected(sql, [{ shopId: shopA, groupKey: 'P1', reason: 'lost tokens: 5' }])).toBe(1);
     const [row] = await sql`select status, reject_reason, display_name from product_names where group_key = 'P1'`;
     expect(row).toEqual({ status: 'rejected', reject_reason: 'recheck: lost tokens: 5', display_name: null });

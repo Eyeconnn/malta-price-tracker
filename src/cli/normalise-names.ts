@@ -1,8 +1,11 @@
 // pnpm normalise-names --model haiku [--effort low] [--pilot] [--limit 500] [--sample-from out/names/<run>.csv]
 //   [--category laptops ...] [--batch-size 40] [--parallel 2] [--max-batches N] [--max-cost 5] [--dry-run] [--seed pilot]
 //   [--timeout 300] [--save-raw] [--retry-rejected] [--recheck-stored] [--backfill-canonical]
-// --backfill-canonical sends only the groups stored as ok that have no canonical name yet (names saved before
-// migration 012), whether their title changed or not; it is bounded like any run (--pilot, --max-batches, --max-cost).
+// --backfill-canonical takes only the groups stored as ok whose canonical name was never tried (names saved before
+// migration 012; with --retry-rejected also those tried and rejected), whether their title changed or not. It refuses
+// to run before migration 012. A name whose stored attrs give a canonical name that passes today's check gets it with
+// no model call; only the rest go to Claude, bounded like any run (--pilot, --max-batches, --max-cost). It writes only
+// the canonical columns (canonical_status ok or rejected): an accepted display name is never replaced or retired.
 // --retry-rejected also sends groups stored as rejected whose titles did not change. --recheck-stored makes no model
 // call: it runs today's checks over the names stored as ok and marks the failing ones rejected (only reports them with
 // --dry-run). A run stops after 5 failed batches in a row, and at once on a login or usage-limit error; the report and
@@ -33,9 +36,10 @@ import { interleaveBatches, makeBatches, systemPrompt, userMessage, type Batch }
 import { writeReport, type BatchStat, type ReportRow } from '../names/report.js';
 import { answerJsonSchema, loadAttributeSchemas } from '../names/schema.js';
 import { pickSample, readSampleCsv } from '../names/sample.js';
+import { splitBackfill } from '../names/backfill.js';
 import { changedGroups, loadGroups, pilotSample, type GroupInput } from '../names/select.js';
 import { recheckStored, type StoredName } from '../names/recheck.js';
-import { finishRun, loadStoredOk, markRejected, saveResults, startRun } from '../names/store.js';
+import { finishRun, hasCanonicalColumns, loadStoredOk, markRejected, saveCanonical, saveResults, startRun, type CanonicalResult } from '../names/store.js';
 
 const { values } = parseArgs({
   options: {
@@ -106,6 +110,9 @@ async function main() {
   let sampleNote: string | undefined;
   /** groups and stored names for --recheck-stored */
   let stored: StoredName[] = [];
+  const backfill = values['backfill-canonical'];
+  /** --backfill-canonical: canonical names built from the stored attrs, saved without a model call */
+  let direct: CanonicalResult[] = [];
   const withBrands = (list: GroupInput[]) => {
     for (const g of list) {
       const v = brandStatus(g.brand, g.shopId, brandCtx!);
@@ -115,6 +122,9 @@ async function main() {
     }
   };
   try {
+    if (backfill && !(await hasCanonicalColumns(ro))) {
+      throw new Error('--backfill-canonical needs migration 012 (product_names.canonical_name, canonical_status, canonical_reason); run pnpm migrate first');
+    }
     groupsAll = await loadGroups(ro, { categories });
     const recategorised = groupsAll.filter((g) => g.storedCategory !== undefined && g.storedCategory !== g.category).length;
     console.log(`normalise-names: ${recategorised} of ${groupsAll.length} fresh groups have another category with today's rules than the stored one`);
@@ -122,10 +132,19 @@ async function main() {
       stored = await loadStoredOk(ro);
       if (stored.length > 0) brandCtx = await loadBrandContext(ro);
     } else {
-      candidates = changedGroups(groupsAll, { retryRejected: values['retry-rejected'], backfillCanonical: values['backfill-canonical'] });
+      candidates = changedGroups(groupsAll, { retryRejected: values['retry-rejected'], backfillCanonical: backfill });
+      if (backfill && candidates.length > 0) {
+        brandCtx = await loadBrandContext(ro);
+        withBrands(candidates);
+        const split = splitBackfill(candidates);
+        direct = split.direct.map((d) => ({ shopId: d.group.shopId, groupKey: d.group.groupKey, canonicalName: d.canonicalName, reason: null }));
+        console.log(`normalise-names: backfill of ${candidates.length} stored names: ${direct.length} from their stored fields (no model call), ${split.needModel.length} need Claude`);
+        for (const d of split.direct.slice(0, 10)) console.log(`  ${d.group.shopSlug} "${d.group.title}" -> ${d.canonicalName}`);
+        candidates = split.needModel;
+      }
       chosen = pickChosen();
       // the brand statistic reads every fresh group; skip it when there is nothing to name
-      if (chosen.length > 0) brandCtx = await loadBrandContext(ro);
+      if (chosen.length > 0 && !brandCtx) brandCtx = await loadBrandContext(ro);
     }
   } finally {
     await ro.end({ timeout: 5 });
@@ -157,6 +176,10 @@ async function main() {
       return pick.chosen;
   }
   return values.pilot ? pilotSample(candidates, limit, values.seed) : candidates;
+  }
+  if (direct.length > 0) {
+    if (dryRun) console.log(`normalise-names: dry run, ${direct.length} canonical names from stored fields not written`);
+    else console.log(`normalise-names: ${await saveCanonical(db(), direct)} canonical names written from stored fields`);
   }
   if (brandCtx) withBrands(chosen);
   const batches = interleaveBatches(makeBatches(chosen, batchSize)).slice(0, maxBatches ?? Infinity);
@@ -265,10 +288,17 @@ async function main() {
         ...ids(r.item.group),
       });
     }
-    if (rw) {
+    if (rw && backfill) {
+      // only the canonical columns: a rejected answer never retires the accepted stored name
+      await saveCanonical(rw, results.map((r) => ({
+        shopId: r.item.group.shopId, groupKey: r.item.group.groupKey,
+        canonicalName: r.status === 'ok' ? r.canonicalName : null,
+        reason: r.status === 'ok' ? r.canonicalReason : `name rejected: ${r.reason}`,
+      })));
+    } else if (rw) {
       await saveResults(rw, Number(runId), model!, results.map((r) => ({
         group: r.item.group, category: batch.category, status: r.status, displayName: r.displayName,
-        variantLabel: r.variantLabel, attrs: r.attrs, reason: r.reason, canonicalName: r.canonicalName,
+        variantLabel: r.variantLabel, attrs: r.attrs, reason: r.reason, canonicalName: r.canonicalName, canonicalReason: r.canonicalReason,
       })));
     }
     const extra = unknownKeys.length > 0 ? `, ignored unknown keys ${unknownKeys.join(' ')}` : '';
