@@ -536,8 +536,21 @@ describe("product page, Simple, a variant's facts from every reading", () => {
     expect(within(article).queryByText('Black Friday')).toBeNull();
     expect(lowest()).toMatch(/Not known yet/);
     expect(screen.getByRole('status').textContent).toMatch(/^8GB: last seen on 10 Sep/);
-    // the price line itself no longer shows €599.00 (only the picker button does)
-    expect(within(article).getAllByText('€599.00')).toHaveLength(1);
+    // neither the price line nor the picker button shows the old €599.00 as current
+    expect(within(article).queryByText('€599.00')).toBeNull();
+    expect(within(within(article).getByRole('radiogroup', { name: 'Variant' })).getByRole('radio', { name: /8GB/ }).textContent).toMatch(/Last seen 10 Sep/);
+  });
+
+  it("prints a variant button's price from its own newest reading, not the variant row", async () => {
+    const data = lenovo();
+    // the 8GB row says €599.00, but its newest reading hid the price; the 16GB row has no readings at all
+    data.history = [...smallHistory.slice(0, -1), obs(SMALL, '2026-10-22', null, null, false)];
+    await openLenovo(data);
+    const picker = within(screen.getByRole('radiogroup', { name: 'Variant' }));
+    expect(picker.getByRole('radio', { name: /8GB/ }).textContent).toMatch(/Price not shown by the shop/);
+    expect(picker.getByRole('radio', { name: /8GB/ }).textContent).not.toMatch(/€599/);
+    expect(picker.getByRole('radio', { name: /16GB/ }).textContent).toMatch(/Price not shown by the shop/);
+    expect(picker.getByRole('radio', { name: /16GB/ }).textContent).not.toMatch(/€799/);
   });
 
   it("counts a price change from today, not from the variant's latest day", async () => {

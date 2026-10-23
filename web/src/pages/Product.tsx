@@ -241,10 +241,6 @@ function Comparison({ others }: { others: OtherShop[] }) {
 const TOGGLE =
   'min-h-11 rounded-xl px-3 font-semibold text-muted-foreground hover:bg-secondary hover:text-ink motion-reduce:transition-none data-[state=on]:bg-ink data-[state=on]:text-background data-[state=on]:hover:bg-ink data-[state=on]:hover:text-background';
 
-/** What a variant button says about its price: the price, "Price not shown by the shop", and out of stock. */
-function variantPrice(v: Variant): string {
-  return `${euroOr(v.priceCents, NO_PRICE)}${v.inStock === false ? ', out of stock' : ''}`;
-}
 
 /** The variant radio group: Simple shows it inside the product card, Advanced in its own "Variants" section. */
 function VariantPicker({
@@ -252,12 +248,15 @@ function VariantPicker({
   value,
   verdictId,
   onChange,
+  priceText,
   inline,
 }: {
   variants: Variant[];
   value: number;
   verdictId: number | null;
   onChange: (id: number) => void;
+  /** what a button says about the variant's price, from its own readings (never a stale price as current) */
+  priceText: (id: number) => string;
   inline?: boolean;
 }) {
   const noteId = useId();
@@ -277,7 +276,7 @@ function VariantPicker({
       {variants.map((v) => (
         <ToggleGroupItem key={v.id} value={String(v.id)} className={cn(TOGGLE, 'h-auto flex-col items-start gap-0 py-1.5 text-left')}>
           <span className="break-words whitespace-normal">{variantName(v)}</span>
-          <span className="text-xs font-normal tabular-nums">{variantPrice(v)}</span>
+          <span className="text-xs font-normal tabular-nums">{priceText(v.id)}</span>
         </ToggleGroupItem>
       ))}
     </ToggleGroup>
@@ -435,6 +434,14 @@ function variantView(data: ProductResponse, id: number, now: Date): VariantView 
   };
 }
 
+/** A variant button's price line: its newest reading (as the card), "Last seen" when stale, or no price. */
+function buttonPrice(data: ProductResponse, id: number, now: Date): string {
+  if (!data.history.some((h) => h.productId === id)) return NO_PRICE;
+  const view = variantView(data, id, now);
+  if (view.lastSeen) return `Last seen ${formatDay(view.lastSeen)}`;
+  return `${euroOr(view.priceCents, NO_PRICE)}${view.inStock === false ? ', out of stock' : ''}`;
+}
+
 function PriceChangeLine({ change }: { change: NonNullable<VariantView['change']> }) {
   return (
     <p className={cn('font-semibold', change.row.price! > change.from ? 'text-bad' : undefined)}>
@@ -479,6 +486,13 @@ function ProductContent({ data }: { data: ProductResponse }) {
   const own = useMemo(() => (other && variant !== null ? variantView(data, variant, new Date()) : null), [other, variant, data]);
   const alarm = avoid && card.bf && !other;
   const shownCard: Card = own ? { ...card, priceCents: own.priceCents, wasCents: own.wasCents } : card;
+
+  // the picker's price lines; the clock is read when the data changes
+  const priceTexts = useMemo(() => {
+    const now = new Date();
+    return new Map(data.variants.map((v) => [v.id, buttonPrice(data, v.id, now)]));
+  }, [data]);
+  const priceText = (id: number) => priceTexts.get(id) ?? NO_PRICE;
 
   /** Choose a variant and tell screen readers its price (a polite live region; nothing moves on screen). */
   const choose = (id: number) => {
@@ -539,7 +553,7 @@ function ProductContent({ data }: { data: ProductResponse }) {
             {announcement}
           </p>
           {!advanced && data.variants.length > 1 && variant !== null && (
-            <VariantPicker inline variants={data.variants} value={variant} verdictId={verdictId} onChange={choose} />
+            <VariantPicker inline variants={data.variants} value={variant} verdictId={verdictId} onChange={choose} priceText={priceText} />
           )}
           {(own ? own.bf && !own.lastSeen : card.bf && !alarm) && <BlackFridayMark />}
           {fact && <p className="font-semibold text-bad">{fact}</p>}
@@ -594,7 +608,7 @@ function ProductContent({ data }: { data: ProductResponse }) {
       {advanced && (
         <>
           {data.variants.length > 1 && variant !== null && (
-            <VariantPicker variants={data.variants} value={variant} verdictId={verdictId} onChange={choose} />
+            <VariantPicker variants={data.variants} value={variant} verdictId={verdictId} onChange={choose} priceText={priceText} />
           )}
           <History rows={rows} judged={judged} low30={judged ? (facts?.low30 ?? null) : null} />
           <div className="grid items-start gap-4 lg:grid-cols-2">
