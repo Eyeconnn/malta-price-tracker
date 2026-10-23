@@ -51,10 +51,6 @@ export type SearchHit = Card & {
   attrs: Record<string, unknown> | null;
   imageUrl: string | null;
 };
-/** Where the same product is cheaper (search): an exactly matched, in-stock row at another shop. */
-export type CheaperTarget = { id: number; shop: string; shopSlug: string; priceCents: number };
-export type GroupItem = Card & { possible: boolean; inStock: boolean | null; cheaper: CheaperTarget | null };
-export type GroupResult = { canonicalId: number | null; title: string; items: GroupItem[] };
 
 export type ShopSummary = { slug: string; name: string; grade: Grade | null; products: number };
 export type ShopInfo = { id: number; slug: string; name: string; url: string; category: string | null };

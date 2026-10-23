@@ -5,7 +5,7 @@ import { MemoryRouter, useLocation, useNavigate } from 'react-router';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { App } from '@/App';
 import { ModeProvider } from '@/components/site/ModeProvider';
-import type { GroupResult } from '@/lib/api';
+import type { ProductResult } from '@/lib/api';
 import { SEARCH_EXAMPLES } from '@/lib/searchExamples';
 
 /** matchMedia: (min-width: Npx) answers for the viewport width; prefers-reduced-motion answers `reduced`. */
@@ -28,30 +28,8 @@ function setMedia(width: number, reduced = false): void {
 const json = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } });
 const PHRASES = { morning: ['Is that deal *real*?'], afternoon: ['Is that deal *real*?'], evening: ['Is that deal *real*?'], late: ['Is that deal *real*?'], bfweek: ['Is that deal *real*?'] };
 
-const groups = (q: string): GroupResult[] => [
-  {
-    canonicalId: 1,
-    title: `${q} result`,
-    items: [
-      {
-        id: 41,
-        title: `${q} result`,
-        shop: 'Beta',
-        shopSlug: 'beta',
-        priceCents: 59900,
-        wasCents: null,
-        verdict: 'good',
-        reason: 'r',
-        bf: false,
-        category: null,
-        raisedFrom: null,
-        wasRaisedFromCents: null,
-        possible: false,
-        inStock: true,
-        cheaper: null,
-      },
-    ],
-  },
+const groups = (q: string): ProductResult[] => [
+  { key: 'c1', name: `${q} result`, specs: null, priceCents: 59900, inStock: true, shops: 1, shop: 'Beta', bf: false, imageUrl: null, good: 1, avoid: 0 },
 ];
 
 function mockApi() {
@@ -302,7 +280,7 @@ describe('searching in the overlay', () => {
     const { d } = await openDesktop();
     fireEvent.change(within(d).getByRole('searchbox'), { target: { value: 'ip' } });
     const results = await within(d).findByRole('region', { name: 'Search results' }, { timeout: 2000 });
-    await waitFor(() => expect(within(results).getByRole('link', { name: /ip result/ }).getAttribute('href')).toBe('/p/41'));
+    await waitFor(() => expect(within(results).getByRole('link', { name: /ip result/ }).getAttribute('href')).toBe('/product/c1'));
     expect(where()).toBe('/how-we-check');
   });
 
@@ -342,7 +320,7 @@ describe('searching in the overlay', () => {
     fireEvent.change(within(d).getByRole('searchbox'), { target: { value: 'ip' } });
     fireEvent.click(await within(d).findByRole('link', { name: /ip result/ }, { timeout: 2000 }));
     await gone();
-    expect(where()).toBe('/p/41');
+    expect(where()).toBe('/product/c1');
   });
 
   it('keeps the query when reopened during the same page view, and clears it after navigating', async () => {
@@ -368,7 +346,7 @@ describe('after choosing a result', () => {
     const { d } = await openDesktop();
     fireEvent.change(within(d).getByRole('searchbox'), { target: { value: 'ip' } });
     fireEvent.click(await within(d).findByRole('link', { name: /ip result/ }, { timeout: 2000 }));
-    await waitFor(() => expect(where()).toBe('/p/41'));
+    await waitFor(() => expect(where()).toBe('/product/c1'));
     await waitFor(() => expect(screen.getByRole('dialog', { hidden: true }).getAttribute('data-state')).toBe('closed'));
     // still fading out: the text is still there, so the panel does not shrink
     expect((within(screen.getByRole('dialog', { hidden: true })).getByRole('searchbox', { hidden: true }) as HTMLInputElement).value).toBe('ip');
@@ -428,7 +406,7 @@ describe('the Back button', () => {
     fireEvent.change(within(d).getByRole('searchbox'), { target: { value: 'ip' } });
     fireEvent.click(await within(d).findByRole('link', { name: /ip result/ }, { timeout: 2000 }));
     await gone();
-    expect(where()).toBe('/p/41');
+    expect(where()).toBe('/product/c1');
     back();
     await waitFor(() => expect(where()).toBe('/how-we-check'));
     expect(dialog()).toBeNull();

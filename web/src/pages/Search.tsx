@@ -1,107 +1,55 @@
-import { TriangleAlert } from 'lucide-react';
 import { useEffect, useId, useRef, useState } from 'react';
 import { Link, useSearchParams } from 'react-router';
-import { alarmText, avoidFact, avoidSummary, BlackFridayMark, NO_PRICE } from '@/components/site/DealCard';
+import { BlackFridayMark, NO_PRICE } from '@/components/site/DealCard';
 import { Notice } from '@/components/site/DealList';
-import { useMode } from '@/components/site/ModeProvider';
+import { ProductImage, productPath, resultLabel, resultPrice, resultTitle, sellersLine, verdictParts } from '@/components/site/ProductResult';
 import { SEARCH_DEBOUNCE_MS, SearchBox, SearchStatus, searchPath, useSearch } from '@/components/site/SearchBox';
-import { ShopBadge } from '@/components/site/ShopBadge';
 import { Button } from '@/components/ui/button';
-import { type GroupItem, type GroupResult, useDebounced } from '@/lib/api';
-import { formatEuro } from '@/lib/format';
+import { type ProductResult, useDebounced } from '@/lib/api';
 import { cn } from '@/lib/utils';
 
 const SLUG = /^[a-z0-9-]{1,64}$/;
 
 /**
- * One shop's row of a product group. `item.cheaper` is decided by the API (Ruling R36); it is only shown here.
- * The shop link is stretched over the whole result (its ::after fills the nearest positioned box), so a
- * tap anywhere opens the product. With `stretch` = 'row' that box is this row (several shops in the group);
- * with 'card' it is the group card around it (one row), which also covers the heading.
+ * One product: its clean name (specs after a middle dot), the lowest price and how many shops sell it, Black
+ * Friday and the sellers' verdicts. The title link is stretched over the whole card (its ::after fills the card,
+ * which is positioned), so a tap anywhere opens the product page; it takes the taps, the hover tint and the focus
+ * ring, so the glass card keeps its own shadow.
  */
-function ResultRow({ item, groupTitle, stretch }: { item: GroupItem; groupTitle: string; stretch: 'row' | 'card' }) {
-  const { mode } = useMode();
-  const { cheaper } = item;
-  const avoid = item.verdict === 'avoid';
-  const fact = avoid ? avoidFact(item) : null;
+function ProductCard({ result }: { result: ProductResult }) {
+  const id = useId();
   return (
-    <li
-      className={cn(
-        'flex min-h-11 items-start gap-3 border-t border-line py-3 first:border-t-0 first:pt-1 last:pb-0',
-        stretch === 'row' && 'relative -mx-2 rounded-xl px-2',
-      )}
-    >
-      <ShopBadge name={item.shop} size="sm" className="mt-0.5" />
+    <article aria-labelledby={id} className="glass relative flex min-h-11 items-start gap-3 p-4">
+      <ProductImage url={result.imageUrl} className="size-16" />
       <div className="flex min-w-0 flex-1 flex-col gap-1">
-        <Link
-          to={`/p/${item.id}`}
-          aria-label={`${item.title} at ${item.shop}, ${item.priceCents === null ? NO_PRICE : formatEuro(item.priceCents)}`}
-          className={cn(
-            // The ::after fills the positioned box (row or card): it takes the taps, the hover tint and the focus ring,
-            // so the ring needs no :has and the glass card keeps its own shadow.
-            "self-start rounded-sm font-semibold outline-none after:absolute after:inset-0 after:content-[''] hover:underline hover:after:bg-secondary focus-visible:after:ring-[3px] focus-visible:after:ring-ring",
-            stretch === 'row' ? 'after:rounded-xl' : 'after:rounded-2xl',
-          )}
-        >
-          {item.shop}
-        </Link>
-        {item.title !== groupTitle && <p className="truncate text-xs text-muted-foreground">{item.title}</p>}
+        <h2 id={id} className="leading-snug font-semibold break-words">
+          <Link
+            to={productPath(result.key)}
+            aria-label={resultLabel(result)}
+            className="rounded-sm outline-none after:absolute after:inset-0 after:rounded-2xl after:content-[''] hover:underline hover:after:bg-secondary focus-visible:after:ring-[3px] focus-visible:after:ring-ring"
+          >
+            {resultTitle(result)}
+          </Link>
+        </h2>
+        <p className="text-sm text-muted-foreground">{sellersLine(result)}</p>
         <div className="flex flex-wrap items-center gap-1.5 text-xs">
-          {avoid && item.bf ? (
-            <span className="inline-flex items-center gap-1 rounded-lg bg-bad px-2 py-0.5 font-bold text-bad-ink">
-              <TriangleAlert aria-hidden="true" className="size-3.5" />
-              {alarmText(item)}
+          {result.bf && <BlackFridayMark />}
+          {verdictParts(result).map((p) => (
+            <span key={p.text} className={cn('font-bold', p.tone === 'bad' ? 'text-bad' : 'text-good')}>
+              {p.text}
             </span>
-          ) : (
-            <>
-              {item.bf && <BlackFridayMark />}
-              {avoid && <span className="font-bold text-bad">{avoidSummary(item)}</span>}
-            </>
-          )}
-          {item.verdict === 'good' && <span className="font-bold text-good">Real deal</span>}
-          {item.possible && <span className="text-muted-foreground">Possibly the same product</span>}
-          {cheaper && (
-            <span className="rounded-lg border border-line bg-secondary px-2 py-0.5 font-semibold">
-              Cheaper elsewhere: {formatEuro(cheaper.priceCents)} at {cheaper.shop}
-            </span>
-          )}
+          ))}
+          {!result.inStock && <span className="text-muted-foreground">Out of stock</span>}
         </div>
-        {fact && <p className="text-sm font-semibold text-bad">{fact}</p>}
-        {mode === 'advanced' && item.reason && <p className="text-sm text-muted-foreground">{item.reason}</p>}
       </div>
       <p className="max-w-32 flex-none text-right font-bold tabular-nums">
-        {item.priceCents === null ? <span className="text-xs font-medium text-muted-foreground">{NO_PRICE}</span> : formatEuro(item.priceCents)}
+        {result.priceCents === null ? <span className="text-xs font-medium text-muted-foreground">{NO_PRICE}</span> : resultPrice(result)}
       </p>
-    </li>
-  );
-}
-
-function GroupCard({ group }: { group: GroupResult }) {
-  const id = useId();
-  const shops = new Set(group.items.map((i) => i.shopSlug)).size;
-  const single = group.items.length === 1;
-  return (
-    <article
-      aria-labelledby={id}
-      className={cn(
-        'glass min-h-11 p-4',
-        single && 'relative',
-      )}
-    >
-      <h2 id={id} className="leading-snug font-semibold">
-        {group.title}
-      </h2>
-      {shops > 1 && <p className="text-xs text-muted-foreground">{shops} shops, cheapest first</p>}
-      <ul className="m-0 mt-2 list-none p-0">
-        {group.items.map((item) => (
-          <ResultRow key={item.id} item={item} groupTitle={group.title} stretch={single ? 'card' : 'row'} />
-        ))}
-      </ul>
     </article>
   );
 }
 
-/** Search: the query lives in ?q= (and an optional ?shop=); results are grouped by product across shops. */
+/** Search: the query lives in ?q= (and an optional ?shop=); one result per product, whatever the number of shops. */
 export function SearchPage() {
   const [params, setParams] = useSearchParams();
   const urlQuery = params.get('q') ?? '';
@@ -188,8 +136,8 @@ export function SearchPage() {
               <p className="text-sm text-muted-foreground">
                 {state.data.results.length === 1 ? '1 product' : `${state.data.results.length} products`}
               </p>
-              {state.data.results.map((g) => (
-                <GroupCard key={g.canonicalId === null ? `s${g.items[0]!.id}` : `c${g.canonicalId}`} group={g} />
+              {state.data.results.map((r) => (
+                <ProductCard key={r.key} result={r} />
               ))}
             </>
           )}

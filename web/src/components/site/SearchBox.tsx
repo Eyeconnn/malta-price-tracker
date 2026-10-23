@@ -1,10 +1,10 @@
 import { Search } from 'lucide-react';
 import { useId, useState } from 'react';
 import { Link, useNavigate } from 'react-router';
-import { alarmText, avoidSummary, BlackFridayMark, NO_PRICE } from '@/components/site/DealCard';
+import { BlackFridayMark, NO_PRICE } from '@/components/site/DealCard';
+import { ProductImage, productPath, resultLabel, resultPrice, resultTitle, verdictNote, verdictParts } from '@/components/site/ProductResult';
 import { Button } from '@/components/ui/button';
-import { ApiError, type ApiState, api, type GroupResult, type SearchResponse, useApi, useDebounced } from '@/lib/api';
-import { formatEuro } from '@/lib/format';
+import { ApiError, type ApiState, api, type ProductResult, type SearchResponse, useApi, useDebounced } from '@/lib/api';
 import { staticExample } from '@/lib/searchExamples';
 import { cn } from '@/lib/utils';
 import { useTypingPlaceholder } from '@/lib/useTypingPlaceholder';
@@ -143,82 +143,46 @@ export function SearchBox({ value, onChange, onSubmit, placeholder = 'Search a p
 const LIVE_MAX = 5;
 
 /**
- * The rows a Simple live result may show: never a "possibly the same" (title-only) row, which only the full
- * search page shows with its label (spec 9a). The API groups trusted rows only; this keeps the rule if it ever does not.
- */
-function exactItems(g: GroupResult) {
-  return g.items.filter((i) => !i.possible);
-}
-
-/** The cheapest row with a price (rows come cheapest first), else the first row. */
-function cheapest(items: GroupResult['items']) {
-  return items.find((i) => i.priceCents !== null) ?? items[0]!;
-}
-
-/** What a result row says about its verdict, for the description of its link (empty when there is nothing to say). */
-function verdictText(best: GroupResult['items'][number]): string {
-  if (best.verdict === 'avoid') return best.bf ? alarmText(best) : avoidSummary(best);
-  if (best.verdict === 'good') return 'Real deal';
-  return best.bf ? 'Black Friday' : '';
-}
-
-/**
- * One live result: a single link over the whole row. Its name is "<title> at <shop>, <price>" (or
+ * One live result, one product: a single link over the whole row. Its name is "<title> at <shop>, <price>" (or
  * "<title>, from <price> at <N> shops") written in a screen reader only span, while the visible text is
- * aria-hidden so the words are not read twice; the visible words are all in the name. The verdict is the
- * link's description.
+ * aria-hidden so the words are not read twice; the visible words are all in the name. The sellers' verdicts and
+ * the Black Friday marker are the link's description.
  */
-function LiveRow({ group, replace }: { group: GroupResult; replace: boolean }) {
+function LiveRow({ result, replace }: { result: ProductResult; replace: boolean }) {
   const descId = useId();
-  const items = exactItems(group);
-  if (items.length === 0) return null;
-  const best = cheapest(items);
-  const shops = new Set(items.map((i) => i.shopSlug)).size;
-  const price = best.priceCents === null ? NO_PRICE : formatEuro(best.priceCents);
-  const name =
-    shops > 1
-      ? best.priceCents === null
-        ? `${group.title}, ${NO_PRICE} at ${shops} shops`
-        : `${group.title}, from ${price} at ${shops} shops`
-      : `${group.title} at ${best.shop}, ${price}`;
-  const verdict = verdictText(best);
+  const note = verdictNote(result);
   return (
     <li className="relative">
       <Link
-        to={`/p/${best.id}`}
+        to={productPath(result.key)}
         replace={replace}
-        aria-describedby={verdict ? descId : undefined}
+        aria-describedby={note ? descId : undefined}
         className="flex min-h-11 items-center gap-3 rounded-xl px-3 py-2 outline-none hover:bg-secondary focus-visible:ring-[3px] focus-visible:ring-ring"
       >
-        <span className="sr-only">{name}</span>
+        <span className="sr-only">{resultLabel(result)}</span>
         <span aria-hidden="true" className="flex min-w-0 flex-1 items-center gap-3">
+          <ProductImage url={result.imageUrl} className="size-10" />
           <span className="min-w-0 flex-1">
-            <span className="block truncate font-medium">{group.title}</span>
+            <span className="block truncate font-medium">{resultTitle(result)}</span>
             <span className="block truncate text-xs text-muted-foreground">
-              {shops > 1 ? `${shops} shops` : best.shop}
-              {best.verdict === 'avoid' && (
-                <>
+              {result.shops > 1 ? `${result.shops} shops` : result.shop}
+              {verdictParts(result).map((p) => (
+                <span key={p.text}>
                   {' · '}
-                  <span className="font-semibold text-bad">{verdict}</span>
-                </>
-              )}
-              {best.verdict === 'good' && (
-                <>
-                  {' · '}
-                  <span className="font-semibold text-good">{verdict}</span>
-                </>
-              )}
-              {best.bf && best.verdict !== 'avoid' && <BlackFridayMark className="ml-1.5 py-0 align-middle text-[11px]" />}
+                  <span className={cn('font-semibold', p.tone === 'bad' ? 'text-bad' : 'text-good')}>{p.text}</span>
+                </span>
+              ))}
+              {result.bf && <BlackFridayMark className="ml-1.5 py-0 align-middle text-[11px]" />}
             </span>
           </span>
           <span className="max-w-28 flex-none text-right text-sm font-bold tabular-nums">
-            {best.priceCents === null ? <span className="text-xs font-medium text-muted-foreground">{NO_PRICE}</span> : price}
+            {result.priceCents === null ? <span className="text-xs font-medium text-muted-foreground">{NO_PRICE}</span> : resultPrice(result)}
           </span>
         </span>
       </Link>
-      {verdict && (
+      {note && (
         <span id={descId} className="sr-only">
-          {verdict}
+          {note}
         </span>
       )}
     </li>
@@ -278,7 +242,7 @@ export function LiveSearch({
             <>
               <ul className="m-0 list-none p-0">
                 {state.data.results.slice(0, LIVE_MAX).map((g) => (
-                  <LiveRow key={g.canonicalId === null ? `s${g.items[0]!.id}` : `c${g.canonicalId}`} group={g} replace={replace} />
+                  <LiveRow key={g.key} result={g} replace={replace} />
                 ))}
               </ul>
               <Link
