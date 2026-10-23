@@ -85,6 +85,7 @@ export function adminErrorText(e: unknown): string {
     if (e.status === 401) return 'Your admin login has expired. Reload the page to sign in again.';
     if (e.status === 404) return 'Not found. It may have been removed; reload the page.';
     if (e.status === 409) return 'It changed in the meantime. Reload the page to see its current state.';
+    if (e.status === 429) return '20 shops are already waiting to be checked. Try again after the next check.';
   }
   return 'Something went wrong. Try again.';
 }

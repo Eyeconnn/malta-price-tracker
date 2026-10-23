@@ -44,8 +44,10 @@ export type AdminShopRequest = {
   details: DetailsView | null;
   error: string | null;
   attempts: number;
-  /** the shop this request created; null until a supported shop was saved */
-  shop: { slug: string; active: boolean } | null;
+  /** a request rate limited by the shop waits until then before it is checked again */
+  nextCheckAt: string | null;
+  /** the shop this request created, with its stored name; null until a supported shop was saved */
+  shop: { slug: string; name: string; active: boolean } | null;
 };
 
 export type CreateResult =
@@ -58,8 +60,8 @@ export interface ShopRequestStore {
   /** newest first, at most 200 */
   shopRequests(): Promise<AdminShopRequest[]>;
   createShopRequest(input: { origin: string; host: string; name: string | null; category: string | null }): Promise<CreateResult>;
-  /** null: no such request; 'conflict': its current status is not in `from` */
-  setShopRequestStatus(id: number, status: 'pending' | 'rejected', from: readonly ShopRequestStatus[]): Promise<AdminShopRequest | 'conflict' | null>;
+  /** null: no such request; 'conflict': its current status is not in `from`; 'full': a retry over the open cap */
+  setShopRequestStatus(id: number, status: 'pending' | 'rejected', from: readonly ShopRequestStatus[]): Promise<AdminShopRequest | 'conflict' | 'full' | null>;
 }
 
 type Row = Record<string, unknown>;
@@ -128,7 +130,8 @@ const iso = (v: unknown): string | null => (v === null || v === undefined ? null
 const numOrNull = (v: unknown): number | null => (v === null || v === undefined ? null : Number(v));
 
 const SELECT = `select r.id, r.origin, r.display_name, r.shop_category, r.status, r.requested_at, r.started_at, r.checked_at,
-    r.platform, r.robots, r.products_found, r.sample, r.details, r.error, r.attempts, s.slug as shop_slug, s.active as shop_active
+    r.platform, r.robots, r.products_found, r.sample, r.details, r.error, r.attempts, r.next_check_at,
+    s.slug as shop_slug, s.name as shop_name, s.active as shop_active
   from shop_requests r left join shops s on s.id = r.shop_id`;
 
 function toRequest(r: Row): AdminShopRequest {
@@ -148,7 +151,11 @@ function toRequest(r: Row): AdminShopRequest {
     details: detailsView(r.details),
     error: str(r.error),
     attempts: Number(r.attempts ?? 0),
-    shop: r.shop_slug === null || r.shop_slug === undefined ? null : { slug: String(r.shop_slug), active: Boolean(r.shop_active) },
+    nextCheckAt: iso(r.next_check_at),
+    shop:
+      r.shop_slug === null || r.shop_slug === undefined
+        ? null
+        : { slug: String(r.shop_slug), name: str(r.shop_name, NAME_MAX) ?? String(r.shop_slug), active: Boolean(r.shop_active) },
   };
 }
 
@@ -191,12 +198,21 @@ export function shopRequestStore(db: AdminRunner): ShopRequestStore {
     },
 
     async setShopRequestStatus(id, status, from) {
+      // a retry adds to the open checks, so the cap is part of the update itself
       const [updated, rows] = await db.transaction([
-        { text: 'update shop_requests set status = $2::text where id = $1::bigint and status = any($3::text[]) returning id', params: [id, status, [...from]] },
+        {
+          text: `update shop_requests set status = $2::text
+            where id = $1::bigint and status = any($3::text[])
+              and ($2::text <> 'pending' or (select count(*) from shop_requests where status = any($4::text[])) < $5::int)
+            returning id`,
+          params: [id, status, [...from], [...QUEUED], MAX_QUEUED],
+        },
         { text: `${SELECT} where r.id = $1::bigint`, params: [id] },
       ]);
-      if (!rows![0]) return null;
-      return updated!.length ? toRequest(rows![0]) : 'conflict';
+      const row = rows![0];
+      if (!row) return null;
+      if (updated!.length) return toRequest(row);
+      return status === 'pending' && from.includes(row.status as ShopRequestStatus) ? 'full' : 'conflict';
     },
   };
 }
@@ -253,5 +269,6 @@ export async function handleShopRequests(req: Request, env: Env, url: URL, store
   const out = await store().setShopRequestStatus(Number(one[1]), body.data.status, from);
   if (out === null) return json({ error: 'not found' }, 404);
   if (out === 'conflict') return json({ error: 'conflict' }, 409);
+  if (out === 'full') return json({ error: 'too many pending', max: MAX_QUEUED }, 429);
   return json({ request: out });
 }

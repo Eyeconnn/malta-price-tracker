@@ -207,6 +207,8 @@ function SetupDetails({ d }: { d: NonNullable<AdminShopRequest['details']> }) {
 function RequestItem({ request, onChanged }: { request: AdminShopRequest; onChanged: (r: AdminShopRequest) => void }) {
   const [state, run] = useSaver();
   const r = request;
+  // rate limited by the shop: the PC checks it again by itself after this time
+  const waitingAfterLimit = r.status === 'pending' && r.nextCheckAt !== null;
   const act = (status: 'pending' | 'rejected', text: string) =>
     void run(async () => {
       const { request: updated } = await adminApi.setShopRequestStatus(r.id, status);
@@ -216,7 +218,7 @@ function RequestItem({ request, onChanged }: { request: AdminShopRequest; onChan
   return (
     <li className="glass flex flex-col gap-3 p-4">
       <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
-        <span className="font-semibold break-all">{r.name ?? hostOf(r.origin)}</span>
+        <span className="font-semibold break-all">{r.shop?.name ?? r.name ?? hostOf(r.origin)}</span>
         <StatusChip status={r.status} />
       </div>
       <p className="-mt-2 text-sm break-all text-muted-foreground">{r.origin}</p>
@@ -257,8 +259,14 @@ function RequestItem({ request, onChanged }: { request: AdminShopRequest; onChan
           </>
         )}
       </dl>
-      {NEXT_STEP[r.status] && <p className="text-sm">{NEXT_STEP[r.status]}</p>}
-      {r.error && r.status !== 'pending' && r.status !== 'checking' && <p className="rounded-md bg-secondary p-3 text-sm break-words whitespace-pre-wrap">{r.error}</p>}
+      {waitingAfterLimit ? (
+        <p className="text-sm font-medium">Retrying after {when.format(new Date(r.nextCheckAt!))}</p>
+      ) : (
+        NEXT_STEP[r.status] && <p className="text-sm">{NEXT_STEP[r.status]}</p>
+      )}
+      {r.error && r.status !== 'checking' && (r.status !== 'pending' || waitingAfterLimit) && (
+        <p className="rounded-md bg-secondary p-3 text-sm break-words whitespace-pre-wrap">{r.error}</p>
+      )}
       {r.details && r.status === 'needs_setup' && <SetupDetails d={r.details} />}
       {r.sample.length > 0 && (
         <div className="flex flex-col gap-1">
@@ -308,7 +316,7 @@ export function AdminAddShopPage() {
       // a refresh that changed a status says so once, for screen readers
       const changed = requests.filter((r) => lastStatus.current.has(r.id) && lastStatus.current.get(r.id) !== r.status);
       lastStatus.current = new Map(requests.map((r) => [r.id, r.status]));
-      if (changed.length) setAnnounce(changed.map((r) => `${r.name ?? hostOf(r.origin)}: ${STATUS_LABELS[r.status]}.`).join(' '));
+      if (changed.length) setAnnounce(changed.map((r) => `${r.shop?.name ?? r.name ?? hostOf(r.origin)}: ${STATUS_LABELS[r.status]}.`).join(' '));
       setList({ status: 'ready', items: requests });
     } catch (error) {
       // a failed refresh keeps the list already shown
@@ -327,11 +335,24 @@ export function AdminAddShopPage() {
   }, [load]);
 
   const busy = list.status === 'ready' && list.items.some((r) => r.status === 'pending' || r.status === 'checking');
+  const busyRef = useRef(busy);
+  busyRef.current = busy;
+  // no polling in a hidden tab; showing the tab again refreshes at once
+  const [visible, setVisible] = useState(() => document.visibilityState !== 'hidden');
   useEffect(() => {
-    if (!busy) return;
+    const changed = () => {
+      const v = document.visibilityState !== 'hidden';
+      setVisible(v);
+      if (v && busyRef.current) void load();
+    };
+    document.addEventListener('visibilitychange', changed);
+    return () => document.removeEventListener('visibilitychange', changed);
+  }, [load]);
+  useEffect(() => {
+    if (!busy || !visible) return;
     const t = setInterval(() => void load(), REFRESH_MS);
     return () => clearInterval(t);
-  }, [busy, load]);
+  }, [busy, visible, load]);
 
   const remember = (r: AdminShopRequest) => lastStatus.current.set(r.id, r.status);
   const replace = (updated: AdminShopRequest) => {

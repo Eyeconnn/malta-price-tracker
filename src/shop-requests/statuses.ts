@@ -5,8 +5,8 @@ export type ShopRequestStatus = (typeof SHOP_REQUEST_STATUSES)[number];
 
 /** The admin may send a request back to pending (retry) from these statuses only. */
 export const RETRY_FROM: readonly ShopRequestStatus[] = ['failed', 'blocked'];
-/** The admin may reject a request in these statuses (not while it is being checked, nor once its shop is active). */
-export const REJECT_FROM: readonly ShopRequestStatus[] = ['pending', 'needs_setup', 'blocked', 'failed'];
+/** The admin may reject a request in these statuses (also while it is checked: the check then leaves it rejected), not once its shop is active. */
+export const REJECT_FROM: readonly ShopRequestStatus[] = ['pending', 'checking', 'needs_setup', 'blocked', 'failed'];
 /** Statuses that count towards the cap of open checks. */
 export const QUEUED: readonly ShopRequestStatus[] = ['pending', 'checking'];
 export const MAX_QUEUED = 20;

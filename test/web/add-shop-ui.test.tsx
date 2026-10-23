@@ -51,6 +51,7 @@ const base: AdminShopRequest = {
   details: null,
   error: null,
   attempts: 0,
+  nextCheckAt: null,
   shop: null,
 };
 const active: AdminShopRequest = {
@@ -64,7 +65,7 @@ const active: AdminShopRequest = {
   productsFound: 50,
   sample: [{ title: '<img src=x onerror=alert(1)> Robot', priceCents: 3999, url: 'https://toys.example.mt/products/robot' }],
   attempts: 1,
-  shop: { slug: 'toys-example', active: true },
+  shop: { slug: 'toys-example', name: 'Toys Galore', active: true },
 };
 const failed: AdminShopRequest = { ...base, id: 3, origin: 'https://thin.example.mt', status: 'failed', platform: 'woocommerce', error: 'Only 4 products with a title and a price above zero (at least 10 needed).', attempts: 1, productsFound: 4 };
 const blocked: AdminShopRequest = {
@@ -181,6 +182,8 @@ describe('admin Add shop page', () => {
     renderAt('/admin/add-shop');
     const a = (await screen.findByText('https://toys.example.mt')).closest('li')!;
     expect(within(a).getByText('Active')).toBeTruthy();
+    // once a shop exists, its stored name is shown
+    expect(within(a).getByText('Toys Galore')).toBeTruthy();
     expect(within(a).getByText('Shopify')).toBeTruthy();
     expect(within(a).getByText('Allowed, crawl delay 5 s')).toBeTruthy();
     expect(within(a).getByText('50')).toBeTruthy();
@@ -244,5 +247,68 @@ describe('admin Add shop page', () => {
       await vi.advanceTimersByTimeAsync(REFRESH_MS * 3);
     });
     await waitFor(() => expect(calls(fetch, 'GET', '/api/admin/shop-requests')).toHaveLength(3));
+  });
+});
+
+const setVisibility = (state: 'visible' | 'hidden') => {
+  Object.defineProperty(document, 'visibilityState', { value: state, configurable: true });
+  Object.defineProperty(document, 'hidden', { value: state === 'hidden', configurable: true });
+  document.dispatchEvent(new Event('visibilitychange'));
+};
+
+describe('admin Add shop page: waiting, checking and hidden tabs', () => {
+  afterEach(() => setVisibility('visible'));
+
+  it('a rate-limited request says when it is checked again, with the reason', async () => {
+    const waiting: AdminShopRequest = { ...base, id: 7, origin: 'https://busy.example.mt', nextCheckAt: '2026-10-23T12:00:00.000Z', attempts: 1, error: 'The home page answered HTTP 429. Checking again automatically (1 of 3).' };
+    mockApi({ 'GET /api/admin/shop-requests': () => json({ requests: [waiting], maxQueued: 20 }) });
+    renderAt('/admin/add-shop');
+    const item = (await screen.findByText('https://busy.example.mt')).closest('li')!;
+    expect(within(item).getByText('Retrying after 23 Oct 2026, 14:00')).toBeTruthy();
+    expect(within(item).getByText(/answered HTTP 429/)).toBeTruthy();
+  });
+
+  it('a request being checked can be rejected but not retried', async () => {
+    const checking: AdminShopRequest = { ...base, id: 8, origin: 'https://now.example.mt', status: 'checking' };
+    const fetch = mockApi({
+      'GET /api/admin/shop-requests': () => json({ requests: [checking], maxQueued: 20 }),
+      'PATCH /api/admin/shop-requests/8': () => json({ request: { ...checking, status: 'rejected' } }),
+    });
+    renderAt('/admin/add-shop');
+    const item = (await screen.findByText('https://now.example.mt')).closest('li')!;
+    expect(within(item).queryByRole('button', { name: /Retry/ })).toBeNull();
+    fireEvent.click(within(item).getByRole('button', { name: 'Reject: https://now.example.mt' }));
+    expect(await within(item).findByText('Rejected')).toBeTruthy();
+    expect(bodyOf(calls(fetch, 'PATCH', '/api/admin/shop-requests/8')[0]!)).toEqual({ status: 'rejected' });
+  });
+
+  it('a retry over the queue cap says so', async () => {
+    mockApi({
+      'GET /api/admin/shop-requests': () => json({ requests: [failed], maxQueued: 20 }),
+      'PATCH /api/admin/shop-requests/3': () => json({ error: 'too many pending', max: 20 }, 429),
+    });
+    renderAt('/admin/add-shop');
+    const item = (await screen.findByText('https://thin.example.mt')).closest('li')!;
+    fireEvent.click(within(item).getByRole('button', { name: 'Retry: https://thin.example.mt' }));
+    expect(await within(item).findByText('20 shops are already waiting to be checked. Try again after the next check.')).toBeTruthy();
+  });
+
+  it('does not refresh while the tab is hidden, and refreshes at once when it is shown again', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    const fetch = mockApi({ 'GET /api/admin/shop-requests': () => json({ requests: [base], maxQueued: 20 }) });
+    renderAt('/admin/add-shop');
+    await screen.findByText('Waiting');
+    expect(calls(fetch, 'GET', '/api/admin/shop-requests')).toHaveLength(1);
+    act(() => setVisibility('hidden'));
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(REFRESH_MS * 3);
+    });
+    expect(calls(fetch, 'GET', '/api/admin/shop-requests')).toHaveLength(1);
+    act(() => setVisibility('visible'));
+    await waitFor(() => expect(calls(fetch, 'GET', '/api/admin/shop-requests')).toHaveLength(2));
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(REFRESH_MS);
+    });
+    expect(calls(fetch, 'GET', '/api/admin/shop-requests')).toHaveLength(3);
   });
 });

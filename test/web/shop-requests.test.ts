@@ -38,6 +38,7 @@ const sample: AdminShopRequest = {
   details: null,
   error: null,
   attempts: 0,
+  nextCheckAt: null,
   shop: null,
 };
 
@@ -186,7 +187,15 @@ describe('PATCH /api/admin/shop-requests/:id', () => {
     expect((await w.send('PATCH', '/api/admin/shop-requests/3', { status: 'pending' })).status).toBe(200);
     expect(w.store.setShopRequestStatus).toHaveBeenLastCalledWith(3, 'pending', ['failed', 'blocked']);
     expect((await w.send('PATCH', '/api/admin/shop-requests/3', { status: 'rejected' })).status).toBe(200);
-    expect(w.store.setShopRequestStatus).toHaveBeenLastCalledWith(3, 'rejected', ['pending', 'needs_setup', 'blocked', 'failed']);
+    expect(w.store.setShopRequestStatus).toHaveBeenLastCalledWith(3, 'rejected', ['pending', 'checking', 'needs_setup', 'blocked', 'failed']);
+  });
+
+  it('a retry refused by the 20 open cap gives 429', async () => {
+    const w = setup();
+    w.store.setShopRequestStatus.mockResolvedValueOnce('full' as never);
+    const res = await w.send('PATCH', '/api/admin/shop-requests/3', { status: 'pending' });
+    expect(res.status).toBe(429);
+    expect(await res.json()).toEqual({ error: 'too many pending', max: 20 });
   });
 
   it('only pending and rejected can be set; bad ids are 404; a wrong current status is 409', async () => {
@@ -284,9 +293,10 @@ describe('shop request store on PGlite as site_admin', () => {
       sample = '[{"title":"<b>Robot</b>","priceCents":3999,"url":"https://shop.example.mt/p/1"}]', robots = '{"status":"ok","allowed":true,"crawlDelaySeconds":5,"checked":[],"blockedBy":null}',
       platform = 'shopify', shop_id = 1 where id = $1`, [id]);
     const retried = await store.setShopRequestStatus(id, 'pending', ['failed', 'blocked']);
-    expect(retried).toMatchObject({ id, status: 'pending', error: 'Only 4 products', productsFound: 4, platform: 'shopify', shop: { slug: 'klikk', active: true } });
-    expect(retried !== 'conflict' && retried?.sample).toEqual([{ title: '<b>Robot</b>', priceCents: 3999, url: 'https://shop.example.mt/p/1' }]);
-    expect(retried !== 'conflict' && retried?.robots).toMatchObject({ allowed: true, crawlDelaySeconds: 5 });
+    // once a shop exists, the list carries its stored name
+    expect(retried).toMatchObject({ id, status: 'pending', error: 'Only 4 products', productsFound: 4, platform: 'shopify', shop: { slug: 'klikk', name: 'Klikk', active: true } });
+    expect(typeof retried === 'object' && retried?.sample).toEqual([{ title: '<b>Robot</b>', priceCents: 3999, url: 'https://shop.example.mt/p/1' }]);
+    expect(typeof retried === 'object' && retried?.robots).toMatchObject({ allowed: true, crawlDelaySeconds: 5 });
     expect(await store.setShopRequestStatus(id, 'rejected', ['pending', 'needs_setup', 'blocked', 'failed'])).toMatchObject({ status: 'rejected' });
     expect(await store.setShopRequestStatus(999_999, 'rejected', ['pending'])).toBeNull();
     const again = await store.createShopRequest({ origin: 'https://shop.example.mt', host: 'shop.example.mt', name: null, category: null });
@@ -300,6 +310,21 @@ describe('shop request store on PGlite as site_admin', () => {
       expect('request' in r).toBe(true);
     }
     expect(await store.createShopRequest({ origin: 'https://one-too-many.example.mt', host: 'one-too-many.example.mt', name: null, category: null })).toEqual({ full: true });
+    // a retry is refused by the same cap, inside the update
+    const { rows: failed } = await pg.query<{ id: number }>(`insert into shop_requests (origin, status) values ('https://was-failed.example.mt', 'failed') returning id`);
+    const id = Number(failed[0]!.id);
+    expect(await store.setShopRequestStatus(id, 'pending', ['failed', 'blocked'])).toBe('full');
+    expect((await pg.query<{ status: string }>('select status from shop_requests where id = $1', [id])).rows[0]!.status).toBe('failed');
+    // rejecting is never capped, also while a check runs
+    await pg.query(`update shop_requests set status = 'checking' where origin = 'https://bulk19.example.mt'`);
+    const [{ id: busy }] = (await pg.query<{ id: number }>(`select id from shop_requests where origin = 'https://bulk19.example.mt'`)).rows as { id: number }[];
+    expect(await store.setShopRequestStatus(Number(busy), 'rejected', ['pending', 'checking', 'needs_setup', 'blocked', 'failed'])).toMatchObject({ status: 'rejected' });
+  });
+
+  it('a rate-limited request shows when it is checked again', async () => {
+    await pg.query(`update shop_requests set next_check_at = '2026-10-23T12:00:00Z' where origin = 'https://bulk18.example.mt'`);
+    const r = (await store.shopRequests()).find((x) => x.origin === 'https://bulk18.example.mt')!;
+    expect(r.nextCheckAt).toBe('2026-10-23T12:00:00.000Z');
   });
 
   it('unreadable stored JSON comes back as null or empty, never as raw values', async () => {
