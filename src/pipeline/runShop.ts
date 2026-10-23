@@ -38,6 +38,8 @@ export interface RunResult {
   flagged: FlaggedRow[];
   sample: NormalisedRecord[];
   durationMs: number;
+  /** requests that finally failed with 429 or 5xx, and the last Retry-After (ms) seen on them */
+  rateLimited?: { count: number; retryAfterMs: number | null };
 }
 
 export interface RunOptions {
@@ -45,12 +47,14 @@ export interface RunOptions {
   limit?: number;
   /** keep this many records in memory for display (dry runs) */
   sampleSize?: number;
+  /** hard request cap for this run only (the shop-request test scrape); past it the run stops */
+  maxRequests?: number;
   log?: (msg: string) => void;
 }
 
-export function makeContext(shop: Shop, opts: { limit?: number; log?: (m: string) => void }, errors: string[]): CrawlContext {
+export function makeContext(shop: Shop, opts: { limit?: number; maxRequests?: number; log?: (m: string) => void }, errors: string[]): CrawlContext {
   const log = opts.log ?? ((m: string) => console.log(`[${shop.slug}] ${m}`));
-  const fetcher = ShopFetcher.fromConfig(shop.config, userAgent(), shop.base_url, log);
+  const fetcher = ShopFetcher.fromConfig(shop.config, userAgent(), shop.base_url, log, { maxRequests: opts.maxRequests });
   return {
     shop,
     fetcher,
@@ -134,5 +138,5 @@ export async function runShop(shop: Shop, opts: RunOptions = {}): Promise<RunRes
   ctx.log(
     `done: ${status}, ${seen.size} products, ${st.requests} requests (${st.failed} failed), ${errors.length} errors, ${Math.round((Date.now() - t0) / 1000)}s`,
   );
-  return { shop, runId, totals, flagged, sample, durationMs: Date.now() - t0 };
+  return { shop, runId, totals, flagged, sample, durationMs: Date.now() - t0, rateLimited: { count: st.rateLimited, retryAfterMs: st.retryAfterMs } };
 }

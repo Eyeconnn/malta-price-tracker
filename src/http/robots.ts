@@ -17,6 +17,10 @@ export interface RobotsRules {
   status: 'ok' | 'none' | 'unreachable';
   /** the robots.txt line that blocks url for our agent, e.g. "Disallow: /cart (line 4)"; null when allowed */
   blockingRule(url: string): string | null;
+  /** when unreachable: the last HTTP status robots.txt answered (429, 503, ...), if any */
+  httpStatus?: number;
+  /** when unreachable: that answer's Retry-After in ms, if any */
+  retryAfterMs?: number | null;
 }
 
 /**
