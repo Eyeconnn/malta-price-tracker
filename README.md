@@ -108,6 +108,41 @@ Helpers for later promo discovery: `shopifyCollections()` and `wooCategories()`.
 4. If the shop refuses GitHub Actions IPs, add `"runner": "local"` to its config: GitHub then skips it
    and `pnpm scrape --runner local` (run on your own machine) covers it.
 
+### Adding a shop from the admin area
+
+The admin page **Add shop** (`/admin/add-shop`) takes a shop's web address, and optionally a display name and
+a shop category. The Worker only checks the address (http or https, a public host name, no IP address in any
+spelling, no user name or password, port 80 or 443 only) and stores its origin, for example
+`https://shop.com.mt`, in `shop_requests`. It refuses a host that is already a shop or already requested, and
+more than 20 requests waiting at once. The Worker never fetches the address.
+
+The Windows task **MTP Shop Requests** (`scripts/run-shop-requests.ps1`, every 15 minutes, hidden window, one run
+at a time) runs `pnpm shop-requests` on the PC, which checks waiting requests oldest first:
+
+1. robots.txt with `SCRAPER_USER_AGENT`: if the home page or the product feed is disallowed, the request is
+   **Blocked** with the rule that blocks it. Crawl-delay is recorded and obeyed.
+2. Platform detection, about 7 requests, one at a time, 2 to 5 s apart, through the normal `ShopFetcher`:
+   Shopify (`/products.json`), WooCommerce Store API, Magento GraphQL, or Magento page markers.
+3. Another platform: **Needs setup**, with what was found (server headers, generator tag, JSON-LD Product
+   data on product pages, category links) for a later session to configure by hand.
+4. A supported platform: the shop row is created inactive (slug from the host, name from the form or the
+   site's `og:site_name` or title, tier P2, `config.runner = "local"`), then a test scrape of 50 products runs
+   through the normal pipeline at the usual pace. It passes with at least 10 products that have a title and a
+   price above zero and no more than 20% of requests failing: the shop becomes **Active** and joins the next
+   nightly local scrape (and shows on the site after the next site-build). Otherwise it is **Failed** with the
+   reason and the shop stays inactive.
+
+Statuses: Waiting (`pending`), Checking (`checking`), Active, Needs setup (`needs_setup`), Blocked, Failed,
+Rejected. On the page, **Retry** sends a failed or blocked request back to waiting (it reuses the shop it
+created) and **Reject** drops a request. A check that crashes is marked failed with the error; one left in
+checking by a killed run is set to failed after an hour. The page refreshes every 30 seconds while a request is
+waiting or being checked.
+
+To check one address by hand without touching the database:
+`pnpm shop-requests --dry-run --url https://shop.com.mt`. Shops added this way live in the database (`pnpm seed`
+never deletes shops missing from `shops.seed.json`); `pnpm export-shops` writes them to `shops.added.json` so
+they can be committed if wanted.
+
 ### Shop config keys
 
 | Key | Meaning |
@@ -141,7 +176,7 @@ All cron times are UTC. Malta is UTC+2 until 25 October, then UTC+1, so 01:xx UT
 | `daily-summary` | 05:30 daily | summary email |
 | `db-setup` | manual | migrations and seed |
 
-GitHub cron is best-effort and has run up to 5 hours late, so the Windows task `MTP Nightly Local Scrape` (02:30 Malta, `scripts/run-local.ps1`) starts the four scrape workflows with `gh workflow run` and then scrapes the local shops. Scheduled (cron) runs pass `--skip-done-hours 18`, so a late backup does nothing for shops already scraped. Windows tasks are installed with `scripts/install-tasks.ps1`.
+GitHub cron is best-effort and has run up to 5 hours late, so the Windows task `MTP Nightly Local Scrape` (02:30 Malta, `scripts/run-local.ps1`) starts the four scrape workflows with `gh workflow run` and then scrapes the local shops. Scheduled (cron) runs pass `--skip-done-hours 18`, so a late backup does nothing for shops already scraped. Windows tasks are installed with `scripts/install-tasks.ps1` (also `MTP Hourly Local Rechecks` and `MTP Shop Requests`, every 15 minutes, for shops added in admin).
 
 Every workflow can also be run by hand from the Actions tab (scrape workflows accept a shop slug and a limit).
 
@@ -215,6 +250,7 @@ Open `/admin` and sign in with `ADMIN_PASSWORD` (any user name). Admin pages are
 | Thresholds | The verdict and rating thresholds: history days, baseline days, raise window, raise %, good drop %, cheaper %, and judged products needed for a rating. |
 | Reports | The "Something wrong?" reports: read them, set a status, add a note. |
 | Shops | Show or hide a shop on the public site. |
+| Add shop | Add a shop by its web address; the PC checks it within 15 minutes (see "Adding a shop from the admin area"). |
 | Matches | Confirm products linked across shops by title only; "Cheaper at" uses them only once confirmed. |
 
 ### The public switch
