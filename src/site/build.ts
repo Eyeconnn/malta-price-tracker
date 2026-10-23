@@ -2,6 +2,7 @@
 // verdicts history rows, canonical ids across shops and shop_ratings. One shop at a time, groups in
 // batches, so only a slice of the observations is ever in memory.
 import type postgres from 'postgres';
+import { judgedClusters, type Resolved } from '../match/apply.js';
 import { categorize } from './categories.js';
 import { assignMatches, type Match, type MatchInput, nameMatch } from './matching.js';
 import { computeRating, JUDGED_SQL } from './rating.js';
@@ -174,10 +175,10 @@ export function pctColumn(v: number | null): number | null {
 const CODES_CHANGED = `(site_products.gtin is distinct from excluded.gtin or site_products.mpn is distinct from excluded.mpn)`;
 
 /**
- * In the site_products upsert: the shop renamed a name-matched listing. Its clean name was made for the old title,
- * so the name match no longer holds (review minor, as CODES_CHANGED).
+ * In the site_products upsert: the shop renamed a name-matched or judged listing. Its clean name or judgement was
+ * made for the old title, so the match no longer holds (review minor, as CODES_CHANGED).
  */
-const NAME_CHANGED = `(site_products.match_method = 'name' and site_products.title is distinct from excluded.title)`;
+const NAME_CHANGED = `(site_products.match_method in ('name', 'judged') and site_products.title is distinct from excluded.title)`;
 const MATCH_GONE = `(${CODES_CHANGED} or ${NAME_CHANGED})`;
 
 /** postgres.js types a JS boolean array as a single boolean, so booleans travel as text[] and are cast per row. */
@@ -302,11 +303,15 @@ type CanonRow = MatchInput & { brand: string | null; canonicalId: string | null;
  * re-formed product keeps its id and a removed one records where its listings went (review I4).
  * opts.nameMatching: match by canonical name at all (owner decision 23 Oct: off until canonical names exist); while off,
  * no row is grouped by name, and rows grouped by name before lose that grouping.
+ * opts.judgedMatching: group the listings Claude judged the same product (match_judgements, design "Update 23 Oct,
+ * afternoon"; method 'judged', trusted like gtin and mpn on the site) while each judgement's fingerprint is current
+ * and the veto in code does not overrule it (src/match/apply.ts). Off by default; while off, rows judged before lose
+ * that grouping. opts.onJudged receives what the judgements gave.
  */
 export async function assignCanonicalIds(
   sql: postgres.Sql,
   prior: Map<number, string> = new Map(),
-  opts: { nameMatching?: boolean } = {},
+  opts: { nameMatching?: boolean; judgedMatching?: boolean; onJudged?: (r: Resolved) => void } = {},
 ): Promise<Record<string, number>> {
   const byName = opts.nameMatching === true;
   // the checked canonical name of each row (name matching): only one stored for the row's current shop title, so a
@@ -316,6 +321,7 @@ export async function assignCanonicalIds(
     {
       id: string;
       shop_id: number;
+      group_key: string;
       gtin: string | null;
       mpn: string | null;
       title: string;
@@ -329,7 +335,7 @@ export async function assignCanonicalIds(
       name_category: string | null;
     }[]
   >`
-    select sp.id, sp.shop_id, sp.gtin, sp.mpn, sp.title, sp.brand, sp.category, sp.canonical_id, sp.match_method,
+    select sp.id, sp.shop_id, sp.group_key, sp.gtin, sp.mpn, sp.title, sp.brand, sp.category, sp.canonical_id, sp.match_method,
       to_jsonb(pn) ->> 'canonical_name' as canonical_name, pn.display_name, pn.variant_label, pn.category as name_category
     from site_products sp
     left join product_names pn on pn.shop_id = sp.shop_id and pn.group_key = sp.group_key
@@ -349,7 +355,16 @@ export async function assignCanonicalIds(
     }),
   );
   const priorOf = (r: CanonRow) => prior.get(r.id) ?? r.canonicalId;
-  const matches = await stableNameKeys(sql, rows, assignMatches(rows), priorOf);
+  let judged: number[][] = [];
+  if (opts.judgedMatching === true) {
+    const resolved = await judgedClusters(
+      sql,
+      raw.map((r) => ({ id: Number(r.id), shopId: r.shop_id, groupKey: r.group_key, title: r.title, brand: r.brand, category: r.category, gtin: r.gtin, mpn: r.mpn })),
+    );
+    judged = resolved.clusters;
+    opts.onJudged?.(resolved);
+  }
+  const matches = await stableKeys(sql, rows, assignMatches(rows, { judged }), priorOf);
 
   // first member (lowest id) of each key describes the canonical product
   const firstOfKey = new Map<string, CanonRow>();
@@ -402,23 +417,36 @@ export async function assignCanonicalIds(
   return counts;
 }
 
+/** Stable product links for name groups and judged groups (see stableMethodKeys). */
+async function stableKeys(sql: postgres.Sql, rows: CanonRow[], matches: Map<number, Match>, priorOf: (r: CanonRow) => string | null): Promise<Map<number, Match>> {
+  const named = await stableMethodKeys(sql, rows, matches, priorOf, 'name');
+  return stableMethodKeys(sql, rows, named, priorOf, 'judged');
+}
+
 /**
- * Stable product links (review I4): a name group that forms again keeps the canonical product most of its members
- * already have (the most common one, then the oldest), so /product/c<id> keeps working while its first member
- * changes. Only a name group's own canonical (match key name:...) is reused, each by one group; a group that gets
- * a new key never takes over the key of an existing canonical product.
+ * Stable product links (review I4): a name or judged group that forms again keeps the canonical product most of its
+ * members already have (the most common one, then the oldest), so /product/c<id> keeps working while its first
+ * member changes. Only a group's own canonical of the same method (match key name:... or judged:...) is reused, each
+ * by one group; a group that gets a new key never takes over the key of an existing canonical product.
  */
-async function stableNameKeys(sql: postgres.Sql, rows: CanonRow[], matches: Map<number, Match>, priorOf: (r: CanonRow) => string | null): Promise<Map<number, Match>> {
+async function stableMethodKeys(
+  sql: postgres.Sql,
+  rows: CanonRow[],
+  matches: Map<number, Match>,
+  priorOf: (r: CanonRow) => string | null,
+  method: 'name' | 'judged',
+): Promise<Map<number, Match>> {
+  const prefix = `${method}:`;
   const groups = new Map<string, CanonRow[]>();
   for (const r of rows) {
     const m = matches.get(r.id);
-    if (!m || m.method !== 'name' || !m.key.startsWith('name:')) continue;
+    if (!m || m.method !== method || !m.key.startsWith(prefix)) continue;
     const g = groups.get(m.key);
     if (g) g.push(r);
     else groups.set(m.key, [r]);
   }
   if (groups.size === 0) return matches;
-  const existing = await sql<{ id: string; match_key: string }[]>`select id, match_key from canonical_products where match_key like 'name:%'`;
+  const existing = await sql<{ id: string; match_key: string }[]>`select id, match_key from canonical_products where match_key like ${`${prefix}%`}`;
   const keyOfId = new Map(existing.map((e) => [e.id, e.match_key]));
   const taken = new Set(existing.map((e) => e.match_key));
   const used = new Set<string>();
@@ -481,8 +509,8 @@ async function recordRedirects(
     on conflict (old_id) do update set new_id = excluded.new_id, created_at = now()`;
 }
 
-/** nameMatching: group listings by clean name (default off; see assignCanonicalIds) */
-export type BuildOptions = { shop?: string; log?: (line: string) => void; nameMatching?: boolean };
+/** nameMatching, judgedMatching: group listings by clean name, by Claude's judgements (both off by default; see assignCanonicalIds) */
+export type BuildOptions = { shop?: string; log?: (line: string) => void; nameMatching?: boolean; judgedMatching?: boolean };
 
 /**
  * Builds site_products for every active, visible shop (or one shop with { shop }), then canonical ids.
@@ -518,7 +546,11 @@ export async function buildSiteProducts(
   }
 
   const started = Date.now();
-  const matched = await assignCanonicalIds(sql, prior, { nameMatching: opts.nameMatching === true });
+  const matched = await assignCanonicalIds(sql, prior, {
+    nameMatching: opts.nameMatching === true,
+    judgedMatching: opts.judgedMatching === true,
+    onJudged: (r) => log(`judged matching: ${r.read} judgements, ${r.used} current, ${r.stale} stale, ${r.vetoed} pairs vetoed today, ${r.clusters.length} clusters`),
+  });
   log(`matching: ${JSON.stringify(matched)}, ${((Date.now() - started) / 1000).toFixed(1)}s`);
   return { products, judged };
 }

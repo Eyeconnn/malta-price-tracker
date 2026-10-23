@@ -223,8 +223,11 @@ export function neonRunner(databaseUrl: string): SqlRunner {
 /** Visible shop and fresh site_products row (R21, R28); needs aliases sp and s. */
 const VISIBLE = `s.active and not s.site_hidden and sp.updated_at > now() - interval '2 days'`;
 
-/** SQL: the row's match is exact (GTIN/MPN, or confirmed by the admin) and so may group publicly (R30); needs alias sp. */
-const TRUSTED = `(sp.canonical_id is not null and (sp.match_method in ('gtin', 'mpn', 'name') or sp.match_confirmed))`;
+/**
+ * SQL: the row's match is exact (GTIN/MPN, checked canonical name, judged by Claude and not vetoed, or confirmed by
+ * the admin) and so may group publicly (R30); needs alias sp.
+ */
+const TRUSTED = `(sp.canonical_id is not null and (sp.match_method in ('gtin', 'mpn', 'name', 'judged') or sp.match_confirmed))`;
 
 /**
  * The row's accepted clean name (design Part 2): only one stored for its current shop title, as the site build
@@ -267,10 +270,11 @@ const iso = (v: unknown): string => new Date(v as string | Date).toISOString();
 
 /**
  * A row of a site_products group counts as exactly matched when matched by GTIN/MPN, by clean name and key specs
- * (design Part 3: the name passed the safety check and the specs agree), or confirmed by the admin.
+ * (design Part 3: the name passed the safety check and the specs agree), judged the same product by Claude and not
+ * vetoed (design "Update 23 Oct, afternoon"), or confirmed by the admin.
  */
 export function trustedMatch(method: string | null, confirmed: boolean): boolean {
-  return method === 'gtin' || method === 'mpn' || method === 'name' || confirmed;
+  return method === 'gtin' || method === 'mpn' || method === 'name' || method === 'judged' || confirmed;
 }
 
 /** The product page key of a row: its canonical product when trusted, else the row alone. */

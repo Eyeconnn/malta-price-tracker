@@ -17,7 +17,7 @@ export type NameMatch = { canonical: string; category: string; guard: string };
  * name: the accepted clean name, when the row has one (name matching).
  */
 export type MatchInput = { id: number; shopId: number; gtin: string | null; mpn: string | null; title: string; brand?: string | null; name?: NameMatch | null };
-export type MatchMethod = 'gtin' | 'mpn' | 'name' | 'title';
+export type MatchMethod = 'gtin' | 'mpn' | 'judged' | 'name' | 'title';
 export type Match = { key: string; method: MatchMethod };
 
 // Colours and filler words are ignored when comparing titles.
@@ -350,15 +350,62 @@ function matchByName(items: MatchInput[], out: Map<number, Match>): void {
 }
 
 /**
- * For every item that matches an item from another shop, returns its group key and how it was matched.
- * GTIN groups first, then MPN, then the clean name, then title; an item grouped by a stronger method is not
- * regrouped (the name rule may add listings to a GTIN or MPN group, see matchByName).
+ * Judged matching (design "Update 23 Oct, afternoon"): each cluster lists site_products ids Claude judged exactly the
+ * same product, whose judgement fingerprint is current and which the veto in code did not overrule (src/match/apply.ts).
+ * With GTIN and MPN groups (they keep priority, decided before this runs), as for name groups:
+ * - a cluster without a code-matched member is a judged group (also listings of one shop: its colours);
+ * - a cluster holding members of exactly one code group, where every judged member of that code group is in the
+ *   cluster, adds its other listings to that code group with method 'judged';
+ * - otherwise code groups are never merged, and only the cluster's listings without a code match may form a group.
  */
-export function assignMatches(items: MatchInput[]): Map<number, Match> {
+function matchByJudged(items: MatchInput[], clusters: number[][], out: Map<number, Match>): void {
+  const known = new Set(items.map((it) => it.id));
+  const lists = clusters.map((c) => [...new Set(c)].filter((id) => known.has(id))).filter((c) => c.length >= 2);
+  const judgedOfCode = new Map<string, Set<number>>();
+  for (const c of lists) {
+    for (const id of c) {
+      const code = out.get(id)?.key;
+      if (code === undefined) continue;
+      const set = judgedOfCode.get(code) ?? new Set<number>();
+      set.add(id);
+      judgedOfCode.set(code, set);
+    }
+  }
+  const assign = (ids: number[], key: string) => {
+    for (const id of ids) out.set(id, { key, method: 'judged' });
+  };
+  for (const c of lists) {
+    const free = c.filter((id) => !out.has(id));
+    if (free.length === 0) continue;
+    const codes = new Set(c.filter((id) => out.has(id)).map((id) => out.get(id)!.key));
+    if (codes.size === 0) {
+      assign(free, `judged:${Math.min(...c)}`);
+      continue;
+    }
+    if (codes.size === 1) {
+      const code = [...codes][0];
+      const ids = new Set(c);
+      if ([...judgedOfCode.get(code)!].every((id) => ids.has(id))) {
+        assign(free, code);
+        continue;
+      }
+    }
+    if (free.length >= 2) assign(free, `judged:${Math.min(...free)}`);
+  }
+}
+
+/**
+ * For every item that matches an item from another shop, returns its group key and how it was matched.
+ * GTIN groups first, then MPN, then the judged clusters (opts.judged), then the clean name, then title; an item
+ * grouped by a stronger method is not regrouped (the judged and name rules may add listings to a GTIN or MPN group,
+ * see matchByJudged and matchByName).
+ */
+export function assignMatches(items: MatchInput[], opts: { judged?: number[][] } = {}): Map<number, Match> {
   const out = new Map<number, Match>();
   matchByGtin(items, out);
   let rest = items.filter((it) => !out.has(it.id));
   matchByMpn(rest, out);
+  if (opts.judged && opts.judged.length > 0) matchByJudged(items, opts.judged, out);
   matchByName(items, out);
   rest = items.filter((it) => !out.has(it.id));
   matchByTitle(rest, out);

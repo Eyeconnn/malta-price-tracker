@@ -397,6 +397,23 @@ describe('data.ts search groups only trusted matches (final review I1)', () => {
   });
 });
 
+describe('data.ts groups judged matches like barcode matches (design Update 23 Oct, afternoon)', () => {
+  beforeAll(async () => {
+    await pg.exec(`
+      insert into site_products (id, shop_id, group_key, title, price_cents, in_stock, verdict, canonical_id, match_method, match_confirmed, updated_at) values
+        (90, 1, 'W90', 'Wombat Speaker Mini 2', 5000, true, 'none', 790, 'judged', false, now()),
+        (91, 2, 'W91', 'WOMBAT SPEAKER MINI 2 BLACK', 4500, true, 'none', 790, 'judged', false, now());
+    `);
+  });
+
+  it('lists both sellers of a judged product in one group', async () => {
+    const hits = await data.search({ text: 'wombat speaker mini', like: '%wombat speaker mini%' }, null);
+    const g = hits.filter((h) => h.groupKey === 'c790');
+    expect(g.map((h) => h.id)).toEqual([91, 90]);
+    expect(g.every((h) => !h.possible)).toBe(true);
+  });
+});
+
 describe('data.ts products by clean name (design Part 3)', () => {
   beforeAll(async () => {
     await pg.exec(`
