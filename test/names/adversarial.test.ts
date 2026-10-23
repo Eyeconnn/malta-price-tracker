@@ -1,0 +1,83 @@
+// The reviewer's adversarial pairs of the re-review of 82f7062/361f083 (N1-N42), kept as fixtures so later rounds
+// keep them: two listings of different products must never share a name-match key (category, checked canonical
+// name, title guard). One pair (N35, Mac mini written mini-M4) is the same product and must keep matching.
+import { describe, expect, it } from 'vitest';
+import { checkCanonical } from '../../src/names/canonical.js';
+import { guardOf } from '../../src/site/matching.js';
+
+type L = { cat: string; title: string; brand: string | null; attrs: Record<string, unknown>; variants?: string[]; mpn?: string };
+const l = (cat: string, title: string, brand: string | null, attrs: Record<string, unknown>, variants?: string[]): L => ({ cat, title, brand, attrs, variants });
+
+/** The name-match key of a listing, or null when it gets no canonical name. */
+function key(x: L): string | null {
+  const r = checkCanonical({ title: x.title, brand: x.brand, variantTitles: x.variants, mpn: x.mpn }, x.cat, x.attrs);
+  return r.ok ? `${x.cat}|${r.canonical}|${guardOf(x.title, x.cat, x.variants)}` : null;
+}
+
+const PAIRS: [string, L, L][] = [
+  ['N1 filler "new": New 3DS XL vs 3DS XL', l('gaming', 'New Nintendo 3DS XL Black', 'Nintendo', { brand: 'Nintendo', line: '3DS XL' }), l('gaming', 'Nintendo 3DS XL Black', 'Nintendo', { brand: 'Nintendo', line: '3DS XL' })],
+  ['N2 size token XL: Airfryer XL vs Airfryer (lossy line)', l('appliances', 'Philips Essential Airfryer XL 6.2L', 'Philips', { brand: 'Philips', line: 'Essential Airfryer', capacity_l: 6.2 }), l('appliances', 'Philips Essential Airfryer 6.2L', 'Philips', { brand: 'Philips', line: 'Essential Airfryer', capacity_l: 6.2 })],
+  ['N3 size token XL: Pixel 9 Pro XL vs Pixel 9 Pro (lossy)', l('phones', 'Google Pixel 9 Pro XL 256GB Obsidian', 'Google', { brand: 'Google', model: 'Pixel 9 Pro', storage_gb: 256 }), l('phones', 'Google Pixel 9 Pro 256GB Obsidian', 'Google', { brand: 'Google', model: 'Pixel 9 Pro', storage_gb: 256 })],
+  ['N4 screen size outside phones pattern: iPad Pro 11 vs 13', l('phones', 'Apple iPad Pro 11" M4 256GB Wi-Fi Space Black', 'Apple', { brand: 'Apple', model: 'iPad Pro M4', storage_gb: 256, screen_in: 11, network: 'Wi-Fi only' }), l('phones', 'Apple iPad Pro 13" M4 256GB Wi-Fi Space Black', 'Apple', { brand: 'Apple', model: 'iPad Pro M4', storage_gb: 256, screen_in: 13, network: 'Wi-Fi only' })],
+  ['N5 case size mm: Apple Watch 42mm vs 46mm', l('phones', 'Apple Watch Series 10 GPS 42mm Jet Black Aluminium', 'Apple', { brand: 'Apple', model: 'Watch Series 10 GPS Aluminium' }), l('phones', 'Apple Watch Series 10 GPS 46mm Jet Black Aluminium', 'Apple', { brand: 'Apple', model: 'Watch Series 10 GPS Aluminium' })],
+  ['N6 other-category weight: Nescafe Gold 100g vs 200g', l('other', 'Nescafe Gold Blend Instant Coffee 100g', 'Nescafe', { brand: 'Nescafe', line: 'Gold Blend Instant Coffee' }), l('other', 'Nescafe Gold Blend Instant Coffee 200g', 'Nescafe', { brand: 'Nescafe', line: 'Gold Blend Instant Coffee' })],
+  ['N7 colour + filler: Nescafe Gold vs Nescafe Original', l('other', 'Nescafe Gold 200g', 'Nescafe', { brand: 'Nescafe', line: 'Instant Coffee' }), l('other', 'Nescafe Original 200g', 'Nescafe', { brand: 'Nescafe', line: 'Instant Coffee' })],
+  ['N8 colour word is the product: Coca-Cola Light vs Coca-Cola', l('drinks', 'Coca-Cola Light 330ml Can', 'Coca-Cola', { brand: 'Coca-Cola', line: 'Coca-Cola', volume_ml: 330 }), l('drinks', 'Coca-Cola Original 330ml Can', 'Coca-Cola', { brand: 'Coca-Cola', line: 'Coca-Cola', volume_ml: 330 })],
+  ['N9 colour word: Gordons Pink Gin vs Gordons Gin', l('drinks', "Gordon's Pink Gin 70cl", "Gordon's", { brand: "Gordon's", line: 'Gin', volume_ml: 700 }), l('drinks', "Gordon's Gin 70cl", "Gordon's", { brand: "Gordon's", line: 'Gin', volume_ml: 700 })],
+  ['N10 grape field outside pattern: Barefoot Merlot vs Pinot Grigio', l('drinks', 'Barefoot Merlot 75cl', 'Barefoot', { brand: 'Barefoot', line: 'Wine', grape: 'Merlot', volume_ml: 750 }), l('drinks', 'Barefoot Pinot Grigio 75cl', 'Barefoot', { brand: 'Barefoot', line: 'Wine', grape: 'Pinot Grigio', volume_ml: 750 })],
+  ['N11 scent field outside pattern: Dove Original vs Cucumber', l('beauty-health', 'Dove Original Antiperspirant Deodorant 150ml', 'Dove', { brand: 'Dove', line: 'Antiperspirant Deodorant', scent: 'Original', volume_ml: 150 }), l('beauty-health', 'Dove Cucumber Antiperspirant Deodorant 150ml', 'Dove', { brand: 'Dove', line: 'Antiperspirant Deodorant', scent: 'Cucumber', volume_ml: 150 })],
+  ['N12 material field outside pattern: AF1 Leather vs Suede', l('fashion', "Nike Air Force 1 '07 Leather Men's", 'Nike', { brand: 'Nike', line: "Air Force 1 '07", gender: 'men', material: 'leather' }), l('fashion', "Nike Air Force 1 '07 Suede Men's", 'Nike', { brand: 'Nike', line: "Air Force 1 '07", gender: 'men', material: 'suede' })],
+  ['N13 os field outside pattern: laptop Win 11 Home vs Pro', l('laptops', 'Lenovo ThinkPad E14 Gen 6 i5-1335U 16GB 512GB 14" Windows 11 Home', 'Lenovo', { brand: 'Lenovo', model: 'ThinkPad E14 Gen 6', cpu: 'i5-1335U', ram_gb: 16, storage_gb: 512, screen_in: 14, os: 'Windows 11 Home' }), l('laptops', 'Lenovo ThinkPad E14 Gen 6 i5-1335U 16GB 512GB 14" Windows 11 Pro', 'Lenovo', { brand: 'Lenovo', model: 'ThinkPad E14 Gen 6', cpu: 'i5-1335U', ram_gb: 16, storage_gb: 512, screen_in: 14, os: 'Windows 11 Pro' })],
+  ['N14 non-pattern width: dishwasher 45cm vs 60cm', l('appliances', 'Bosch Serie 2 Freestanding Dishwasher 45cm', 'Bosch', { brand: 'Bosch', line: 'Serie 2 Freestanding Dishwasher', width_cm: 45 }), l('appliances', 'Bosch Serie 2 Freestanding Dishwasher 60cm', 'Bosch', { brand: 'Bosch', line: 'Serie 2 Freestanding Dishwasher', width_cm: 60 })],
+  ['N15 voltage 110V vs 230V (no field)', l('appliances', 'Russell Hobbs Supreme Steam Iron 2600W 230V', 'Russell Hobbs', { brand: 'Russell Hobbs', line: 'Supreme Steam Iron' }), l('appliances', 'Russell Hobbs Supreme Steam Iron 2600W 110V', 'Russell Hobbs', { brand: 'Russell Hobbs', line: 'Supreme Steam Iron' })],
+  ['N16 wattage outside appliance pattern: 2200W vs 3000W', l('appliances', 'Tefal Express Kettle 1.7L 2200W', 'Tefal', { brand: 'Tefal', line: 'Express Kettle', capacity_l: 1.7 }), l('appliances', 'Tefal Express Kettle 1.7L 3000W', 'Tefal', { brand: 'Tefal', line: 'Express Kettle', capacity_l: 1.7 })],
+  ['N17 EU plug vs UK plug (lossy)', l('appliances', 'Dyson V15 Detect Absolute EU Plug', 'Dyson', { brand: 'Dyson', line: 'V15 Detect Absolute' }), l('appliances', 'Dyson V15 Detect Absolute UK Plug', 'Dyson', { brand: 'Dyson', line: 'V15 Detect Absolute' })],
+  ['N18 toy pieces outside pattern: puzzle 500 vs 1000', l('toys', 'Ravensburger Disney Castle Jigsaw Puzzle 1000 Pieces', 'Ravensburger', { brand: 'Ravensburger', line: 'Disney Castle Jigsaw Puzzle', pieces: 1000 }), l('toys', 'Ravensburger Disney Castle Jigsaw Puzzle 500 Pieces', 'Ravensburger', { brand: 'Ravensburger', line: 'Disney Castle Jigsaw Puzzle', pieces: 500 })],
+  ['N19 LEGO set number: "incl. Bag" / "Instructions only"', l('toys', 'LEGO Technic 42115 Lamborghini Sian FKP 37', 'LEGO', { brand: 'LEGO', model: '42115', line: 'Technic Lamborghini Sian FKP 37' }), l('toys', 'LEGO Technic 42115 Lamborghini Sian Instructions Only incl. Sticker Sheet', 'LEGO', { brand: 'LEGO', model: '42115', line: 'Technic Lamborghini Sian' })],
+  ['N20 LEGO set number: "w/ Light Kit"', l('toys', 'LEGO Star Wars 75192 Millennium Falcon', 'LEGO', { brand: 'LEGO', model: '75192', line: 'Star Wars Millennium Falcon' }), l('toys', 'LEGO Star Wars 75192 Millennium Falcon w/ LED Light Kit', 'LEGO', { brand: 'LEGO', model: '75192', line: 'Star Wars Millennium Falcon' })],
+  ['N21 baby bottle ml outside baby pattern', l('baby', 'Philips Avent Natural Response Baby Bottle 125ml', 'Philips Avent', { brand: 'Philips Avent', line: 'Natural Response Baby Bottle' }), l('baby', 'Philips Avent Natural Response Baby Bottle 260ml', 'Philips Avent', { brand: 'Philips Avent', line: 'Natural Response Baby Bottle' })],
+  ['N22 baby formula 400g vs 800g', l('baby', 'Aptamil 1 First Infant Milk 800g', 'Aptamil', { brand: 'Aptamil', line: '1 First Infant Milk' }), l('baby', 'Aptamil 1 First Infant Milk 400g', 'Aptamil', { brand: 'Aptamil', line: '1 First Infant Milk' })],
+  ['N23 size words: Pedigree Large Breed vs Small Breed', l('other', 'Pedigree Adult Large Breed Dry Dog Food 15kg', 'Pedigree', { brand: 'Pedigree', line: 'Adult Dry Dog Food' }), l('other', 'Pedigree Adult Small Breed Dry Dog Food 15kg', 'Pedigree', { brand: 'Pedigree', line: 'Adult Dry Dog Food' })],
+  ['N24 implied brand: 3rd-party iPhone case vs Apple case', l('phones', 'Apple iPhone 15 Clear Case', 'Apple', { brand: 'Apple', model: 'iPhone 15 Clear Case' }), l('phones', 'iPhone 15 Clear Case', null, { brand: 'Apple', model: 'iPhone 15 Clear Case' })],
+  ['N25 condition only in variant titles', l('phones', 'Apple iPhone 13 128GB', 'Apple', { brand: 'Apple', model: 'iPhone 13', storage_gb: 128 }), l('phones', 'Apple iPhone 13 128GB', 'Apple', { brand: 'Apple', model: 'iPhone 13', storage_gb: 128 }, ['Apple iPhone 13 128GB - Grade A Refurbished', 'Apple iPhone 13 128GB - Grade B Refurbished'])],
+  ['N26 model word only in variant titles (Ultra)', l('phones', 'Samsung Galaxy S24 256GB', 'Samsung', { brand: 'Samsung', model: 'Galaxy S24', storage_gb: 256 }), l('phones', 'Samsung Galaxy S24 256GB', 'Samsung', { brand: 'Samsung', model: 'Galaxy S24', storage_gb: 256 }, ['Samsung Galaxy S24 Ultra 256GB Titanium Black', 'Samsung Galaxy S24 Ultra 256GB Titanium Gray'])],
+  ['N27 refurbished in Italian (lossy)', l('phones', 'Apple iPhone 13 128GB', 'Apple', { brand: 'Apple', model: 'iPhone 13', storage_gb: 128 }), l('phones', 'Apple iPhone 13 128GB Ricondizionato', 'Apple', { brand: 'Apple', model: 'iPhone 13', storage_gb: 128, condition: 'refurbished' })],
+  ['N28 "Special Edition" (special is a price word)', l('other', 'Fourth Wing - Rebecca Yarros', 'Rebecca Yarros', { brand: 'Rebecca Yarros', line: 'Fourth Wing' }), l('other', 'Fourth Wing Special Edition - Rebecca Yarros', 'Rebecca Yarros', { brand: 'Rebecca Yarros', line: 'Fourth Wing' })],
+  ['N29 hallucinated model word (forward check)', l('phones', 'Apple iPhone 15 Pro 128GB', 'Apple', { brand: 'Apple', model: 'iPhone 15 Pro', storage_gb: 128 }), l('phones', 'Apple iPhone 15 128GB', 'Apple', { brand: 'Apple', model: 'iPhone 15 Pro', storage_gb: 128 })],
+  ['N30 suffix A15s vs A15 (forward)', l('phones', 'Samsung Galaxy A15s 128GB', 'Samsung', { brand: 'Samsung', model: 'Galaxy A15s', storage_gb: 128 }), l('phones', 'Samsung Galaxy A15 128GB', 'Samsung', { brand: 'Samsung', model: 'Galaxy A15s', storage_gb: 128 })],
+  ['N31 Pro+ unspaced', l('phones', 'Xiaomi Redmi Note 13 Pro+ 5G 512GB', 'Xiaomi', { brand: 'Xiaomi', model: 'Redmi Note 13 Pro', storage_gb: 512, network: '5G' }), l('phones', 'Xiaomi Redmi Note 13 Pro 5G 512GB', 'Xiaomi', { brand: 'Xiaomi', model: 'Redmi Note 13 Pro', storage_gb: 512, network: '5G' })],
+  ['N32 "two pack" in words (lossy)', l('beauty-health', 'Gillette Fusion5 ProGlide Razor Blades Two Pack', 'Gillette', { brand: 'Gillette', line: 'Fusion5 ProGlide Razor Blades' }), l('beauty-health', 'Gillette Fusion5 ProGlide Razor Blades', 'Gillette', { brand: 'Gillette', line: 'Fusion5 ProGlide Razor Blades' })],
+  ['N33 "Duo" pack', l('beauty-health', 'Oral-B iO Series 9 Electric Toothbrush Duo Pack', 'Oral-B', { brand: 'Oral-B', line: 'iO Series 9 Electric Toothbrush' }), l('beauty-health', 'Oral-B iO Series 9 Electric Toothbrush', 'Oral-B', { brand: 'Oral-B', line: 'iO Series 9 Electric Toothbrush' })],
+  ['N34 fullwidth digits / look-alike', l('phones', 'Samsung Galaxy S24 Ultra 256GB', 'Samsung', { brand: 'Samsung', model: 'Galaxy S24 Ultra', storage_gb: 256 }), l('phones', 'Samsung Galaxy S２４ Ultrа ２５６GB', 'Samsung', { brand: 'Samsung', model: 'Galaxy S24', storage_gb: 256 })],
+  ['N35 "Mini" vs "mini-"', l('laptops', 'Apple Mac mini M4 16GB 256GB', 'Apple', { brand: 'Apple', model: 'Mac mini', cpu: 'M4', ram_gb: 16, storage_gb: 256 }), l('laptops', 'Apple Mac mini-M4 16GB 256GB', 'Apple', { brand: 'Apple', model: 'Mac mini', cpu: 'M4', ram_gb: 16, storage_gb: 256 })],
+  ['N36 tablets vs capsules (filler)', l('beauty-health', 'Panadol Advance 500mg 24 Tablets', 'Panadol', { brand: 'Panadol', line: 'Advance 500mg', count: 24 }), l('beauty-health', 'Panadol Advance 500mg 24 Capsules', 'Panadol', { brand: 'Panadol', line: 'Advance 500mg', count: 24 })],
+  ['N37 SSD vs eMMC (filler)', l('laptops', 'HP 14s-dq0000 Celeron N4120 4GB 128GB eMMC 14"', 'HP', { brand: 'HP', model: '14s-dq0000', cpu: 'Celeron N4120', ram_gb: 4, storage_gb: 128, screen_in: 14 }), l('laptops', 'HP 14s-dq0000 Celeron N4120 4GB 128GB SSD 14"', 'HP', { brand: 'HP', model: '14s-dq0000', cpu: 'Celeron N4120', ram_gb: 4, storage_gb: 128, screen_in: 14 })],
+  ['N38 soundbar power outside pattern', l('tv-audio', 'Samsung HW-Q600C 3.1.2ch Soundbar 360W', 'Samsung', { brand: 'Samsung', model: 'HW-Q600C', channels: '3.1.2', power_w: 360 }), l('tv-audio', 'Samsung HW-Q600C 3.1.2ch Soundbar 500W', 'Samsung', { brand: 'Samsung', model: 'HW-Q600C', channels: '3.1.2', power_w: 500 })],
+  ['N39 same title text, different category', l('tv-audio', 'Apple AirPods Pro 2', 'Apple', { brand: 'Apple', model: 'AirPods Pro 2' }), l('phones', 'Apple AirPods Pro 2', 'Apple', { brand: 'Apple', model: 'AirPods Pro 2' })],
+  ['N40 dual sim (sim field outside pattern)', l('phones', 'Motorola Moto G84 256GB Dual SIM', 'Motorola', { brand: 'Motorola', model: 'Moto G84', storage_gb: 256, sim: 'dual' }), l('phones', 'Motorola Moto G84 256GB', 'Motorola', { brand: 'Motorola', model: 'Moto G84', storage_gb: 256 })],
+  ['N41 "Rose" colour word: Moet Rose vs Moet', l('drinks', 'Moet & Chandon Imperial Rose Champagne 75cl', 'Moet & Chandon', { brand: 'Moet & Chandon', line: 'Imperial Champagne', volume_ml: 750 }), l('drinks', 'Moet & Chandon Imperial Champagne 75cl', 'Moet & Chandon', { brand: 'Moet & Chandon', line: 'Imperial Champagne', volume_ml: 750 })],
+  ['N42 Medium vs Dark roast', l('other', 'Lavazza Espresso Medium Roast Beans 1kg', 'Lavazza', { brand: 'Lavazza', line: 'Espresso Roast Beans' }), l('other', 'Lavazza Espresso Dark Roast Beans 1kg', 'Lavazza', { brand: 'Lavazza', line: 'Espresso Roast Beans' })],
+];
+
+/** Pairs that are one product written two ways. */
+const SAME = new Set(['N35']);
+const id = (what: string) => what.split(' ')[0];
+
+describe('adversarial pairs: different products never share a name-match key', () => {
+  for (const [what, a, b] of PAIRS.filter(([w]) => !SAME.has(id(w)))) {
+    it(what, () => {
+      const ka = key(a);
+      const kb = key(b);
+      expect(ka !== null && ka === kb, `${ka} / ${kb}`).toBe(false);
+    });
+  }
+});
+
+describe('adversarial pairs: the same product written two ways still matches', () => {
+  for (const [what, a, b] of PAIRS.filter(([w]) => SAME.has(id(w)))) {
+    it(what, () => {
+      expect(key(a)).not.toBeNull();
+      expect(key(a)).toBe(key(b));
+    });
+  }
+});

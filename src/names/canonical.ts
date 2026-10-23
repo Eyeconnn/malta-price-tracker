@@ -17,9 +17,9 @@
 import raw from '../../config/attribute-schemas.json' with { type: 'json' };
 import { nameKey, nameTokens, numberSpecText } from '../site/identity.js';
 import { basicBrandStatus, hasBrand, keepsBrand, type BrandStatus } from './brand.js';
-import { BARCODE, requiredText, SIZE_TOKENS, stripNoise } from './check.js';
+import { BARCODE, requiredText, stripNoise } from './check.js';
 import { parseAttributeSchemas, type AttributeSchemas } from './schema.js';
-import { canonText, withoutGpuMemory } from './canon-text.js';
+import { bundleWords, canonText, PRICE_INCLUDES, withoutGpuMemory } from './canon-text.js';
 import { compact, conditions, moneyValues, packCounts, prep, quantityClass, withoutConditionsAndMoney } from './text.js';
 
 export { canonText };
@@ -28,7 +28,7 @@ export { canonText };
 export const SHARED_TAIL = ['condition', 'audience', 'pack_count', 'edition', 'format', 'refill', 'bundle', 'face_value'] as const;
 /** The fields of the product line: a canonical name needs one. */
 const CORE = new Set(['model', 'line']);
-const VARIANT_KEYS = new Set(['colour', 'size', 'sizes']);
+const VARIANT_KEYS = new Set(['colour', 'size', 'sizes', 'size_system']);
 
 type RawCats = { categories?: Record<string, Record<string, unknown>> };
 
@@ -85,6 +85,8 @@ function tvBase(code: string): string {
   return base.length >= 6 && (base.match(/\d/g) ?? []).length >= 3 ? base : t;
 }
 
+const SIM_TEXT: Record<string, string> = { single: 'single sim', dual: 'dual sim', eSIM: 'esim', 'dual + eSIM': 'dual sim esim' };
+
 /** One field written as the canonical name has it, or null when absent (a pack of 1, new, adult, refill no). */
 function fieldText(category: string, key: string, v: unknown): string | null {
   const spec = SCHEMAS[category]?.[key];
@@ -107,6 +109,20 @@ function fieldText(category: string, key: string, v: unknown): string | null {
       return text(v) ? cpuText(text(v)!) || null : null;
     case 'model':
       return text(v) ? (category === 'tv-audio' ? text(v)!.split(/\s+/).map(tvBase).join(' ') : text(v)) : null;
+    case 'edition':
+    case 'format': {
+      // one order, without the word edition: "Edition Ultimate", "Ultimate Edition" and "Ultimate" are one
+      const words = text(v) ? canonToks(text(v)!).filter((w) => w !== 'edition').sort() : [];
+      return words.length > 0 ? words.join(' ') : null;
+    }
+    case 'sim':
+      return SIM_TEXT[String(v)] ?? text(v);
+    case 'wireless':
+      return v === 'yes' ? 'wireless' : v === 'no' ? 'wired' : null;
+    case 'os':
+      return v === 'none' ? null : text(v);
+    case 'energy_class':
+      return text(v) ? `energy ${text(v)}` : null;
     default:
       if (spec?.type === 'number') return finite(v) && v > 0 ? numberSpecText(key, spec.unit, v) : null;
       return text(v);
@@ -130,11 +146,21 @@ export function canonicalParts(category: string, attrs: Record<string, unknown>)
   }
   if (!parts.some(([k]) => CORE.has(k))) return [];
   if (pattern.some((p) => p.includes('brand')) && !parts.some(([k]) => k === 'brand')) return [];
-  const used = new Set(pattern.flat());
-  for (const k of SHARED_TAIL) {
-    if (used.has(k)) continue;
+  const used = new Set(parts.map(([k]) => k));
+  const have = new Set(parts.flatMap(([, t]) => canonToks(t)));
+  // then the shared fields, then every other field the category has (an unused "model|line" alternative too), in
+  // schema order: a field value is in the name or nowhere, so it never excuses a title word that the name lacks
+  // (re-review of 82f7062). A field whose words the name already has adds nothing. Never colour or size.
+  const rest = [...SHARED_TAIL, ...Object.keys(SCHEMAS[category] ?? {})];
+  for (const k of rest) {
+    if (used.has(k) || VARIANT_KEYS.has(k)) continue;
+    used.add(k);
     const t = fieldText(category, k, attrs[k]);
-    if (t !== null) parts.push([k, t]);
+    if (t === null) continue;
+    const toks = canonToks(t);
+    if (toks.length === 0 || toks.every((x) => have.has(x))) continue;
+    for (const x of toks) have.add(x);
+    parts.push([k, t]);
   }
   return parts;
 }
@@ -152,17 +178,17 @@ export function canonicalName(category: string, attrs: Record<string, unknown>):
 export type CanonicalSource = { title: string; brand: string | null; brandStatus?: BrandStatus; variantTitles?: string[]; mpn?: string | null };
 export type CanonicalCheck = { ok: true; canonical: string } | { ok: false; reason: string };
 
-/** Words a title may have that say nothing about which product it is. */
+/** Words a title may have that say nothing about which product it is (not New, Original or SSD: they can). */
 const FILLER = new Set(
   ('smartphone smartphones phone mobile console consoles tv television smart 4k 8k uhd hd fhd wireless bluetooth smartwatch ' +
     'notebook notebooks laptop laptops office gaming earphones earphone earbuds headphones headphone headset inear onear overear ' +
-    'speaker speakers portable soundbar the a an for of with and in to new latest official original genuine ' +
-    'edition version model series gen generation inch inches channel ssd hdd emmc ram storage memory unit pcs piece pieces ' +
-    'pack pk cans can bottles bottle nappies diapers capsules tablets pods sachets wipes rolls bags copilotpc')
+    'speaker speakers portable soundbar the a an for of with and in to latest official genuine ' +
+    'edition version model series gen generation inch inches channel ram storage memory unit pcs piece pieces ' +
+    'pack pk cans can bottles bottle nappies diapers capsules capsule tablets tablet caplets pods sachets wipes rolls bags copilotpc')
     .split(' '),
 );
-/** Percent-off, price and sale words. */
-const PRICE_WORDS = new Set('sale offer offers deal deals discount save off now only price special promo free delivery shipping clearance friday cyber monday bestseller best seller'.split(' '));
+/** Percent-off, price and sale words (not Special: Special Edition is a product). */
+const PRICE_WORDS = new Set('sale offer offers deal deals discount save off now only price promo free delivery shipping clearance friday cyber monday bestseller best seller'.split(' '));
 /** Colour words: the shared colour list and the shop colour names (Phantom, Midnight, Titanium, ...). */
 const COLOUR_WORDS = new Set([
   ...((raw as { lists?: { colours?: string[] } }).lists?.colours ?? []).flatMap((c) => canonToks(c)),
@@ -171,8 +197,15 @@ const COLOUR_WORDS = new Set([
     'pastel dark light matte metallic multicolor multi transparent clear')
     .split(' '),
 ]);
-/** Brand names a product word implies (an iPhone is an Apple). */
+/** The plain colours (the shared list): a title's Gold or Light is excused only as the listing's own colour. */
+const BASIC_COLOURS = new Set([...((raw as { lists?: { colours?: string[] } }).lists?.colours ?? []).flatMap((c) => canonToks(c)), 'gray', 'grey', 'rose', 'light', 'dark']);
+/** Categories whose colour words are never the product (drinks, beauty and other: Light, Pink, Rose, Gold stay). */
+const COLOUR_CATEGORIES = new Set(Object.keys(SCHEMAS).filter((c) => Object.hasOwn(SCHEMAS[c], 'colour') && !['drinks', 'beauty-health', 'other'].includes(c)));
+/** Brand names a product word implies (an iPhone is an Apple), never for an accessory made for it. */
 const IMPLIED_BRAND: Record<string, string> = { iphone: 'apple', ipad: 'apple', macbook: 'apple', imac: 'apple', airpods: 'apple' };
+const ACCESSORY_WORDS = new Set('case cases cover covers protector protectors charger chargers cable cables strap straps holder holders stand stands mount mounts adapter adapters sleeve skin glass film band bands dock tempered'.split(' '));
+/** Shopify's placeholder variant title. */
+const PLACEHOLDER_VARIANT = /^\s*default(?:\s+title)?\s*$/i;
 
 /** 4G, 5G and LTE are network words, never grams. */
 const qty = (t: string) => (/^[2-6]g$/.test(t) ? null : quantityClass(t));
@@ -184,6 +217,21 @@ function fieldClassValue(category: string, key: string, v: unknown): { cls: stri
   return qty(nameTokens(numberSpecText(key, spec.unit, v)).find((t) => /\d/.test(t)) ?? '');
 }
 
+/** The title (or a variant title) as the check reads it: canonical spelling, without the words checked otherwise. */
+function checkedText(title: string, attrs: Record<string, unknown>): string {
+  // the GPU memory next to the GPU is read by the title guard of name matching (gpuMemory), not by the fields;
+  // percent off, prices, conditions, "incl. VAT", "Brand New", CPU/GPU/OS names the fields hold and maker part
+  // numbers (SM-S921B) are checked as such or are no product words
+  let t = canonText(withoutConditionsAndMoney(requiredText(stripNoise(withoutGpuMemory(prep(title))), attrs)))
+    .replace(PRICE_INCLUDES, ' ')
+    .replace(/\bbrand[\s-]?new\b/g, ' ')
+    .replace(/\bsm-?[a-z]\d{3,4}[a-z0-9/]*\b/g, ' ');
+  // a + that joins a bundle (spaced, or between two words) is checked as a bundle; Pro+ stays the model word Plus
+  t = t.replace(/(^|\s)\+(?=\s*[\p{L}\p{N}]|\s|$)/gu, '$1 ').replace(/([\p{L}\p{N}])\+(?=[\p{L}\p{N}])/gu, '$1 ');
+  // w/, incl. and includes are bundle words (checked below), not product words
+  return t.replace(/\bw\s*\/\s*(?=[\p{L}\p{N}])/gu, ' ').replace(/\b(?:incl|inc|includes|including|included)\b\.?/g, ' ');
+}
+
 /** The checks of the file header. attrs must already be checked (checkAttrs). */
 export function checkCanonical(source: CanonicalSource, category: string, attrs: Record<string, unknown>): CanonicalCheck {
   const pattern = PATTERNS[category] ?? [];
@@ -193,71 +241,65 @@ export function checkCanonical(source: CanonicalSource, category: string, attrs:
   if (parts.length === 0) return { ok: false, reason: 'no product line or model' };
   const canonical = canonicalName(category, attrs)!;
   const readable = parts.map(([, t]) => t).join(' ');
-  const cToks = canonToks(readable);
+  // each field on its own: a number of one field and a unit word of the next are no quantity (RTX 5060, SSD)
+  const cToks = parts.flatMap(([, t]) => canonToks(t));
   const cSet = new Set(cToks);
   const joined = cToks.join('');
   const cQty = cToks.map(qty).filter((q): q is { cls: string; value: number } => q !== null);
   const titleToks = nameTokens(source.title);
+  const variants = (source.variantTitles ?? []).filter((v) => v.trim() !== '' && !PLACEHOLDER_VARIANT.test(v));
   const problems: string[] = [];
 
-  // brand: kept when it names the maker, and never one the shop data does not have (an iPhone is an Apple)
+  // brand: kept when it names the maker, and never one the shop data does not have (an iPhone is an Apple, a case
+  // for an iPhone is not)
   if (hasBrandPart) {
     const status = source.brandStatus ?? basicBrandStatus(source.brand);
     const brand = text(attrs.brand)!;
-    const implied = titleToks.some((t) => IMPLIED_BRAND[t] === compact(brand));
+    const accessory = titleToks.some((t) => ACCESSORY_WORDS.has(t));
+    const implied = !accessory && titleToks.some((t) => IMPLIED_BRAND[t] === compact(brand));
     if (status === 'reliable' && source.brand && !keepsBrand(cToks, source.brand, titleToks) && !implied) problems.push(`brand ${source.brand} missing`);
     if (!hasBrand(titleToks, brand) && !(source.brand && compact(source.brand) === compact(brand)) && !implied) problems.push(`brand ${brand} not in the shop data`);
   }
 
+  // variant titles: the words every one of them has are the product's (Ultra in every variant is an Ultra); the
+  // others (a colour, a size) are the variant's
+  const variantToks = variants.map((v) => nameTokens(checkedText(v, attrs)));
+  const shared = variantToks.length === 0 ? [] : [...new Set(variantToks[0])].filter((t) => variantToks.every((vt) => vt.includes(t)));
+  const variantOnly = new Set(variantToks.flat().filter((t) => !shared.includes(t)));
+
   // the words a title may have beyond the canonical name
-  const used = new Set(parts.map(([k]) => k));
-  const exempt = new Set<string>([...FILLER, ...PRICE_WORDS, ...VENDOR_WORDS, ...COLOUR_WORDS]);
-  const exemptQty: { cls: string; value: number }[] = [];
-  for (const v of source.variantTitles ?? []) for (const t of canonToks(v)) exempt.add(t);
+  const exempt = new Set<string>([...FILLER, ...PRICE_WORDS, ...VENDOR_WORDS, ...variantOnly]);
   if ((source.brandStatus ?? basicBrandStatus(source.brand)) !== 'reliable' && source.brand) for (const t of canonToks(source.brand)) exempt.add(t);
-  // a set number names a toy: the words of its line may stay out of the canonical name
-  const setNumber = category === 'toys' && used.has('model') && /\d{4,}/.test(String(attrs.model ?? ''));
   // a pack the title says in words (Twin Pack) is the pack count
   const titlePacks = packCounts(source.title, { pieces: false });
   for (const p of titlePacks) if (p.word !== null && attrs.pack_count === p.n) exempt.add(p.word);
   // the word bundle, when the bundle field says what comes with it
   if (text(attrs.bundle)) exempt.add('bundle');
-  const inPattern = (k: string) => pattern.some((p) => p.includes(k)) || (SHARED_TAIL as readonly string[]).includes(k);
-  for (const [k, v] of Object.entries(attrs)) {
-    // a field of the pattern (used or an unused alternative such as line next to model) never excuses a word
-    if (inPattern(k) && !(setNumber && k === 'line')) continue;
-    // a nappy size is identity: listed sizes do not excuse it
-    if (category === 'baby' && k === 'sizes') continue;
-    const q = fieldClassValue(category, k, v);
-    if (q) exemptQty.push(q);
-    for (const x of Array.isArray(v) ? v : [v]) if (typeof x === 'string') for (const t of canonToks(x)) exempt.add(t);
-  }
-  const sizes = new Set((Array.isArray(attrs.sizes) ? attrs.sizes : []).flatMap((x) => (typeof x === 'string' ? canonToks(x) : [])));
-  const patternClasses = new Set(pattern.flat().map((k) => fieldClassValue(category, k, 1)?.cls).filter((c): c is string => !!c));
+  // colour words: only where a colour is never the product, and only for a listing with a colour: a plain colour
+  // (Black, Gold, Light) only as its own colour, a shop's colour name (Phantom, Graphite, Midnight) for any colour
+  const ownColours = new Set(
+    COLOUR_CATEGORIES.has(category) ? (Array.isArray(attrs.colour) ? attrs.colour : [attrs.colour]).flatMap((c) => (typeof c === 'string' ? canonToks(c) : [])) : [],
+  );
+  // size words: only the listing's sizes and a size after "size"; a nappy size is identity
+  const sizes = new Set(category === 'baby' ? [] : (Array.isArray(attrs.sizes) ? attrs.sizes : [attrs.sizes]).flatMap((x) => (typeof x === 'string' ? canonToks(x) : [])));
   const moneyNumbers = new Set(moneyValues(source.title).map((m) => Number(m.replace(/^\D+/, ''))));
   const mpn = source.mpn ? compact(source.mpn) : '';
 
-  // the title in the canonical spelling, without percent off, prices, CPU/GPU/OS names the fields hold and maker
-  // part numbers (SM-S921B, the MPN)
-  // the GPU memory next to the GPU is read by the title guard of name matching (gpuMemory), not by the fields
-  let titleText = canonText(withoutConditionsAndMoney(requiredText(stripNoise(withoutGpuMemory(prep(source.title))), attrs))).replace(/\bsm-?[a-z]\d{3,4}[a-z0-9/]*\b/g, ' ');
-  // a spaced + joins a bundle (the guard and the bundle field check it), it is not the model word Plus
-  titleText = titleText.replace(/(^|\s)\+(?=\s|$)/g, '$1 ');
-  const required = nameTokens(titleText);
+  const titleRequired = nameTokens(checkedText(source.title, attrs));
+  const required = [...titleRequired, ...shared.filter((t) => !titleRequired.includes(t))];
   const lost = new Set<string>();
   required.forEach((t, i) => {
     if (t === '' || exempt.has(t) || BARCODE.test(t) || (mpn !== '' && compact(t) === mpn)) return;
-    // the words of a set (Technic Lamborghini Sian) may go when its set number is there
-    if (setNumber && /^\p{L}+$/u.test(t)) return;
-    if (category !== 'baby' && (SIZE_TOKENS.has(t) || t === 'size' || required[i - 1] === 'size' || sizes.has(t))) return;
+    if (ownColours.has(t) || (ownColours.size > 0 && COLOUR_WORDS.has(t) && !BASIC_COLOURS.has(t))) return;
+    if (category !== 'baby' && (sizes.has(t) || (t === 'size' && required[i + 1] !== undefined) || required[i - 1] === 'size')) return;
     if (/^\d+(?:\.\d+)?$/.test(t) && moneyNumbers.has(Number(t))) return;
     const tt = category === 'tv-audio' && /\d/.test(t) && /[a-z]/.test(t) ? tvBase(t) : t;
+    // every quantity of the title is one of the canonical name (re-review of 82f7062: 2600W, 230V, 100g, 42mm)
     const q = qty(tt);
+    // counts (6 x, 12 pcs) are pack sizes: the pack-size check below reads them
+    if (q && (q.cls === 'x' || q.cls === 'pcs')) return;
     if (q) {
-      if (cQty.some((c) => c.cls === q.cls && c.value === q.value)) return;
-      if (exemptQty.some((c) => c.cls === q.cls && c.value === q.value)) return;
-      // a quantity of a class the pattern has no field for (4K is not a pattern field)
-      if (patternClasses.has(q.cls)) lost.add(tt);
+      if (!cQty.some((c) => c.cls === q.cls && c.value === q.value)) lost.add(tt);
       return;
     }
     if (cSet.has(tt)) return;
@@ -273,13 +315,15 @@ export function checkCanonical(source: CanonicalSource, category: string, attrs:
     for (const k of keys) {
       const cls = fieldClassValue(category, k, 1)?.cls;
       if (!cls) continue;
-      const values = new Set((source.variantTitles ?? []).flatMap((v) => canonToks(v).map(qty)).filter((q) => q?.cls === cls).map((q) => q!.value));
+      const values = new Set(variants.flatMap((v) => canonToks(v).map(qty)).filter((q) => q?.cls === cls).map((q) => q!.value));
       if (values.size > 1) problems.push(`variants differ in ${k}`);
     }
   }
 
+  // conditions, values, packs, bundles and refills: of the title and of every variant title
+  const shopTexts = [source.title, ...variants];
   const canonConditions = new Set(conditions(readable));
-  const lostConditions = conditions(source.title).filter((c) => !canonConditions.has(c));
+  const lostConditions = [...new Set(shopTexts.flatMap((s) => conditions(s)))].filter((c) => !canonConditions.has(c)).sort();
   if (lostConditions.length > 0) problems.push(`condition lost: ${lostConditions.join(', ')}`);
   const canonMoney = new Set(moneyValues(readable));
   const lostMoney = moneyValues(source.title).filter((m) => !canonMoney.has(m));
@@ -287,11 +331,13 @@ export function checkCanonical(source: CanonicalSource, category: string, attrs:
   const lostPacks = titlePacks.filter((p) => !cSet.has(String(p.n)) && !(p.word !== null && cSet.has(p.word)));
   if (lostPacks.length > 0) problems.push(`pack size lost: ${lostPacks.map((p) => p.n).join(', ')}`);
   const plain = canonText(source.title);
-  if ((/(?:^|\s)\+\s*[\p{L}\p{N}]/u.test(plain) || /\bbundle\b/.test(plain)) && !text(attrs.bundle)) problems.push('bundle lost');
+  if (bundleWords(plain) && !text(attrs.bundle)) problems.push('bundle lost');
   if (/\brefills?\b/.test(plain) && attrs.refill !== 'yes') problems.push('refill lost');
 
-  // no number the shop data does not have (a guessed storage, a model number from memory)
-  const dataToks = canonToks([source.title, ...(source.variantTitles ?? []), source.mpn ?? ''].join(' \n '));
+  // no number, and no model, line or edition word, the shop data does not have (a guessed storage, iPhone 15 Pro
+  // for an iPhone 15, A15s for an A15)
+  const dataToks = canonToks([...shopTexts, source.brand ?? '', source.mpn ?? ''].join(' \n '));
+  const dataSet = new Set(dataToks);
   const dataQty = dataToks.map(qty).filter((q): q is { cls: string; value: number } => q !== null);
   const dataJoined = dataToks.join('');
   const dataNumbers = new Set(dataToks.flatMap((t) => (t.match(/\d+(?:\.\d+)?/g) ?? []).map(Number)));
@@ -304,13 +350,23 @@ export function checkCanonical(source: CanonicalSource, category: string, attrs:
       if (!dataQty.some((q) => q.cls === fieldQ.cls && q.value === fieldQ.value)) invented.add(nameTokens(t).find((x) => /\d/.test(x)) ?? t);
       continue;
     }
-    for (const tok of canonToks(t)) {
-      if (!/\d/.test(tok)) continue;
-      const known = dataJoined.includes(tok) || (tok.match(/\d+(?:\.\d+)?/g) ?? []).every((n) => dataNumbers.has(Number(n)));
-      if (!known) invented.add(tok);
-    }
+    const toks = canonToks(t);
+    toks.forEach((tok, i) => {
+      if (/\d/.test(tok)) {
+        const known = dataJoined.includes(tok) || (key !== 'model' && key !== 'line' && (tok.match(/\d+(?:\.\d+)?/g) ?? []).every((n) => dataNumbers.has(Number(n))));
+        if (!known) invented.add(tok);
+        return;
+      }
+      if (!FORWARD_KEYS.has(key) || dataSet.has(tok)) return;
+      // a word written apart in the field and together in the data (Think Book, ThinkBook)
+      if (dataSet.has(`${toks[i - 1] ?? ''}${tok}`) || dataSet.has(`${tok}${toks[i + 1] ?? ''}`)) return;
+      invented.add(tok);
+    });
   }
   if (invented.size > 0) problems.push(`not in the shop data: ${[...invented].join(', ')}`);
 
   return problems.length > 0 ? { ok: false, reason: problems.join('; ') } : { ok: true, canonical };
 }
+
+/** The fields whose every word must be in the shop data (the forward check). */
+const FORWARD_KEYS = new Set(['model', 'line', 'edition']);

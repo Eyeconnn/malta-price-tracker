@@ -32,13 +32,14 @@
     },
     "phones": {
       "identity": ["storage_gb", "ram_gb", "screen_in", "network"],
-      "canonical": ["brand", "model|line", "storage_gb", "ram_gb", "network"],
+      "canonical": ["brand", "model|line", "storage_gb", "ram_gb", "network", "screen_in", "case_mm"],
       "brand": { "type": "text", "meaning": "maker" },
       "model": { "type": "text", "meaning": "model name and number, without storage or colour" },
       "device_type": { "type": "enum", "values": [ "phone", "tablet", "smartwatch", "e-reader", "accessory" ], "meaning": "kind of device" },
       "storage_gb": { "type": "number", "unit": "GB", "min": 1, "max": 4096, "meaning": "built-in storage" },
       "ram_gb": { "type": "number", "unit": "GB", "min": 1, "max": 32, "meaning": "memory" },
       "screen_in": { "type": "number", "unit": "inch", "min": 1, "max": 16, "meaning": "screen diagonal" },
+      "case_mm": { "type": "number", "unit": "mm", "min": 20, "max": 60, "meaning": "watch case size (42mm)" },
       "network": { "type": "enum", "values": [ "4G", "5G", "Wi-Fi only" ], "meaning": "best mobile network supported" },
       "sim": { "type": "enum", "values": [ "single", "dual", "eSIM", "dual + eSIM" ], "meaning": "SIM slots" },
       "colour": { "type": "enum", "list": "colours", "multi": true, "meaning": "colours the group comes in" }

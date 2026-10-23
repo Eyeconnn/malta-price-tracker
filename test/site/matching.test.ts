@@ -342,6 +342,19 @@ describe('the title guard of name matching (review of 013b134)', () => {
     differ('MSI Cyborg 15 RTX-5060-8GB 1TB SSD', 'MSI Cyborg 15 RTX 5060 16GB 1TB SSD', 'laptops');
   });
 
+  it('reads unspaced +, w/, incl., includes, the Windows edition, the dose form and variant-title conditions (re-review of 82f7062)', () => {
+    differ('Sony PS5 Slim+FC 25', 'Sony PS5 Slim', 'gaming');
+    differ('LEGO 75192 Millennium Falcon w/ LED Light Kit', 'LEGO 75192 Millennium Falcon', 'toys');
+    differ('LEGO 42115 incl. Stickers', 'LEGO 42115', 'toys');
+    differ('Dyson V15 Includes Wall Dock', 'Dyson V15', 'appliances');
+    same('Apple iPhone 15 128GB incl. VAT', 'Apple iPhone 15 128GB', 'phones');
+    same('Xiaomi Redmi Note 13 Pro+ 5G', 'Xiaomi Redmi Note 13 Pro+ 5G 512GB', 'phones');
+    differ('Lenovo ThinkPad E14 Windows 11 Home', 'Lenovo ThinkPad E14 Windows 11 Pro', 'laptops');
+    same('Lenovo ThinkPad E14 Win 11 Pro', 'Lenovo ThinkPad E14 Windows 11 Pro', 'laptops');
+    differ('Panadol Advance 500mg 24 Tablets', 'Panadol Advance 500mg 24 Capsules', 'beauty-health');
+    expect(guardOf('Apple iPhone 13 128GB', 'phones', ['Grade A Refurbished'])).not.toBe(guardOf('Apple iPhone 13 128GB', 'phones'));
+  });
+
   it('reads the GPU memory however it is written, and Copilot+ without PC is no bundle', () => {
     same('ASUS TUF A16 16GB, RTX5060-8GB, 1TB SSD', 'ASUS TUF A16 16GB RTX 5060 8GB 1TB SSD', 'laptops');
     same('Lenovo IdeaPad Slim 5 Copilot + 16” Office Notebook', 'Lenovo IdeaPad Slim 5 16” Office Notebook', 'laptops');

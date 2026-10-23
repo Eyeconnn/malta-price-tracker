@@ -1,7 +1,7 @@
 // Groups "the same product" across shops: same barcode, else same part number, else the same canonical name
 // (design "Update 23 Oct: match by canonical normalised names"), else similar titles. The title rule is ported from
 // dashboard/src/page.ts (tokens and sameProduct).
-import { canonText, gpuMemory } from '../names/canon-text.js';
+import { bundleWords, canonText, gpuMemory, PRICE_INCLUDES } from '../names/canon-text.js';
 import { conditions, moneyValues, prep } from '../names/text.js';
 import { cleanGtin } from '../util/normalise.js';
 import { nameTokens } from './identity.js';
@@ -219,9 +219,13 @@ function matchByTitle(items: MatchInput[], out: Map<number, Match>): void {
  * and the GPU memory it states (guardOf). Listings whose guards differ are never one product. Null without a
  * canonical name: such a listing never name-matches.
  */
-export function nameMatch(canonical: string | null, category: string | null, texts: { title?: string; displayName?: string | null; variantLabel?: string | null } = {}): NameMatch | null {
+export function nameMatch(
+  canonical: string | null,
+  category: string | null,
+  texts: { title?: string; displayName?: string | null; variantLabel?: string | null; variantTitles?: string[] } = {},
+): NameMatch | null {
   if (!canonical || canonical.trim() === '') return null;
-  return { canonical: canonical.trim(), category: category ?? '', guard: guardOf(texts.title ?? '', category ?? '') };
+  return { canonical: canonical.trim(), category: category ?? '', guard: guardOf(texts.title ?? '', category ?? '', texts.variantTitles ?? []) };
 }
 
 /** Each guard word class: the words it reads (a title token) and the one spelling each counts as. */
@@ -236,12 +240,17 @@ const GUARD: Record<string, Record<string, string>> = {
   edition: { ultimate: 'ultimate', premium: 'premium', deluxe: 'deluxe', dayone: 'dayone', collector: 'collector', collectors: 'collector', signature: 'signature', limited: 'limited', goty: 'goty' },
   format: { hardback: 'hardback', hardcover: 'hardback', paperback: 'paperback', digital: 'digital', disc: 'disc', kindle: 'kindle' },
   pack: { monthly: 'monthly', box: 'box', jumbo: 'jumbo', mega: 'mega', value: 'value', bulk: 'bulk', multipack: 'multipack' },
+  // the form of a medicine or supplement: 24 tablets and 24 capsules are two products (the name check reads both as filler)
+  form: {
+    tablet: 'tablet', tablets: 'tablet', caplet: 'tablet', caplets: 'tablet', capsule: 'capsule', capsules: 'capsule', softgel: 'softgel',
+    softgels: 'softgel', sachet: 'sachet', sachets: 'sachet', gummy: 'gummy', gummies: 'gummy', effervescent: 'effervescent', syrup: 'syrup',
+  },
 };
 /** Edition words that are colours or plain words elsewhere: only games read them (FC 25 Gold, DualSense Edge). */
 const GAME_EDITION: Record<string, string> = { gold: 'gold', standard: 'standard', edge: 'edge' };
 
 /** The second guard of a title (see nameMatch), as one string. */
-export function guardOf(title: string, category: string): string {
+export function guardOf(title: string, category: string, variantTitles: string[] = []): string {
   const plain = canonText(title)
     .replace(/\bxbox\s+one\b/g, ' xboxone ')
     .replace(/\bseries\s+([xs])\b/g, ' series$1 ')
@@ -250,10 +259,15 @@ export function guardOf(title: string, category: string): string {
   const toks = nameTokens(plain);
   const words = (map: Record<string, string>) => [...new Set(toks.flatMap((t) => (Object.hasOwn(map, t) ? [map[t]] : [])))].sort().join(',');
   const edition = [words(GUARD.edition), category === 'gaming' ? words(GAME_EDITION) : ''].filter((x) => x !== '').join(',');
-  // a bundle: "&", "and", "with <item>", a spaced + item, multipack or bundle (Copilot+ PC is a label, see canonText)
-  const bundle = /&|\band\b|\bwith\s+[\p{L}\p{N}]|(?:^|\s)\+\s*[\p{L}\p{N}]|\bmultipack\b|\bbundle\b/u.test(plain) ? 'bundle' : '';
+  // a bundle: "&", "and", "with <item>", or bundleWords (+ item spaced or not, w/, incl., includes; Copilot+ PC and
+  // Pro+ are labels, incl. VAT is a price)
+  const bundle = /&|\band\b|\bwith\s+[\p{L}\p{N}]/u.test(plain.replace(PRICE_INCLUDES, ' ')) || bundleWords(plain) ? 'bundle' : '';
+  // the Windows edition: Windows 11 Home and Pro are two laptops (the name check reads the OS family from os)
+  const osEdition = [...prep(title).matchAll(/\bw(?:in(?:dows)?)?\s*(?:7|8|10|11)\s*(home|pro|h|p|s)?\b/g)].map((m) => ({ h: 'home', p: 'pro' })[m[1] as 'h' | 'p'] ?? m[1] ?? 'windows');
+  // conditions of the title and of every variant title (a group whose variants are refurbished is refurbished)
+  const conds = [...new Set([title, ...variantTitles].flatMap((t) => conditions(t)))].sort();
   return [
-    conditions(title).join(',') || 'new',
+    conds.join(',') || 'new',
     moneyValues(title).join(',') || 'none',
     words(GUARD.gender),
     words(GUARD.audience),
@@ -264,6 +278,8 @@ export function guardOf(title: string, category: string): string {
     bundle,
     words(GUARD.pack),
     gpuMemory(prep(title)).join(','),
+    [...new Set(osEdition)].sort().join(','),
+    words(GUARD.form),
   ].join('|');
 }
 

@@ -475,7 +475,7 @@ describe('checkBatch', () => {
       ],
     };
     const r = checkBatch(batch, out, laptops);
-    expect(r.results[0]).toMatchObject({ status: 'ok', canonicalName: 'lenovo thinkbook16g6irl i5 16gbram 512gb 16in', canonicalReason: null, proposedCanonical: 'anything Claude likes' });
+    expect(r.results[0]).toMatchObject({ status: 'ok', canonicalName: 'lenovo thinkbook16g6irl i5 16gbram 512gb 16in ssd windows', canonicalReason: null, proposedCanonical: 'anything Claude likes' });
     // the display name is accepted, but without a product line there is no canonical name: it never name-matches
     expect(r.results[1]).toMatchObject({ status: 'ok', canonicalName: null, canonicalReason: 'no product line or model' });
   });

@@ -35,12 +35,12 @@ const APART: [string, Listing, Listing][] = [
   ['iPhone 13 refurbished grade A vs new', phone('Apple iPhone 13 128GB Refurbished Grade A', 'Apple', { model: 'iPhone 13', storage_gb: 128, condition: 'refurbished grade A' }), phone('Apple iPhone 13 128GB', 'Apple', { model: 'iPhone 13', storage_gb: 128 })],
   ['a 256/512GB group vs the 512GB listing', phone('Samsung Galaxy S25 Ultra', 'Samsung', { model: 'Galaxy S25 Ultra' }), phone('Samsung Galaxy S25 Ultra 512GB', 'Samsung', { model: 'Galaxy S25 Ultra', storage_gb: 512 })],
   ['ram 12GB only vs 256GB', phone('Samsung Galaxy S25 Ultra 12GB RAM', 'Samsung', { model: 'Galaxy S25 Ultra', ram_gb: 12 }), phone('Samsung Galaxy S25 Ultra 256GB', 'Samsung', { model: 'Galaxy S25 Ultra', storage_gb: 256 })],
-  ['iPhone 15 Plus vs 15', phone('Apple iPhone 15 Plus 128GB Black', 'Apple', { model: 'iPhone 15 Plus', storage_gb: 128 }), phone('Apple iPhone 15 128GB Black', 'Apple', { model: 'iPhone 15', storage_gb: 128 })],
+  ['iPhone 15 Plus vs 15', phone('Apple iPhone 15 Plus 128GB Black', 'Apple', { model: 'iPhone 15 Plus', storage_gb: 128, colour: ['Black'] }), phone('Apple iPhone 15 128GB Black', 'Apple', { model: 'iPhone 15', storage_gb: 128, colour: ['Black'] })],
   ['S24 Ultra vs S24', phone('Samsung Galaxy S24 Ultra 256GB', 'Samsung', { model: 'Galaxy S24 Ultra', storage_gb: 256 }), phone('Samsung Galaxy S24 256GB', 'Samsung', { model: 'Galaxy S24', storage_gb: 256 })],
-  ['Buds2 Pro vs Buds2', L('tv-audio', 'Samsung Galaxy Buds2 Pro Graphite', 'Samsung', { brand: 'Samsung', model: 'Galaxy Buds2 Pro' }), L('tv-audio', 'Samsung Galaxy Buds2 Graphite', 'Samsung', { brand: 'Samsung', model: 'Galaxy Buds2' })],
-  ['Switch OLED vs Lite', L('gaming', 'Nintendo Switch OLED White', 'Nintendo', { brand: 'Nintendo', line: 'Switch OLED' }), L('gaming', 'Nintendo Switch Lite Turquoise', 'Nintendo', { brand: 'Nintendo', line: 'Switch Lite' })],
+  ['Buds2 Pro vs Buds2', L('tv-audio', 'Samsung Galaxy Buds2 Pro Graphite', 'Samsung', { brand: 'Samsung', model: 'Galaxy Buds2 Pro', colour: ['Grey'] }), L('tv-audio', 'Samsung Galaxy Buds2 Graphite', 'Samsung', { brand: 'Samsung', model: 'Galaxy Buds2', colour: ['Grey'] })],
+  ['Switch OLED vs Lite', L('gaming', 'Nintendo Switch OLED White', 'Nintendo', { brand: 'Nintendo', line: 'Switch OLED', colour: ['White'] }), L('gaming', 'Nintendo Switch Lite Turquoise', 'Nintendo', { brand: 'Nintendo', line: 'Switch Lite', colour: ['Turquoise'] })],
   ['PS5 Slim Digital vs Disc', L('gaming', 'Sony PS5 Slim Digital Edition', 'Sony', { brand: 'Sony', line: 'PS5 Slim', format: 'Digital' }), L('gaming', 'Sony PS5 Slim Disc Edition', 'Sony', { brand: 'Sony', line: 'PS5 Slim', format: 'Disc' })],
-  ['LEGO 42115 vs + LEGO Bag', L('toys', 'LEGO Technic 42115 Lamborghini Sian', 'LEGO', { brand: 'LEGO', model: '42115' }), L('toys', 'LEGO Technic 42115 Lamborghini Sian + LEGO Bag', 'LEGO', { brand: 'LEGO', model: '42115', bundle: 'LEGO Bag' })],
+  ['LEGO 42115 vs + LEGO Bag', L('toys', 'LEGO Technic 42115 Lamborghini Sian', 'LEGO', { brand: 'LEGO', model: '42115', line: 'Technic Lamborghini Sian' }), L('toys', 'LEGO Technic 42115 Lamborghini Sian + LEGO Bag', 'LEGO', { brand: 'LEGO', model: '42115', line: 'Technic Lamborghini Sian', bundle: 'LEGO Bag' })],
   ['PS5 vs PS5 bundle + 2 controllers', L('gaming', 'Sony PS5 Console', 'Sony', { brand: 'Sony', line: 'PS5' }), L('gaming', 'Sony PS5 Console Bundle + 2 Controllers', 'Sony', { brand: 'Sony', line: 'PS5', bundle: '2 Controllers' })],
   ['kids vs adult shoe', L('fashion', 'Nike Air Max 90 Kids', 'Nike', { brand: 'Nike', line: 'Air Max 90', audience: 'kids' }), L('fashion', 'Nike Air Max 90', 'Nike', { brand: 'Nike', line: 'Air Max 90' })],
   ['Cisk 330ml vs pack of 6', L('drinks', 'Cisk Lager 330ml', 'Cisk', { brand: 'Cisk', line: 'Lager', volume_ml: 330 }), L('drinks', 'Cisk Lager 330ml Pack of 6', 'Cisk', { brand: 'Cisk', line: 'Lager', volume_ml: 330, pack_count: 6 })],
@@ -78,15 +78,15 @@ const EMPTY_FIELD: [string, Listing, Listing][] = [
 
 /** Real matches, worded differently by the shops: the same canonical name and guard. */
 const TOGETHER: [string, Listing, Listing][] = [
-  ['the same phone with marketing colour words', phone('SAMSUNG Galaxy S23 5G 256GB 8GB Smartphone, Phantom Black', 'SAMSUNG', { brand: 'Samsung', model: 'Galaxy S23', storage_gb: 256, ram_gb: 8, network: '5G' }), phone('Samsung Galaxy S23 5G 256GB 8GB Black', 'Samsung', { model: 'Galaxy S23', storage_gb: 256, ram_gb: 8, network: '5G' })],
-  ['JW 70cl vs 700ml', L('drinks', 'Johnnie Walker Black Label 70cl', 'Johnnie Walker', { brand: 'Johnnie Walker', line: 'Black Label', volume_ml: 700 }), L('drinks', 'JOHNNIE WALKER BLACK LABEL WHISKY 700ML', 'Johnnie Walker', { brand: 'Johnnie Walker', line: 'Black Label', volume_ml: 700, style: 'Blended Scotch Whisky' })],
-  ['the same LEGO set by its set number', L('toys', 'LEGO Technic 42115 Lamborghini Sian FKP 37', 'LEGO', { brand: 'LEGO', model: '42115', line: 'Technic Lamborghini Sian FKP 37' }), L('toys', 'LEGO 42115 Building Set', 'Lego', { brand: 'LEGO', model: '42115' })],
+  ['the same phone with marketing colour words', phone('SAMSUNG Galaxy S23 5G 256GB 8GB Smartphone, Phantom Black', 'SAMSUNG', { brand: 'Samsung', model: 'Galaxy S23', storage_gb: 256, ram_gb: 8, network: '5G', colour: ['Black'] }), phone('Samsung Galaxy S23 5G 256GB 8GB Black', 'Samsung', { model: 'Galaxy S23', storage_gb: 256, ram_gb: 8, network: '5G', colour: ['Black'] })],
+  ['JW 70cl vs 700ml', L('drinks', 'Johnnie Walker Black Label Whisky 70cl', 'Johnnie Walker', { brand: 'Johnnie Walker', line: 'Black Label', volume_ml: 700, style: 'Whisky' }), L('drinks', 'JOHNNIE WALKER BLACK LABEL WHISKY 700ML', 'Johnnie Walker', { brand: 'Johnnie Walker', line: 'Black Label', volume_ml: 700, style: 'Whisky' })],
+  ['the same LEGO set by its set number', L('toys', 'LEGO Technic 42115 Lamborghini Sian FKP 37', 'LEGO', { brand: 'LEGO', model: '42115', line: 'Technic Lamborghini Sian FKP 37' }), L('toys', 'LEGO 42115 Technic Lamborghini Sian FKP 37 Building Set', 'Lego', { brand: 'LEGO', model: '42115', line: 'Technic Lamborghini Sian FKP 37' })],
   ['the same TV with a region suffix', L('tv-audio', 'Samsung QE55Q60DAUXXU 55" QLED 4K Smart TV', 'Samsung', { brand: 'Samsung', model: 'QE55Q60DAUXXU', screen_in: 55, panel: 'QLED' }), L('tv-audio', 'SAMSUNG 55 Inch QLED TV QE55Q60D', 'Samsung', { brand: 'Samsung', model: 'QE55Q60D', screen_in: 55, panel: 'QLED' })],
   ['2nd Gen is II', L('tv-audio', 'Apple AirPods Pro (2nd Gen)', 'Apple', { brand: 'Apple', model: 'AirPods Pro 2nd Gen' }), L('tv-audio', 'Apple AirPods Pro II', 'Apple', { brand: 'Apple', model: 'AirPods Pro II' })],
-  ['Intel Core i5-1335U is i5-1335U', L('laptops', 'Lenovo IdeaPad Slim 3 15.6" Intel Core i5-1335U 16GB 512GB', 'Lenovo', { brand: 'Lenovo', model: 'IdeaPad Slim 3', cpu: 'Intel Core i5-1335U', ram_gb: 16, storage_gb: 512, screen_in: 15.6 }), L('laptops', 'LENOVO IDEAPAD SLIM 3 15.6" I5-1335U 16GB 512GB SSD', 'LENOVO', { brand: 'Lenovo', model: 'IdeaPad Slim 3', cpu: 'i5-1335U', ram_gb: 16, storage_gb: 512, screen_in: 15.6 })],
+  ['Intel Core i5-1335U is i5-1335U', L('laptops', 'Lenovo IdeaPad Slim 3 15.6" Intel Core i5-1335U 16GB 512GB SSD', 'Lenovo', { brand: 'Lenovo', model: 'IdeaPad Slim 3', cpu: 'Intel Core i5-1335U', ram_gb: 16, storage_gb: 512, screen_in: 15.6, storage_type: 'SSD' }), L('laptops', 'LENOVO IDEAPAD SLIM 3 15.6" I5-1335U 16GB 512GB SSD', 'LENOVO', { brand: 'Lenovo', model: 'IdeaPad Slim 3', cpu: 'i5-1335U', ram_gb: 16, storage_gb: 512, screen_in: 15.6, storage_type: 'SSD' })],
   ['NE 3850 is NE3850', L('appliances', 'Philips Steam Iron NE 3850', 'Philips', { brand: 'Philips', model: 'NE3850', appliance_type: 'Steam Iron' }), L('appliances', 'Philips NE3850 Steam Iron', 'Philips', { brand: 'Philips', model: 'NE3850', appliance_type: 'Steam Iron' })],
   ['PlayStation 5 is PS5', L('gaming', 'Sony PlayStation 5 Slim Console', 'Sony', { brand: 'Sony', line: 'PS5 Slim' }), L('gaming', 'Sony PS5 Slim Console', 'Sony', { brand: 'Sony', line: 'PlayStation 5 Slim' })],
-  ['an iPhone is an Apple', phone('iPhone 15 128GB', null, { brand: 'Apple', model: 'iPhone 15', storage_gb: 128 }), phone('Apple iPhone 15 128GB Black', 'Apple', { model: 'iPhone 15', storage_gb: 128 })],
+  ['an iPhone is an Apple', phone('iPhone 15 128GB', null, { brand: 'Apple', model: 'iPhone 15', storage_gb: 128 }), phone('Apple iPhone 15 128GB Black', 'Apple', { model: 'iPhone 15', storage_gb: 128, colour: ['Black'] })],
   ['a maker part number in the title', phone('Samsung Galaxy S24 SM-S921B 128GB 8GB 5G', 'Samsung', { model: 'Galaxy S24', storage_gb: 128, ram_gb: 8, network: '5G' }), phone('Samsung Galaxy S24 5G 128GB 8GB', 'Samsung', { model: 'Galaxy S24', storage_gb: 128, ram_gb: 8, network: '5G' })],
   ['Pampers by its size and count', L('baby', 'Pampers Baby-Dry Size 4 44 Nappies', 'Pampers', { brand: 'Pampers', line: 'Baby-Dry', nappy_size: 'Size 4', pack_count: 44 }), L('baby', 'PAMPERS BABY DRY NAPPIES SIZE 4 X44', 'Pampers', { brand: 'Pampers', line: 'Baby Dry', nappy_size: 'Size 4', pack_count: 44 })],
 ];
@@ -121,12 +121,12 @@ describe('canonicalName', () => {
     expect(canonicalName('phones', { brand: 'Samsung', model: 'Galaxy S25-Ultra', storage_gb: 1024, colour: ['black'], ram_gb: 12, network: '5G' })).toBe('samsung galaxys25ultra 1tb 12gbram 5g');
     expect(canonicalName('drinks', { brand: 'Johnnie Walker', line: 'Black Label', volume_ml: 700, age_years: 12 })).toBe('johnniewalker blacklabel 12yearold 700ml');
     expect(canonicalName('gaming', { brand: 'Sony', line: 'PS5 Slim', format: 'Digital', condition: 'used', bundle: '2 Controllers', edition: 'Deluxe Edition' })).toBe(
-      'sony ps5slim used deluxeedition digital with2controllers',
+      'sony ps5slim used deluxe digital with2controllers',
     );
     expect(canonicalName('beauty-health', { brand: 'Dior', line: 'Sauvage', concentration: 'EDP', volume_ml: 100, refill: 'yes', audience: 'kids' })).toBe('dior sauvage edp 100ml kids refill');
     expect(canonicalName('gaming', { brand: 'Steam', line: 'Gift Card', face_value: '20 EUR' })).toBe('steam giftcard eur20');
-    // "model|line": the first present; CPU vendor words and TV region suffixes are dropped
-    expect(canonicalName('toys', { brand: 'LEGO', model: '42115', line: 'Technic' })).toBe('lego 42115');
+    // "model|line": the first present (the other follows as any other field); CPU vendor words and TV region suffixes are dropped
+    expect(canonicalName('toys', { brand: 'LEGO', model: '42115', line: 'Technic' })).toBe('lego 42115 technic');
     expect(canonicalName('laptops', { brand: 'Acer', model: 'Nitro V 15', cpu: 'AMD Ryzen 7 7735HS' })).toBe('acer nitrov15 r7 7735hs');
     expect(canonicalName('tv-audio', { brand: 'LG', model: 'OLED55C46LA', screen_in: 55 })).toBe('lg oled55c46 55in');
   });
@@ -157,17 +157,17 @@ describe('checkCanonical: every title word is in the canonical name, or excused'
 
   it('excuses the type words shops add (Office Notebook, In-Ear Earphones, Portable Speaker), Copilot+ and the GPU memory (stored names on Neon)', () => {
     const lap = (title: string, brand: string, attrs: Record<string, unknown>) => L('laptops', title, brand, attrs);
-    good(lap('LENOVO V15 G5 IRL 15.6” Intel Core i5 Office Notebook, 16GB, 512GB SSD', 'LENOVO', { brand: 'Lenovo', model: 'V15 G5 IRL', cpu: 'Intel Core i5', ram_gb: 16, storage_gb: 512, screen_in: 15.6 }));
-    expect(good(lap('ASUS TUF Gaming A16 16” AMD Ryzen 7 Gaming Notebook, 16GB, RTX5060-8GB, 1TB SSD', 'ASUS', { brand: 'ASUS', model: 'TUF Gaming A16', cpu: 'AMD Ryzen 7', gpu: 'RTX 5060', ram_gb: 16, storage_gb: 1024, screen_in: 16 }))).toBe('asus tufgaminga16 r7 16gbram 1tb 16in rtx5060');
-    good(lap('ACER Acer Nitro V 16 AI, Copilot + PC 16” AMD Ryzen AI 9 Gaming Notebook, 32GB, RTX-5070-8GB, 1TB SSD', 'ACER', { brand: 'Acer', model: 'Nitro V 16 AI', cpu: 'AMD Ryzen AI 9', gpu: 'RTX 5070', ram_gb: 32, storage_gb: 1024, screen_in: 16 }));
-    good(lap('ASUS Vivobook X1607 Copilot+ 16” Intel Core Ultra 5 Office Notebook, 16GB, 512GB SSD', 'ASUS', { brand: 'ASUS', model: 'Vivobook X1607', cpu: 'Intel Core Ultra 5', ram_gb: 16, storage_gb: 512, screen_in: 16 }));
-    good(lap('LENOVO IdeaPad Slim 5 Copilot + 16” AMD Ryzen AI 7 Office Notebook, 16GB, 512GB SSD', 'LENOVO', { brand: 'Lenovo', model: 'IdeaPad Slim 5', cpu: 'AMD Ryzen AI 7', ram_gb: 16, storage_gb: 512, screen_in: 16 }));
-    good(L('tv-audio', 'JBL Tune Flex 2 In-Ear Wireless Earphones, Black', 'JBL', { brand: 'JBL', model: 'Tune Flex 2' }));
-    good(L('tv-audio', 'KAKUSIGA KSC-695 Over-Ear Wireless Headphones, Black', 'KAKUSIGA', { brand: 'Kakusiga', model: 'KSC-695' }));
-    good(L('tv-audio', 'JBL Tune 525BT On-Ear Wireless Headphones, White', 'JBL', { brand: 'JBL', model: 'Tune 525BT' }));
-    good(L('tv-audio', 'JBL GO Essential 2 Bluetooth Portable Speaker, Red', 'JBL', { brand: 'JBL', model: 'GO Essential 2' }));
+    good(lap('LENOVO V15 G5 IRL 15.6” Intel Core i5 Office Notebook, 16GB, 512GB SSD', 'LENOVO', { brand: 'Lenovo', model: 'V15 G5 IRL', cpu: 'Intel Core i5', ram_gb: 16, storage_gb: 512, screen_in: 15.6, storage_type: 'SSD' }));
+    expect(good(lap('ASUS TUF Gaming A16 16” AMD Ryzen 7 Gaming Notebook, 16GB, RTX5060-8GB, 1TB SSD', 'ASUS', { brand: 'ASUS', model: 'TUF Gaming A16', cpu: 'AMD Ryzen 7', gpu: 'RTX 5060', ram_gb: 16, storage_gb: 1024, screen_in: 16, storage_type: 'SSD' }))).toBe('asus tufgaminga16 r7 16gbram 1tb 16in rtx5060 ssd');
+    good(lap('ACER Acer Nitro V 16 AI, Copilot + PC 16” AMD Ryzen AI 9 Gaming Notebook, 32GB, RTX-5070-8GB, 1TB SSD', 'ACER', { brand: 'Acer', model: 'Nitro V 16 AI', cpu: 'AMD Ryzen AI 9', gpu: 'RTX 5070', ram_gb: 32, storage_gb: 1024, screen_in: 16, storage_type: 'SSD' }));
+    good(lap('ASUS Vivobook X1607 Copilot+ 16” Intel Core Ultra 5 Office Notebook, 16GB, 512GB SSD', 'ASUS', { brand: 'ASUS', model: 'Vivobook X1607', cpu: 'Intel Core Ultra 5', ram_gb: 16, storage_gb: 512, screen_in: 16, storage_type: 'SSD' }));
+    good(lap('LENOVO IdeaPad Slim 5 Copilot + 16” AMD Ryzen AI 7 Office Notebook, 16GB, 512GB SSD', 'LENOVO', { brand: 'Lenovo', model: 'IdeaPad Slim 5', cpu: 'AMD Ryzen AI 7', ram_gb: 16, storage_gb: 512, screen_in: 16, storage_type: 'SSD' }));
+    good(L('tv-audio', 'JBL Tune Flex 2 In-Ear Wireless Earphones, Black', 'JBL', { brand: 'JBL', model: 'Tune Flex 2', colour: ['Black'] }));
+    good(L('tv-audio', 'KAKUSIGA KSC-695 Over-Ear Wireless Headphones, Black', 'KAKUSIGA', { brand: 'Kakusiga', model: 'KSC-695', colour: ['Black'] }));
+    good(L('tv-audio', 'JBL Tune 525BT On-Ear Wireless Headphones, White', 'JBL', { brand: 'JBL', model: 'Tune 525BT', colour: ['White'] }));
+    good(L('tv-audio', 'JBL GO Essential 2 Bluetooth Portable Speaker, Red', 'JBL', { brand: 'JBL', model: 'GO Essential 2', colour: ['Red'] }));
     // a GPU memory the gpu field does not have is no other word, but wired is (wireless is filler)
-    bad(lap('MSI Cyborg 15 B2RWFKG 15.6” Intel Core 7 Gaming Notebook, 16GB, RTX-5060, 1TB SSD 8GB', 'MSI', { brand: 'MSI', model: 'Cyborg 15 B2RWFKG', cpu: 'Intel Core 7', gpu: 'RTX 5060', ram_gb: 16, storage_gb: 1024, screen_in: 15.6 }), /8gb/);
+    bad(lap('MSI Cyborg 15 B2RWFKG 15.6” Intel Core 7 Gaming Notebook, 16GB, RTX-5060, 1TB SSD 8GB', 'MSI', { brand: 'MSI', model: 'Cyborg 15 B2RWFKG', cpu: 'Intel Core 7', gpu: 'RTX 5060', ram_gb: 16, storage_gb: 1024, screen_in: 15.6, storage_type: 'SSD' }), /8gb/);
     bad(L('tv-audio', 'AUDEEO Radiant LX On-Ear Wired Headphones, Blue', 'AUDEEO', { brand: 'Audeeo', model: 'Radiant LX' }), /wired/);
   });
 
@@ -194,11 +194,11 @@ describe('checkCanonical: every title word is in the canonical name, or excused'
     bad(phone('Samsung Galaxy S25 256GB', 'Samsung', { model: 'Galaxy S25', storage_gb: 256 }, ['128GB', '256GB']), /variants differ in storage_gb/);
   });
 
-  it('excuses colour, size, filler, price words and fields outside the pattern', () => {
-    good(phone('SAMSUNG Galaxy A17 128GB-Storage 4GB Smartphone, Grey', 'SAMSUNG', { brand: 'Samsung', model: 'Galaxy A17', storage_gb: 128, ram_gb: 4 }));
-    good(L('fashion', 'Nike Air Max 90 Size 42 Black', 'Nike', { brand: 'Nike', line: 'Air Max 90', sizes: ['42'] }));
+  it('excuses the listing\'s colour and sizes, filler and price words; a field outside the pattern is in the name', () => {
+    good(phone('SAMSUNG Galaxy A17 128GB-Storage 4GB Smartphone, Grey', 'SAMSUNG', { brand: 'Samsung', model: 'Galaxy A17', storage_gb: 128, ram_gb: 4, colour: ['Grey'] }));
+    good(L('fashion', 'Nike Air Max 90 Size 42 Black', 'Nike', { brand: 'Nike', line: 'Air Max 90', sizes: ['42'], colour: ['Black'] }));
     good(L('laptops', 'LENOVO V15 G5 IRL 15.6" I5/16GB/512SSD/W11P', 'LENOVO', { brand: 'Lenovo', model: 'V15 G5 IRL', cpu: 'Intel Core i5', ram_gb: 16, storage_gb: 512, screen_in: 15.6, os: 'Windows' }));
-    good(phone('Apple iPhone 15 128GB Black - Black Friday Sale -10%', 'Apple', { model: 'iPhone 15', storage_gb: 128 }));
+    good(phone('Apple iPhone 15 128GB Black - Black Friday Sale -10%', 'Apple', { model: 'iPhone 15', storage_gb: 128, colour: ['Black'] }));
   });
 
   it('does not reject real titles for their wording (review of 013b134, I4)', () => {
@@ -211,6 +211,94 @@ describe('checkCanonical: every title word is in the canonical name, or excused'
     // a code inside a longer code
     good(L('tv-audio', 'LG OLED55C46LA 55" C4 OLED 4K Smart TV', 'LG', { brand: 'LG', model: 'OLED55C46LA', screen_in: 55, panel: 'OLED' }));
     // a set number with its building set words
-    good(L('toys', 'LEGO Creator 31058 Mighty Dinosaurs Building Set', 'LEGO', { brand: 'LEGO', model: '31058' }));
+    good(L('toys', 'LEGO Creator 31058 Mighty Dinosaurs Building Set', 'LEGO', { brand: 'LEGO', model: '31058', line: 'Creator Mighty Dinosaurs' }));
+  });
+});
+
+describe('ruling of the re-review of 82f7062: a field one side states and the other leaves out keeps them apart', () => {
+  it('loses the match rather than risk a false one', () => {
+    const a = L('drinks', 'Johnnie Walker Black Label 70cl', 'Johnnie Walker', { brand: 'Johnnie Walker', line: 'Black Label', volume_ml: 700 });
+    const b = L('drinks', 'Johnnie Walker Black Label Blended Scotch Whisky 70cl', 'Johnnie Walker', { brand: 'Johnnie Walker', line: 'Black Label', volume_ml: 700, style: 'Blended Scotch Whisky' });
+    expect(canon(a)).not.toBe(canon(b));
+    expect(canon(phone('Samsung Galaxy S24 256GB', 'Samsung', { model: 'Galaxy S24', storage_gb: 256 }))).not.toBe(
+      canon(phone('Samsung Galaxy S24 256GB 8GB', 'Samsung', { model: 'Galaxy S24', storage_gb: 256, ram_gb: 8 })),
+    );
+  });
+});
+
+describe('re-review of 82f7062: fields, words and quantities', () => {
+  const bad = (l: Listing, what: RegExp) => {
+    const r = check(l);
+    expect(r.ok, l.title).toBe(false);
+    expect(r.ok ? '' : r.reason).toMatch(what);
+  };
+  const good = (l: Listing) => {
+    const r = check(l);
+    expect(r.ok ? 'ok' : r.reason, l.title).toBe('ok');
+    return r.ok ? r.canonical : '';
+  };
+
+  it('appends every field outside the pattern (never colour or sizes), so a field value never excuses a title word unseen', () => {
+    expect(canonicalName('drinks', { brand: 'Barefoot', line: 'Wine', grape: 'Merlot', volume_ml: 750 })).toBe('barefoot wine 750ml merlot');
+    expect(canonicalName('phones', { brand: 'Motorola', model: 'Moto G84', storage_gb: 256, sim: 'dual', colour: ['Black'] })).toBe('motorola motog84 256gb dualsim');
+    // the unused alternative of "model|line" is a field like any other
+    expect(canonicalName('toys', { brand: 'LEGO', model: '42115', line: 'Technic' })).toBe('lego 42115 technic');
+    // a field whose words the name already has adds nothing
+    expect(canonicalName('toys', { brand: 'LEGO', model: '42115 Technic', line: 'Technic' })).toBe('lego 42115technic');
+  });
+
+  it('writes edition and format words in one order, "Digital Edition" as Digital, and PS VR2 as PlayStation VR2', () => {
+    const ea = (over: Record<string, unknown>) => canonicalName('gaming', { brand: 'EA', line: 'FC 25', platform: 'PS5', ...over });
+    expect(ea({ edition: 'Edition Ultimate' })).toBe(ea({ edition: 'Ultimate Edition' }));
+    expect(ea({ edition: 'Ultimate' })).toBe(ea({ edition: 'Ultimate Edition' }));
+    expect(ea({ edition: 'Digital Edition' })).toBe(ea({ format: 'Digital' }));
+    expect(canonicalName('gaming', { brand: 'Sony', line: 'PS VR2' })).toBe(canonicalName('gaming', { brand: 'Sony', line: 'PlayStation VR2' }));
+  });
+
+  it('excuses colour words only as the listing\'s colour or variant values, and never in drinks, beauty or other', () => {
+    good(phone('Samsung Galaxy A17 128GB 4GB Smartphone, Phantom Black', 'Samsung', { model: 'Galaxy A17', storage_gb: 128, ram_gb: 4, colour: ['Black'] }));
+    bad(phone('Samsung Galaxy A17 128GB 4GB Smartphone, Phantom Black', 'Samsung', { model: 'Galaxy A17', storage_gb: 128, ram_gb: 4 }), /black/);
+    good(phone('Samsung Galaxy A17 128GB 4GB', 'Samsung', { model: 'Galaxy A17', storage_gb: 128, ram_gb: 4 }, ['Black', 'Blue']));
+    bad(L('drinks', 'Coca-Cola Light 330ml', 'Coca-Cola', { brand: 'Coca-Cola', line: 'Coca-Cola', volume_ml: 330, colour: ['Light'] }), /light/);
+    bad(L('other', 'Nescafe Gold 200g', 'Nescafe', { brand: 'Nescafe', line: 'Instant Coffee', weight_g: 200 }), /gold/);
+  });
+
+  it('excuses size words only from sizes, variant titles or after "size"', () => {
+    good(L('fashion', 'Nike Club Tee XL', 'Nike', { brand: 'Nike', line: 'Club Tee', sizes: ['XL'] }));
+    good(L('fashion', 'Nike Club Tee Size XL', 'Nike', { brand: 'Nike', line: 'Club Tee' }));
+    good(L('fashion', 'Nike Club Tee', 'Nike', { brand: 'Nike', line: 'Club Tee' }, ['S', 'M', 'XL']));
+    bad(L('fashion', 'Nike Club Tee XL', 'Nike', { brand: 'Nike', line: 'Club Tee' }), /xl/);
+  });
+
+  it('requires the words every variant title shares, and reads conditions from variant titles', () => {
+    bad(phone('Samsung Galaxy S24 256GB', 'Samsung', { model: 'Galaxy S24', storage_gb: 256, colour: ['Black', 'Grey'] }, ['Samsung Galaxy S24 Ultra 256GB Titanium Black', 'Samsung Galaxy S24 Ultra 256GB Titanium Gray']), /ultra/);
+    bad(phone('Apple iPhone 13 128GB', 'Apple', { model: 'iPhone 13', storage_gb: 128 }, ['Grade A Refurbished', 'New']), /condition lost: .*refurbished/);
+  });
+
+  it('needs every title quantity in the canonical name, whatever its unit', () => {
+    bad(L('appliances', 'Russell Hobbs Supreme Steam Iron 2600W', 'Russell Hobbs', { brand: 'Russell Hobbs', line: 'Supreme Steam Iron' }), /2600w/);
+    good(L('appliances', 'Russell Hobbs Supreme Steam Iron 2600W', 'Russell Hobbs', { brand: 'Russell Hobbs', line: 'Supreme Steam Iron', power_w: 2600 }));
+    good(phone('Apple Watch Series 10 GPS 42mm Aluminium', 'Apple', { model: 'Watch Series 10 GPS Aluminium', case_mm: 42 }));
+  });
+
+  it('rejects model, line and edition words the shop data does not have', () => {
+    bad(phone('Apple iPhone 15 128GB', 'Apple', { model: 'iPhone 15 Pro', storage_gb: 128 }), /not in the shop data: pro/);
+    bad(phone('Samsung Galaxy A15 128GB', 'Samsung', { model: 'Galaxy A15s', storage_gb: 128 }), /not in the shop data: a15s/);
+    bad(L('gaming', 'EA FC 25 PS5', 'EA', { brand: 'EA', line: 'FC 25', platform: 'PS5', edition: 'Ultimate' }), /not in the shop data: ultimate/);
+  });
+
+  it('reads unspaced +, w/, incl. and includes as a bundle, not incl. VAT; New and Special are words, Brand New is not', () => {
+    bad(L('gaming', 'Sony PS5 Slim+FC 25', 'Sony', { brand: 'Sony', line: 'PS5 Slim' }), /bundle lost/);
+    bad(L('toys', 'LEGO Star Wars 75192 Millennium Falcon w/ LED Light Kit', 'LEGO', { brand: 'LEGO', model: '75192', line: 'Star Wars Millennium Falcon' }), /bundle lost/);
+    bad(L('toys', 'LEGO 42115 Lamborghini incl. Stickers', 'LEGO', { brand: 'LEGO', model: '42115', line: 'Lamborghini' }), /bundle lost/);
+    good(phone('Apple iPhone 15 128GB incl. VAT', 'Apple', { model: 'iPhone 15', storage_gb: 128 }));
+    good(phone('Apple iPhone 15 128GB Brand New', 'Apple', { model: 'iPhone 15', storage_gb: 128 }));
+    bad(L('gaming', 'New Nintendo 3DS XL', 'Nintendo', { brand: 'Nintendo', line: '3DS XL' }), /new/);
+    bad(L('other', 'Fourth Wing Special Edition', 'Rebecca Yarros', { brand: 'Rebecca Yarros', line: 'Fourth Wing' }), /special/);
+  });
+
+  it('implies Apple from iPhone only for the device, not for a case or charger', () => {
+    good(phone('iPhone 15 128GB', null, { brand: 'Apple', model: 'iPhone 15', storage_gb: 128 }));
+    bad(phone('iPhone 15 Clear Case', null, { brand: 'Apple', model: 'iPhone 15 Clear Case' }), /brand apple not in the shop data/i);
   });
 });

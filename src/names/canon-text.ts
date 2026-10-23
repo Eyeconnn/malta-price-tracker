@@ -14,6 +14,8 @@ export function canonText(s: string): string {
     .replace(/\beau\s+de\s+parfum\b/g, ' edp ')
     .replace(/\beau\s+de\s+toilette\b/g, ' edt ')
     .replace(/\beau\s+de\s+cologne\b/g, ' edc ')
+    // PS VR2 is PlayStation VR2
+    .replace(/\b(?:play\s*station|ps)\s*vr\s*(2?)\b/g, ' psvr$1 ')
     .replace(/\bplay\s*station\s*([2-5])\b/g, ' ps$1 ')
     .replace(/\b(in|on|over)[\s-]ear\b/g, ' $1ear ')
     .replace(/\b(\d+)(?:st|nd|rd|th)\s+gen(?:eration)?\b/g, ' $1 ')
@@ -40,4 +42,23 @@ export function gpuMemory(s: string): string[] {
 /** A prepped text without the GPU memory amounts (the GPU code stays). */
 export function withoutGpuMemory(s: string): string {
   return s.replace(GPU_MEMORY, '$1 ');
+}
+
+/** "incl. VAT", "including delivery": price words, never a bundle. */
+export const PRICE_INCLUDES = /\b(?:incl(?:uding|udes|uded)?|inc)\.?\s*(?:vat|tax(?:es)?|delivery|shipping|postage|p\s*&\s*p)\b/g;
+
+/**
+ * Whether a canonText text names a bundle: a + item spaced or not (PS5+FC 25; Pro+ and Copilot+ are model words),
+ * w/, incl., includes or including (not incl. VAT), multipack or bundle. The name check and the title guard of name
+ * matching both read it.
+ */
+export function bundleWords(plain: string): boolean {
+  const t = plain.replace(PRICE_INCLUDES, ' ');
+  return (
+    /(?:^|\s)\+\s*[\p{L}\p{N}]/u.test(t) ||
+    /[\p{L}\p{N}]\+[\p{L}\p{N}]/u.test(t) ||
+    /\bw\s*\/\s*[\p{L}\p{N}]/u.test(t) ||
+    /\b(?:incl|inc|includes|including|included)\b/.test(t) ||
+    /\b(?:multipack|bundle)\b/.test(t)
+  );
 }
