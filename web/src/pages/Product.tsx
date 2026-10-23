@@ -1,77 +1,109 @@
 import { ExternalLink } from 'lucide-react';
-import { lazy, type ReactNode, Suspense, useId, useMemo, useState } from 'react';
-import { Link, useParams } from 'react-router';
-import { CheaperBox } from '@/components/site/CheaperBox';
+import { lazy, type ReactNode, Suspense, useEffect, useId, useMemo, useState } from 'react';
+import { Link, Navigate, useNavigate, useParams } from 'react-router';
 import { DayTable } from '@/components/site/DayTable';
-import { AlarmBanner, avoidFact, avoidKind, BlackFridayMark, NO_PRICE, PriceLine, tagProps } from '@/components/site/DealCard';
+import { AlarmBanner, avoidFact, BlackFridayMark, NO_PRICE, PriceLine, tagProps } from '@/components/site/DealCard';
 import { Notice } from '@/components/site/DealList';
 import { GlassCard } from '@/components/site/GlassCard';
 import { useMode } from '@/components/site/ModeProvider';
 import { PriceTag } from '@/components/site/PriceTag';
+import { ProductImage, productPath } from '@/components/site/ProductResult';
 import { ReportButton } from '@/components/site/ReportButton';
 import { ShopBadge } from '@/components/site/ShopBadge';
 import { Button } from '@/components/ui/button';
 import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group';
-import { ApiError, api, type Card, type HistoryObs, type Label, type OtherShop, type ProductResponse, type Variant, useApi } from '@/lib/api';
+import { ApiError, api, type Card, type ProductPage, type SellerView, type VariantView, useApi } from '@/lib/api';
 import { formatDay, formatEuro, signedPct } from '@/lib/format';
-import { type DayRow, dayRows, lastDays, lowestInLastDays, recentChange } from '@/lib/history';
+import { dayRows, lastDays } from '@/lib/history';
+import { SERIES_MAX, seriesStyle } from '@/lib/sellerSeries';
 import { useMediaQuery } from '@/lib/useMediaQuery';
 import { cn } from '@/lib/utils';
-import { maltaDay, type VerdictFacts } from '../../../src/site/verdict.js';
+import { withSpecs } from '../../../src/site/display.js';
+import type { VerdictFacts } from '../../../src/site/verdict.js';
 
 // Recharts is only downloaded when an Advanced product page shows the chart.
-const PriceChart = lazy(() => import('@/components/site/PriceChart'));
+const SellersChart = lazy(() => import('@/components/site/SellersChart'));
 
 const RANGES = { '7': 7, '30': 30 } as const;
 type Range = keyof typeof RANGES;
 
+const KEY = /^[cs]\d{1,15}$/;
 const ID = /^\d{1,15}$/;
 const DAY = /^\d{4}-\d{2}-\d{2}$/;
 const positive = (n: unknown): n is number => typeof n === 'number' && Number.isFinite(n) && n > 0;
 const finite = (n: unknown): n is number => typeof n === 'number' && Number.isFinite(n);
+const euroOr = (cents: number | null | undefined, none: string) => (positive(cents) ? formatEuro(cents) : none);
 
-/**
- * The product as a deal card, so the tag, alarm banner and change fact are the deal lists' own
- * (Ruling R35): the avoid tag's earlier price comes from facts.raisedFrom / facts.wasRaisedFrom.
- */
-export function productCard(d: ProductResponse): Card {
-  const p = d.product;
-  const f = d.verdict.facts;
-  const avoid = d.verdict.label === 'avoid';
+const TOGGLE =
+  'min-h-11 rounded-xl px-3 font-semibold text-muted-foreground hover:bg-secondary hover:text-ink motion-reduce:transition-none data-[state=on]:bg-ink data-[state=on]:text-background data-[state=on]:hover:bg-ink data-[state=on]:hover:text-background';
+
+/** A seller as a deal card, so its tag, alarm and change fact are the deal lists' own (Ruling R35). */
+export function sellerCard(s: SellerView): Card {
+  const f = s.verdict.facts;
+  const avoid = s.verdict.label === 'avoid';
   const rf = f?.raisedFrom;
   return {
-    id: p.id,
-    title: p.title,
-    shop: p.shop,
-    shopSlug: p.shopSlug,
-    priceCents: positive(p.priceCents) ? p.priceCents : null,
-    wasCents: positive(p.wasCents) ? p.wasCents : null,
-    verdict: d.verdict.label,
-    reason: d.verdict.reason,
-    bf: p.bf,
-    category: p.category,
+    id: s.id,
+    title: s.title,
+    shop: s.shop,
+    shopSlug: s.shopSlug,
+    priceCents: positive(s.priceCents) ? s.priceCents : null,
+    wasCents: positive(s.wasCents) ? s.wasCents : null,
+    verdict: s.verdict.label,
+    reason: s.verdict.reason,
+    bf: s.bf,
+    category: null,
     raisedFrom: avoid && rf && positive(rf.price) && typeof rf.at === 'string' && DAY.test(rf.at) ? { priceCents: rf.price, at: rf.at } : null,
     wasRaisedFromCents: avoid && positive(f?.wasRaisedFrom) ? f.wasRaisedFrom : null,
   };
 }
 
-const euroOr = (cents: number | null | undefined, none: string) => (positive(cents) ? formatEuro(cents) : none);
-const days = (n: number) => `${n} ${n === 1 ? 'day' : 'days'}`;
-
-const VERDICT_TEXT: Record<Label, string> = {
-  good: 'Real deal',
-  avoid: 'Deal to avoid',
-  none: 'No deal found',
-  insufficient: 'Not enough history',
-};
-
-function variantName(v: Variant): string {
-  return v.variantTitle || v.title || `Variant ${v.id}`;
+/** The shop's product link, only when it is an http(s) address (the API checks too; scraped data is untrusted). */
+function webAddress(url: string | null): string | null {
+  if (!url) return null;
+  try {
+    const u = new URL(url);
+    return (u.protocol === 'https:' || u.protocol === 'http:') && !u.username && !u.password ? u.href : null;
+  } catch {
+    return null;
+  }
 }
 
-/** The product the verdict is about, else the first variant, else the newest history point. */
-function defaultVariant(d: ProductResponse): number | null {
-  return d.product.productId ?? d.variants[0]?.id ?? d.history.at(-1)?.productId ?? null;
+/** The key of an option label: case, spacing and punctuation aside ("Black" and "black" are one option). */
+const optionKey = (label: string) => label.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, '');
+
+type Option = { key: string; label: string };
+
+/** The options of every seller's variants, each once, in the order they first appear. */
+function optionsOf(variants: VariantView[]): Option[] {
+  const out = new Map<string, Option>();
+  for (const v of variants) {
+    if (!v.label) continue;
+    const key = optionKey(v.label);
+    if (key !== '' && !out.has(key)) out.set(key, { key, label: v.label });
+  }
+  return [...out.values()];
+}
+
+/**
+ * What a seller row shows for the chosen option: the seller's variant with that option (its own latest price
+ * and stock), or the seller's listing as built (its verdict variant) when no option is chosen. null when the
+ * seller does not name the option.
+ */
+type Shown = { variantId: number | null; priceCents: number | null; wasCents: number | null; inStock: boolean | null; checked: boolean };
+
+function shownFor(s: SellerView, variants: VariantView[], option: string | null): Shown | null {
+  if (option === null) return { variantId: s.productId, priceCents: s.priceCents, wasCents: s.wasCents, inStock: s.inStock, checked: true };
+  const v = variants.find((x) => x.sellerId === s.id && x.label !== null && optionKey(x.label) === option);
+  if (!v) return null;
+  const checked = v.id === s.productId;
+  return {
+    variantId: v.id,
+    priceCents: checked ? s.priceCents : v.priceCents,
+    wasCents: checked ? s.wasCents : null,
+    inStock: checked ? s.inStock : v.inStock,
+    checked,
+  };
 }
 
 function Section({ title, children, className }: { title: string; children: ReactNode; className?: string }) {
@@ -86,28 +118,8 @@ function Section({ title, children, className }: { title: string; children: Reac
   );
 }
 
-/** Simple: lowest 30 days, usual price and real change, from the stored facts. */
-function ThreeNumbers({ facts }: { facts: VerdictFacts }) {
-  const real = facts.realPct;
-  const items: [string, string, string?][] = [
-    ['Lowest 30 days', euroOr(facts.low30, 'Not known yet')],
-    ['Usual price', euroOr(facts.usual, 'Not known yet')],
-    ['Real change', finite(real) ? signedPct(real) : 'Not known yet', finite(real) ? (real > 0 ? 'text-bad' : real < 0 ? 'text-good' : undefined) : undefined],
-  ];
-  return (
-    <ul aria-label="Price facts" className="m-0 grid list-none grid-cols-3 gap-2 p-0">
-      {items.map(([label, value, tone]) => (
-        <li key={label} className="glass flex flex-col gap-0.5 p-3">
-          <span className="text-xs text-muted-foreground">{label}</span>
-          <span className={cn('text-base font-bold tabular-nums sm:text-lg', tone)}>{value}</span>
-        </li>
-      ))}
-    </ul>
-  );
-}
-
-/** Advanced: every stored fact behind the verdict. "Days worth buying" only for a judged (good / avoid) verdict (R44). */
-function NumbersPanel({ facts, judged }: { facts: VerdictFacts; judged: boolean }) {
+/** Advanced: every stored fact behind one seller's verdict. "Days worth buying" only for a judged verdict (R44). */
+function NumbersPanel({ shop, facts, judged }: { shop: string; facts: VerdictFacts; judged: boolean }) {
   const at = (v: { price: number; at: string } | undefined) =>
     v && positive(v.price) && typeof v.at === 'string' && DAY.test(v.at) ? `${formatEuro(v.price)} on ${formatDay(v.at)}` : null;
   const rows: [string, string | null, string?][] = [
@@ -128,7 +140,7 @@ function NumbersPanel({ facts, judged }: { facts: VerdictFacts; judged: boolean 
     ['Days worth buying', judged && finite(facts.daysWorthBuying) && finite(facts.historyDays) ? `${facts.daysWorthBuying} of ${facts.historyDays}` : null],
   ];
   return (
-    <Section title="Numbers">
+    <Section title={`Numbers at ${shop}`}>
       <dl className="m-0 flex flex-col text-sm">
         {rows
           .filter((r): r is [string, string, string?] => r[1] !== null)
@@ -143,178 +155,167 @@ function NumbersPanel({ facts, judged }: { facts: VerdictFacts; judged: boolean 
   );
 }
 
-/** Simple: exactly matched other shops only (a title-only match is never shown here). */
-function OtherShops({ others, forVariant }: { others: OtherShop[]; forVariant?: string }) {
-  const exact = others.filter((o) => !o.possible);
-  if (exact.length === 0) return null;
-  return (
-    <Section title={forVariant ? `Other shops (for ${forVariant})` : 'Other shops'}>
-      <ul className="m-0 flex list-none flex-col p-0">
-        {exact.map((o) => (
-          <li key={o.id} className="border-t border-line first:border-t-0">
-            <Link
-              to={`/p/${o.id}`}
-              className="flex min-h-11 items-center gap-3 rounded-sm py-1.5 outline-none hover:underline focus-visible:ring-[3px] focus-visible:ring-ring/50"
-            >
-              <ShopBadge name={o.shop} size="sm" />
-              <span className="min-w-0 flex-1 break-words">{o.shop}</span>
-              <span className={cn('tabular-nums', positive(o.priceCents) ? 'font-semibold' : 'text-xs text-muted-foreground')}>
-                {euroOr(o.priceCents, NO_PRICE)}
-              </span>
-            </Link>
-          </li>
-        ))}
-      </ul>
-    </Section>
-  );
-}
+const days = (n: number) => `${n} ${n === 1 ? 'day' : 'days'}`;
 
-/** Advanced: every other shop's row, title-only matches labelled "possibly the same product". */
-function Comparison({ others }: { others: OtherShop[] }) {
-  if (others.length === 0) {
-    return (
-      <Section title="Other shops">
-        <p className="text-sm text-muted-foreground">We have not matched this product at another shop.</p>
-      </Section>
-    );
-  }
-  return (
-    <div className="glass overflow-x-auto p-4">
-      <table className="w-full border-collapse text-left text-sm">
-        <caption className="pb-2 text-left text-lg font-semibold">Other shops</caption>
-        <thead>
-          <tr className="text-xs text-muted-foreground">
-            <th scope="col" className="px-2 py-1 font-medium">
-              Shop
-            </th>
-            <th scope="col" className="px-2 py-1 text-right font-medium">
-              Price
-            </th>
-            <th scope="col" className="px-2 py-1 font-medium">
-              Verdict
-            </th>
-            <th scope="col" className="px-2 py-1 font-medium">
-              Match
-            </th>
-          </tr>
-        </thead>
-        <tbody>
-          {others.map((o) => (
-            <tr key={o.id} className="border-t border-line align-top">
-              <th scope="row" className="px-2 py-2 font-medium">
-                <Link to={`/p/${o.id}`} className="rounded-sm outline-none hover:underline focus-visible:ring-[3px] focus-visible:ring-ring/50">
-                  {o.shop}
-                </Link>
-                <span className="block text-xs font-normal break-words text-muted-foreground">{o.title}</span>
-              </th>
-              <td className={cn('px-2 py-2 text-right tabular-nums', !positive(o.priceCents) && 'text-xs text-muted-foreground')}>
-                {euroOr(o.priceCents, NO_PRICE)}
-                {o.inStock === false && <span className="block text-xs text-muted-foreground">Out of stock</span>}
-              </td>
-              <td className="px-2 py-2">{VERDICT_TEXT[o.verdict] ?? ''}</td>
-              <td className="px-2 py-2">
-                {o.possible ? (
-                  <span className="inline-block rounded-md bg-secondary px-2 py-0.5 text-xs font-semibold">possibly the same product</span>
-                ) : (
-                  <span className="text-xs text-muted-foreground">Same product</span>
-                )}
-                {/* a match report targets the other row, site_products.id (Ruling R20) */}
-                <ReportButton
-                  targetType="match"
-                  targetId={o.id}
-                  title="Wrong match?"
-                  label="Report"
-                  ariaLabel={`Report a wrong match with ${o.shop}`}
-                  about={`${o.title} at ${o.shop}`}
-                  compact
-                  className="-ml-2 flex"
-                />
-              </td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-    </div>
-  );
-}
-
-const TOGGLE =
-  'min-h-11 rounded-xl px-3 font-semibold text-muted-foreground hover:bg-secondary hover:text-ink motion-reduce:transition-none data-[state=on]:bg-ink data-[state=on]:text-background data-[state=on]:hover:bg-ink data-[state=on]:hover:text-background';
-
-
-/** The variant radio group: Simple shows it inside the product card, Advanced in its own "Variants" section. */
-function VariantPicker({
-  variants,
-  value,
-  verdictId,
-  onChange,
-  priceText,
-  inline,
+/**
+ * One seller: shop, price and was price, that shop's own tag and verdict sentence (a was price is one shop's
+ * claim, so verdicts are never merged), "View on <shop>" and "Something wrong?". The cheapest seller is marked.
+ */
+function SellerRow({
+  seller,
+  shown,
+  verdictOption,
+  cheapest,
+  minHistoryDays,
+  matchReport,
 }: {
-  variants: Variant[];
-  value: number;
-  verdictId: number | null;
-  onChange: (id: number) => void;
-  /** what a button says about the variant's price, from its own readings (never a stale price as current) */
-  priceText: (id: number) => string;
-  inline?: boolean;
+  seller: SellerView;
+  shown: Shown;
+  /** the option the seller's verdict is about, when an option is chosen and it is another one */
+  verdictOption: string | null;
+  cheapest: boolean;
+  minHistoryDays: number;
+  /** Advanced, several sellers: report this seller as not the same product (target: its site_products row) */
+  matchReport: boolean;
 }) {
-  const noteId = useId();
-  const labelId = useId();
-  const group = (
-    <ToggleGroup
-      type="single"
-      aria-label={inline ? undefined : 'Variant'}
-      aria-labelledby={inline ? labelId : undefined}
-      aria-describedby={inline ? undefined : noteId}
-      value={String(value)}
-      onValueChange={(v) => {
-        if (v) onChange(Number(v));
-      }}
-      className="glass w-full flex-wrap justify-start gap-1 rounded-2xl p-1"
-    >
-      {variants.map((v) => (
-        <ToggleGroupItem key={v.id} value={String(v.id)} className={cn(TOGGLE, 'h-auto flex-col items-start gap-0 py-1.5 text-left')}>
-          <span className="break-words whitespace-normal">{variantName(v)}</span>
-          <span className="text-xs font-normal tabular-nums">{priceText(v.id)}</span>
-        </ToggleGroupItem>
-      ))}
-    </ToggleGroup>
-  );
-  if (inline) {
-    return (
-      <div className="flex flex-col gap-1">
-        <p id={labelId} className="text-xs font-medium text-muted-foreground">
-          Variant
-        </p>
-        {group}
-      </div>
-    );
-  }
+  const titleId = useId();
+  const base = sellerCard(seller);
+  const card: Card = { ...base, priceCents: positive(shown.priceCents) ? shown.priceCents : null, wasCents: positive(shown.wasCents) ? shown.wasCents : null };
+  const checked = shown.checked;
+  const tag = checked ? tagProps(base) : null;
+  const avoid = seller.verdict.label === 'avoid';
+  const alarm = checked && avoid && seller.bf;
+  const fact = checked && avoid ? avoidFact(base) : null;
+  const shopUrl = webAddress(seller.url);
+  const tooNew = checked && seller.verdict.label === 'insufficient' && base.priceCents !== null;
+  const tracked = finite(seller.verdict.facts?.historyDays) ? seller.verdict.facts.historyDays : null;
   return (
-    <Section title="Variants">
-      {group}
-      <p id={noteId} className="text-xs text-muted-foreground">
-        The chart and the price by day show one variant at a time.
-        {verdictId !== null && variants.some((v) => v.id === verdictId) && ` The verdict is about ${variantName(variants.find((v) => v.id === verdictId)!)}.`}
-      </p>
-    </Section>
+    <li
+      aria-labelledby={titleId}
+      data-cheapest={cheapest ? 'true' : undefined}
+      data-verdict={checked ? seller.verdict.label : undefined}
+      className={cn('glass overflow-hidden', cheapest && 'border-2 border-good', alarm && 'border-2 border-bad')}
+    >
+      {alarm && <AlarmBanner card={base} />}
+      <div className={cn('relative flex flex-col gap-1.5 p-4', tag && 'pr-24')}>
+        {tag && (
+          <div className="absolute top-2 right-4">
+            <PriceTag {...tag} size="sm" />
+          </div>
+        )}
+        <div className="flex min-w-0 flex-wrap items-center gap-2">
+          <ShopBadge name={seller.shop} size="sm" />
+          <h3 id={titleId} className="min-w-0 font-semibold break-words">
+            <Link
+              to={`/shops/${encodeURIComponent(seller.shopSlug)}`}
+              className="rounded-sm outline-none hover:underline focus-visible:ring-[3px] focus-visible:ring-ring/50"
+            >
+              {seller.shop}
+            </Link>
+          </h3>
+          {cheapest && <span className="rounded-full border border-good px-2 py-0.5 text-xs font-bold text-good">Cheapest</span>}
+        </div>
+        {/* the shop's own title stays visible, so a clean name never hides what the shop wrote */}
+        <p className="text-xs break-words text-muted-foreground">{seller.title}</p>
+        <PriceLine card={card} className="[&>span:first-child]:text-2xl" />
+        {shown.inStock === false && <p className="text-sm text-muted-foreground">Out of stock</p>}
+        {checked && seller.bf && !alarm && <BlackFridayMark />}
+        {fact && <p className="font-semibold text-bad">{fact}</p>}
+        {seller.cheaper && checked && (
+          <p className="text-sm font-semibold">
+            Cheaper at {seller.cheaper.shop}, <span className="text-good tabular-nums">{formatEuro(seller.cheaper.priceCents)}</span>
+          </p>
+        )}
+        {!checked ? (
+          <p className="text-sm text-muted-foreground">{`Our deal check at ${seller.shop} is for ${verdictOption ?? 'another option'}.`}</p>
+        ) : tooNew ? (
+          <p className="text-sm">
+            Not enough price history yet.{finite(minHistoryDays) && ` We judge a deal after ${days(minHistoryDays)} of prices`}
+            {tracked !== null && `; we have ${days(tracked)} so far`}.
+          </p>
+        ) : (
+          seller.verdict.reason && <p className="text-[15px] leading-relaxed">{seller.verdict.reason}</p>
+        )}
+        <div className="flex flex-wrap items-center gap-x-4">
+          {shopUrl && (
+            <a
+              href={shopUrl}
+              target="_blank"
+              rel="noopener noreferrer nofollow"
+              className="inline-flex min-h-11 w-fit items-center gap-1.5 rounded-sm font-semibold text-accent outline-none hover:underline focus-visible:ring-[3px] focus-visible:ring-ring/50"
+            >
+              View on {seller.shop}
+              <ExternalLink className="size-4" aria-hidden="true" />
+              <span className="sr-only"> (opens in a new tab)</span>
+            </a>
+          )}
+          {/* the report target is the seller's verdict variant, products.id (Ruling R20) */}
+          {seller.productId !== null && (
+            <ReportButton targetType="product" targetId={seller.productId} about={`${seller.title} at ${seller.shop}`} ariaLabel={`Something wrong? ${seller.shop}`} compact />
+          )}
+          {matchReport && (
+            <ReportButton
+              targetType="match"
+              targetId={seller.id}
+              title="Not the same product?"
+              ariaLabel={`Not the same product? Report ${seller.shop}`}
+              about={`${seller.title} at ${seller.shop}`}
+              compact
+            />
+          )}
+        </div>
+      </div>
+    </li>
   );
 }
 
-/** Advanced: chart (lazy Recharts) and day table for one variant, both cut to the 7 / 30 day switch. */
-function History({ rows, judged, low30 }: { rows: DayRow[]; judged: boolean; low30: number | null }) {
+/** Advanced: one price line per seller (lazy Recharts), the day table of one chosen seller, both cut to 7 / 30 days. */
+function History({ data, sellers, shownBy }: { data: ProductPage; sellers: SellerView[]; shownBy: Map<number, Shown> }) {
   const [range, setRange] = useState<Range>('30');
   const reduced = useMediaQuery('(prefers-reduced-motion: reduce)');
   const tableId = useId();
-  const shown = useMemo(() => lastDays(rows, RANGES[range]), [rows, range]);
+  const headingId = useId();
+  const [chosen, setChosen] = useState<number | null>(data.cheapestId);
+  const seller = sellers.find((s) => s.id === chosen) ?? sellers[0];
+
+  const labelOf = useMemo(() => new Map(data.variants.map((v) => [v.id, v.label])), [data.variants]);
+  const variantsPer = useMemo(() => {
+    const m = new Map<number, number>();
+    for (const v of data.variants) m.set(v.sellerId, (m.get(v.sellerId) ?? 0) + 1);
+    return m;
+  }, [data.variants]);
+
+  // one line per seller, each one variant (the chosen option's, else the verdict's): never a mix of variants
+  const lines = useMemo(
+    () =>
+      sellers
+        .map((s) => {
+          const variant = shownBy.get(s.id)?.variantId ?? null;
+          const rows = variant === null ? [] : lastDays(dayRows(data.history.filter((h) => h.sellerId === s.id), variant, null), RANGES[range]);
+          const label = variant !== null && (variantsPer.get(s.id) ?? 0) > 1 ? labelOf.get(variant) : null;
+          return { id: s.id, shop: s.shop, legend: label ? `${s.shop} (${label})` : s.shop, rows };
+        })
+        .filter((l) => l.rows.length > 0)
+        .slice(0, SERIES_MAX),
+    [sellers, shownBy, data.history, range, variantsPer, labelOf],
+  );
+
+  const shown = seller ? shownBy.get(seller.id) : undefined;
+  const variant = shown?.variantId ?? null;
+  // only a good / avoid verdict, on the variant it is about, answers "worth buying" (Ruling R44)
+  const judged = !!seller && !!shown?.checked && (seller.verdict.label === 'good' || seller.verdict.label === 'avoid');
+  const low30 = judged ? (seller!.verdict.facts?.low30 ?? null) : null;
+  const rows = useMemo(
+    () => (seller && variant !== null ? lastDays(dayRows(data.history.filter((h) => h.sellerId === seller.id), variant, low30), RANGES[range]) : []),
+    [seller, variant, data.history, low30, range],
+  );
 
   return (
     <>
-      <section aria-labelledby={`${tableId}-h`} className="glass flex flex-col gap-3 p-4">
+      <section aria-labelledby={headingId} className="glass flex flex-col gap-3 p-4">
         <div className="flex flex-wrap items-center gap-3">
-          <h2 id={`${tableId}-h`} className="text-lg font-semibold">
-            Was price vs price
+          <h2 id={headingId} className="text-lg font-semibold">
+            Price at each shop
           </h2>
           <ToggleGroup
             type="single"
@@ -333,294 +334,190 @@ function History({ rows, judged, low30 }: { rows: DayRow[]; judged: boolean; low
             </ToggleGroupItem>
           </ToggleGroup>
         </div>
-        {shown.length === 0 ? (
-          <p className="text-sm text-muted-foreground">No prices tracked for this variant in the last 60 days.</p>
+        {lines.length === 0 ? (
+          <p className="text-sm text-muted-foreground">No prices tracked in the last 60 days.</p>
         ) : (
           <>
             <div
-              data-testid="price-chart"
-              data-points={shown.length}
+              data-testid="sellers-chart"
+              data-lines={lines.length}
               role="img"
-              aria-label={`Chart of the price and the was price over the last ${RANGES[range]} days. The same prices are in the price by day table.`}
+              aria-label={`Chart of each shop's price over the last ${RANGES[range]} days. The prices are in the price by day table, one shop at a time.`}
               aria-describedby={tableId}
-              className="min-h-[220px]"
+              className="min-h-[240px]"
             >
-              <Suspense fallback={<div aria-hidden="true" className="h-[220px] rounded-xl bg-secondary opacity-60" />}>
-                <PriceChart rows={shown} animate={!reduced} />
+              <Suspense fallback={<div aria-hidden="true" className="h-[240px] rounded-xl bg-secondary opacity-60" />}>
+                <SellersChart lines={lines.map((l) => ({ id: l.id, shop: l.shop, rows: l.rows }))} animate={!reduced} />
               </Suspense>
             </div>
-            <ul className="m-0 flex list-none flex-wrap gap-x-4 gap-y-1 p-0 text-xs text-muted-foreground">
-              <li className="flex items-center gap-1.5">
-                <span aria-hidden="true" className="h-0.5 w-4 bg-brand" />
-                Price
-              </li>
-              <li className="flex items-center gap-1.5">
-                <span aria-hidden="true" className="w-4 border-t-2 border-dashed border-muted-foreground" />
-                Was price
-              </li>
-              {judged && (
-                <>
-                  <li className="flex items-center gap-1.5">
-                    <span aria-hidden="true" className="size-3 rounded-sm bg-good/25" />
-                    Worth buying
+            <ul aria-label="Chart lines" className="m-0 flex list-none flex-wrap gap-x-4 gap-y-1 p-0 text-xs text-muted-foreground">
+              {lines.map((l, i) => {
+                const { stroke, dash } = seriesStyle(i);
+                return (
+                  <li key={l.id} className="flex items-center gap-1.5">
+                    <svg aria-hidden="true" width="18" height="6" className="flex-none">
+                      <line x1="0" y1="3" x2="18" y2="3" stroke={stroke} strokeWidth="2.4" strokeDasharray={dash || undefined} />
+                    </svg>
+                    {l.legend}
                   </li>
-                  <li className="flex items-center gap-1.5">
-                    <span aria-hidden="true" className="size-3 rounded-sm bg-bad/25" />
-                    Not worth buying
-                  </li>
-                </>
-              )}
+                );
+              })}
             </ul>
+            {sellers.filter((s) => (shownBy.get(s.id)?.variantId ?? null) !== null).length > SERIES_MAX && (
+              <p className="text-xs text-muted-foreground">{`The chart shows the first ${SERIES_MAX} shops of the list.`}</p>
+            )}
           </>
         )}
       </section>
-      {shown.length > 0 && (
-        <div className="glass p-4">
-          <DayTable id={tableId} rows={shown} judged={judged} low30={low30} />
-        </div>
-      )}
+      <div className="glass flex flex-col gap-3 p-4">
+        {sellers.length > 1 && (
+          <ToggleGroup
+            type="single"
+            aria-label="Shop for the price by day"
+            value={seller ? String(seller.id) : ''}
+            onValueChange={(v) => {
+              if (v) setChosen(Number(v));
+            }}
+            className="glass w-full flex-wrap justify-start gap-1 rounded-2xl p-1"
+          >
+            {sellers.map((s) => (
+              <ToggleGroupItem key={s.id} value={String(s.id)} className={TOGGLE}>
+                {s.shop}
+              </ToggleGroupItem>
+            ))}
+          </ToggleGroup>
+        )}
+        {rows.length === 0 ? (
+          <p id={tableId} className="text-sm text-muted-foreground">
+            {seller ? `No prices tracked at ${seller.shop} in the last 60 days.` : 'No prices tracked.'}
+          </p>
+        ) : (
+          <DayTable id={tableId} rows={rows} judged={judged} low30={low30} />
+        )}
+      </div>
+      {seller?.verdict.facts && <NumbersPanel shop={seller.shop} facts={seller.verdict.facts} judged={seller.verdict.label === 'good' || seller.verdict.label === 'avoid'} />}
     </>
   );
 }
 
-/** The shop's product link, only when it is an http(s) address (scraped data is untrusted). */
-function webAddress(url: string | null): string | null {
-  if (!url) return null;
-  try {
-    const u = new URL(url);
-    // an address with a user name or password is not a plain product link
-    return (u.protocol === 'https:' || u.protocol === 'http:') && !u.username && !u.password ? u.href : null;
-  } catch {
-    return null;
-  }
-}
-
-/** The days the lowest-price fact looks back, today included. */
-const LOW_DAYS = 30;
-const DAY_MS = 86_400_000;
-const dayNumber = (day: string) => Math.round(Date.parse(`${day}T00:00:00Z`) / DAY_MS);
-
-/** What the Simple card shows for a variant the verdict is not about: plain facts from that variant's own history. */
-type VariantView = {
-  priceCents: number | null;
-  wasCents: number | null;
-  inStock: boolean | null;
-  bf: boolean;
-  /** the Malta day of its newest reading when that is older than the last 30 days: it is not current */
-  lastSeen: string | null;
-  /** the lowest of every reading in the last 30 Malta days, today included; null when none */
-  lowest30: number | null;
-  change: ReturnType<typeof recentChange>;
-};
-
-function variantView(data: ProductResponse, id: number, now: Date): VariantView {
-  let latest: HistoryObs | undefined;
-  for (const h of data.history) {
-    if (h.productId === id && (!latest || Date.parse(h.at) >= Date.parse(latest.at))) latest = h;
-  }
-  const v = data.variants.find((x) => x.id === id);
-  const today = maltaDay(now);
-  const rows = dayRows(data.history, id, null);
-  const lastDay = rows.at(-1)?.day;
-  const stale = lastDay !== undefined && dayNumber(today) - dayNumber(lastDay) >= LOW_DAYS;
-  return {
-    priceCents: latest ? (positive(latest.price) ? latest.price : null) : positive(v?.priceCents) ? v.priceCents : null,
-    wasCents: latest && positive(latest.was) ? latest.was : null,
-    inStock: latest?.inStock ?? v?.inStock ?? null,
-    bf: latest?.bf === true,
-    lastSeen: stale ? lastDay : null,
-    lowest30: lowestInLastDays(data.history, id, today, LOW_DAYS),
-    change: !stale && finite(data.raiseWindowDays) ? recentChange(rows, data.raiseWindowDays, today) : null,
-  };
-}
-
-/** A variant button's price line: its newest reading (as the card), "Last seen" when stale, or no price. */
-function buttonPrice(data: ProductResponse, id: number, now: Date): string {
-  if (!data.history.some((h) => h.productId === id)) return NO_PRICE;
-  const view = variantView(data, id, now);
-  if (view.lastSeen) return `Last seen ${formatDay(view.lastSeen)}`;
-  return `${euroOr(view.priceCents, NO_PRICE)}${view.inStock === false ? ', out of stock' : ''}`;
-}
-
-function PriceChangeLine({ change }: { change: NonNullable<VariantView['change']> }) {
-  return (
-    <p className={cn('font-semibold', change.row.price! > change.from ? 'text-bad' : undefined)}>
-      Price changed from {formatEuro(change.from)} to {formatEuro(change.row.price!)} on {formatDay(change.row.day)}
-      {change.row.bf && ', while marked Black Friday'}
-    </p>
-  );
-}
-
-function ProductContent({ data }: { data: ProductResponse }) {
+function ProductContent({ data }: { data: ProductPage }) {
   const { mode } = useMode();
   const advanced = mode === 'advanced';
   const titleId = useId();
-  const { product, verdict } = data;
-  const facts = verdict.facts;
-  const card = productCard(data);
-  const tag = tagProps(card);
-  const shopUrl = webAddress(product.url);
-  const avoid = verdict.label === 'avoid';
-  const verdictId = product.productId;
-  const [variant, setVariant] = useState<number | null>(() => defaultVariant(data));
+  const listId = useId();
+  const [option, setOption] = useState<string | null>(null);
   const [announcement, setAnnouncement] = useState('');
+  const { product } = data;
 
-  // Only a good / avoid verdict, on the variant it is about, answers "worth buying" (Ruling R44).
-  const verdictJudged = verdict.label === 'good' || verdict.label === 'avoid';
-  const judged = verdictJudged && variant !== null && variant === verdictId;
+  const options = useMemo(() => optionsOf(data.variants), [data.variants]);
+  const shownBy = useMemo(() => {
+    const m = new Map<number, Shown>();
+    for (const s of data.sellers) {
+      const shown = shownFor(s, data.variants, option);
+      if (shown) m.set(s.id, shown);
+    }
+    return m;
+  }, [data.sellers, data.variants, option]);
+  const sellers = data.sellers.filter((s) => shownBy.has(s.id));
+  const labelOf = (id: number | null) => (id === null ? null : (data.variants.find((v) => v.id === id)?.label ?? null));
 
-  const verdictRows = useMemo(
-    () => (verdictId === null ? [] : dayRows(data.history, verdictId, verdictJudged ? (facts?.low30 ?? null) : null)),
-    [data.history, verdictId, facts, verdictJudged],
-  );
-  const rows = useMemo(
-    () => (variant === null ? [] : variant === verdictId ? verdictRows : dayRows(data.history, variant, null)),
-    [data.history, variant, verdictId, verdictRows],
-  );
+  // the lowest price of a seller not known out of stock, as the search result says it
+  const stocked = data.sellers.filter((s) => s.inStock !== false && positive(s.priceCents));
+  const lowest = stocked.length > 0 ? Math.min(...stocked.map((s) => s.priceCents as number)) : null;
+  const summary =
+    data.sellers.length > 1
+      ? lowest !== null
+        ? `from ${formatEuro(lowest)} at ${data.sellers.length} shops`
+        : `at ${data.sellers.length} shops`
+      : `at ${data.sellers[0]!.shop}`;
 
-  // Simple shows the chosen variant's own data when the verdict is about another one (R44: only the
-  // verdict's variant is judged), so the tag, reason, alarm, three numbers and CheaperBox are hidden then.
-  const verdictVariant = verdictId === null ? undefined : data.variants.find((v) => v.id === verdictId);
-  const other = !advanced && verdictVariant !== undefined && variant !== null && variant !== verdictId;
-  // the clock is read when the variant changes, not on every render
-  const own = useMemo(() => (other && variant !== null ? variantView(data, variant, new Date()) : null), [other, variant, data]);
-  const alarm = avoid && card.bf && !other;
-  const shownCard: Card = own ? { ...card, priceCents: own.priceCents, wasCents: own.wasCents } : card;
-
-  // the picker's price lines; the clock is read when the data changes
-  const priceTexts = useMemo(() => {
-    const now = new Date();
-    return new Map(data.variants.map((v) => [v.id, buttonPrice(data, v.id, now)]));
-  }, [data]);
-  const priceText = (id: number) => priceTexts.get(id) ?? NO_PRICE;
-
-  /** Choose a variant and tell screen readers its price (a polite live region; nothing moves on screen). */
-  const choose = (id: number) => {
-    setVariant(id);
-    const v = data.variants.find((x) => x.id === id);
-    if (!v) return;
-    const view = verdictVariant && id !== verdictId ? variantView(data, id, new Date()) : null;
-    const price = view?.lastSeen ? `last seen on ${formatDay(view.lastSeen)}` : euroOr(view ? view.priceCents : card.priceCents, NO_PRICE);
-    const stock = !view?.lastSeen && (view ? view.inStock : product.inStock) === false ? ', out of stock' : '';
-    // the deal check follows the verdict's variant only: say when it goes and when it comes back
-    const check = advanced || !verdictVariant ? '' : id === verdictId ? '. Deal check shown.' : '. Deal check not shown for this variant.';
-    setAnnouncement(`${variantName(v)}: ${price}${stock}${check}`);
+  const choose = (key: string | null) => {
+    setOption(key);
+    const label = key === null ? 'All options' : (options.find((o) => o.key === key)?.label ?? '');
+    const n = key === null ? data.sellers.length : data.sellers.filter((s) => shownFor(s, data.variants, key) !== null).length;
+    setAnnouncement(`${label}: ${n} ${n === 1 ? 'shop' : 'shops'}`);
   };
-
-  // The insufficient case with a price is "not enough history"; without a price the reason says so.
-  const tooNew = verdict.label === 'insufficient' && card.priceCents !== null;
-  const trackedDays = finite(facts?.historyDays) ? facts.historyDays : verdictRows.length;
-  const fact = avoid && !other ? avoidFact(card) : null;
-  // a change is recent within the stored raise window (R43), as the verdict's own price-rise check
-  const change =
-    (avoid && avoidKind(card) === 'price') || !finite(data.raiseWindowDays) ? null : recentChange(verdictRows, data.raiseWindowDays);
 
   return (
     <div className="flex flex-col gap-4">
-      <article
-        aria-labelledby={titleId}
-        data-verdict={other ? undefined : verdict.label}
-        data-alarm={alarm ? 'true' : undefined}
-        className={cn('glass overflow-hidden', alarm && 'border-2 border-bad')}
-      >
-        {alarm && <AlarmBanner card={card} />}
-        <div className={cn('relative flex flex-col gap-2 p-4', tag && !other && 'pr-24')}>
-          {tag && !other && (
-            <div className="absolute top-2 right-4">
-              <PriceTag {...tag} />
-            </div>
-          )}
-          <p className="flex min-w-0 items-center gap-2 text-sm text-muted-foreground">
-            <ShopBadge name={product.shop} size="sm" />
-            <Link
-              to={`/shops/${encodeURIComponent(product.shopSlug)}`}
-              className="truncate rounded-sm outline-none hover:text-ink hover:underline focus-visible:ring-[3px] focus-visible:ring-ring/50"
-            >
-              {product.shop}
-            </Link>
-          </p>
-          <h1 id={titleId} className="text-xl leading-snug font-bold tracking-tight break-words sm:text-2xl">
-            {product.title}
-          </h1>
-          {/* min-h keeps the line as tall as the big price, so "Price not shown" does not shift the card */}
-          {own?.lastSeen ? (
-            <p className="min-h-9 text-lg font-semibold">Last seen on {formatDay(own.lastSeen)}</p>
-          ) : (
-            <PriceLine card={shownCard} className="min-h-9 [&>span:first-child]:text-3xl" />
-          )}
-          {/* announced politely when the variant changes; always rendered so the change is heard */}
-          <p role="status" aria-live="polite" className="sr-only">
-            {announcement}
-          </p>
-          {!advanced && data.variants.length > 1 && variant !== null && (
-            <VariantPicker inline variants={data.variants} value={variant} verdictId={verdictId} onChange={choose} priceText={priceText} />
-          )}
-          {(own ? own.bf && !own.lastSeen : card.bf && !alarm) && <BlackFridayMark />}
-          {fact && <p className="font-semibold text-bad">{fact}</p>}
-          {(own ? own.inStock === false && !own.lastSeen : product.inStock === false) && <p className="text-sm text-muted-foreground">Out of stock</p>}
-          {own ? own.change && <PriceChangeLine change={own.change} /> : change && <PriceChangeLine change={change} />}
-          {own && (
-            <p className="text-sm">
-              <span className="text-muted-foreground">Lowest price in the last 30 days</span>{' '}
-              <span className="font-semibold tabular-nums">{euroOr(own.lowest30, 'Not known yet')}</span>
-            </p>
-          )}
-          {shopUrl && (
-            <a
-              href={shopUrl}
-              target="_blank"
-              rel="noopener noreferrer nofollow"
-              className="mt-1 inline-flex min-h-11 w-fit items-center gap-1.5 rounded-sm font-semibold text-accent outline-none hover:underline focus-visible:ring-[3px] focus-visible:ring-ring/50"
-            >
-              View on {product.shop}
-              <ExternalLink className="size-4" aria-hidden="true" />
-              <span className="sr-only"> (opens in a new tab)</span>
-            </a>
-          )}
-          {own ? (
-            verdictVariant && (
-              <div className="mt-1 flex flex-col items-start gap-2 rounded-xl bg-secondary p-3">
-                <p className="text-[15px]">{`Our deal check is for ${variantName(verdictVariant)}. Choose it to see the check.`}</p>
-                <Button variant="outline" className="min-h-11" onClick={() => choose(verdictVariant.id)}>
-                  {`Choose ${variantName(verdictVariant)}`}
-                </Button>
-              </div>
-            )
-          ) : tooNew ? (
-            <div className="mt-1 flex flex-col gap-1 rounded-xl bg-secondary p-3">
-              <p className="font-semibold">Not enough price history yet</p>
-              <p className="text-sm">
-                {finite(data.minHistoryDays) && `We judge a deal after ${days(data.minHistoryDays)} of prices. `}
-                We have {days(trackedDays)} for this product so far.
-              </p>
-            </div>
-          ) : (
-            verdict.reason && <p className="text-[15px] leading-relaxed">{verdict.reason}</p>
-          )}
+      <article aria-labelledby={titleId} className="glass flex flex-col gap-3 p-4">
+        <div className="flex items-start gap-4">
+          <ProductImage url={product.imageUrl} className="size-24" />
+          <div className="flex min-w-0 flex-col gap-1">
+            {product.brand && <p className="text-sm text-muted-foreground">{product.brand}</p>}
+            <h1 id={titleId} className="text-xl leading-snug font-bold tracking-tight break-words sm:text-2xl">
+              {withSpecs(product.name, product.specs)}
+            </h1>
+            <p className="text-sm text-muted-foreground">{summary}</p>
+          </div>
         </div>
+        {options.length > 1 && (
+          <div className="flex flex-col gap-1">
+            <p id={`${titleId}-option`} className="text-xs font-medium text-muted-foreground">
+              Option
+            </p>
+            <ToggleGroup
+              type="single"
+              aria-labelledby={`${titleId}-option`}
+              value={option ?? '__all'}
+              onValueChange={(v) => {
+                if (v) choose(v === '__all' ? null : v);
+              }}
+              className="glass w-full flex-wrap justify-start gap-1 rounded-2xl p-1"
+            >
+              <ToggleGroupItem value="__all" className={TOGGLE}>
+                All
+              </ToggleGroupItem>
+              {options.map((o) => (
+                <ToggleGroupItem key={o.key} value={o.key} className={TOGGLE}>
+                  {o.label}
+                </ToggleGroupItem>
+              ))}
+            </ToggleGroup>
+            {option !== null && <p className="text-xs text-muted-foreground">Shops that do not name this option are left out.</p>}
+          </div>
+        )}
+        {/* announced politely when the option changes; always rendered so the change is heard */}
+        <p role="status" aria-live="polite" className="sr-only">
+          {announcement}
+        </p>
       </article>
 
-      {data.cheaper && !other && <CheaperBox cheaper={data.cheaper} ownCents={card.priceCents} />}
-
-      {!advanced && !other && facts && !tooNew && <ThreeNumbers facts={facts} />}
-      {!advanced && <OtherShops others={data.others} forVariant={other && verdictVariant ? variantName(verdictVariant) : undefined} />}
+      <section aria-labelledby={listId} className="flex flex-col gap-3">
+        <h2 id={listId} className="text-lg font-semibold">
+          {data.sellers.length > 1 ? 'Where to buy, cheapest first' : 'Where to buy'}
+        </h2>
+        <ol aria-label="Shops selling this product" className="m-0 flex list-none flex-col gap-3 p-0">
+          {sellers.map((s) => (
+            <SellerRow
+              key={s.id}
+              seller={s}
+              shown={shownBy.get(s.id)!}
+              verdictOption={labelOf(s.productId)}
+              cheapest={option === null && s.id === data.cheapestId && data.sellers.length > 1}
+              minHistoryDays={data.minHistoryDays}
+              matchReport={advanced && data.sellers.length > 1}
+            />
+          ))}
+        </ol>
+      </section>
 
       {advanced && (
         <>
-          {data.variants.length > 1 && variant !== null && (
-            <VariantPicker variants={data.variants} value={variant} verdictId={verdictId} onChange={choose} priceText={priceText} />
+          <History data={data} sellers={sellers} shownBy={shownBy} />
+          {product.attributes.length > 0 && (
+            <Section title="Product details">
+              <dl className="m-0 flex flex-col text-sm">
+                {product.attributes.map((a) => (
+                  <div key={a.key} className="flex items-baseline justify-between gap-3 border-t border-line py-1.5 first:border-t-0">
+                    <dt className="text-muted-foreground">{a.label}</dt>
+                    <dd className="m-0 text-right font-semibold break-words">{a.value}</dd>
+                  </div>
+                ))}
+              </dl>
+            </Section>
           )}
-          <History rows={rows} judged={judged} low30={judged ? (facts?.low30 ?? null) : null} />
-          <div className="grid items-start gap-4 lg:grid-cols-2">
-            {facts && <NumbersPanel facts={facts} judged={verdictJudged} />}
-            <Comparison others={data.others} />
-          </div>
         </>
-      )}
-
-      {/* the report target is the verdict's variant, products.id (Ruling R20); without one there is nothing to report */}
-      {product.productId !== null && (
-        <ReportButton targetType="product" targetId={product.productId} about={`${product.title} at ${product.shop}`} />
       )}
     </div>
   );
@@ -640,57 +537,82 @@ function NotFound() {
   );
 }
 
-/** A product: its tag, verdict and numbers; Advanced adds the chart, price by day, all facts, other shops and variants. */
+function Failed({ retry }: { retry: () => void }) {
+  return (
+    <div className="flex flex-col gap-4">
+      <h1 className="text-2xl font-bold tracking-tight">Product</h1>
+      <Notice
+        title="This product could not be loaded."
+        action={
+          <Button variant="outline" className="min-h-11" onClick={retry}>
+            Try again
+          </Button>
+        }
+      >
+        Check your connection and try again.
+      </Notice>
+    </div>
+  );
+}
+
+function Loading() {
+  return (
+    <div role="status" aria-label="Loading product" className="flex flex-col gap-4">
+      <h1 className="sr-only">Product</h1>
+      <div aria-hidden="true" className="glass h-48 opacity-60" />
+      <div aria-hidden="true" className="glass h-20 opacity-60" />
+    </div>
+  );
+}
+
+const notFound = (state: { status: string; error?: unknown }) =>
+  state.status === 'error' && state.error instanceof ApiError && (state.error.status === 404 || state.error.status === 400);
+
+/**
+ * A product (design Part 3): its clean name, picture and options, and every shop that sells it, cheapest first,
+ * each with its own verdict. Advanced adds a price line per shop, the price by day of one shop, its numbers and
+ * the product's attributes.
+ */
 export function ProductPage() {
+  const { key } = useParams();
+  const navigate = useNavigate();
+  const valid = key !== undefined && KEY.test(key);
+  const state = useApi(
+    valid ? key : null,
+    (signal) => api.productPage(key!, signal),
+    (d) => {
+      if (!d || typeof d.key !== 'string' || !d.product || typeof d.product.name !== 'string' || !Array.isArray(d.sellers) || d.sellers.length === 0 || !Array.isArray(d.variants) || !Array.isArray(d.history)) {
+        throw new ApiError(200); // a 200 without the expected shape
+      }
+      return false;
+    },
+  );
+  // a listing of a matched product answers with the product's own key: that is the address to keep
+  const canonical = state.status === 'ready' && KEY.test(state.data.key) && state.data.key !== key ? state.data.key : null;
+  useEffect(() => {
+    if (canonical) navigate(productPath(canonical), { replace: true });
+  }, [canonical, navigate]);
+
+  if (!valid || notFound(state)) return <NotFound />;
+  if (state.status === 'error') return <Failed retry={state.retry} />;
+  if (state.status !== 'ready') return <Loading />;
+  return <ProductContent key={state.data.key} data={state.data} />;
+}
+
+/** An old listing link (/p/:id): goes to its product's page, replacing the address, so old links keep working. */
+export function ListingRedirect() {
   const { id } = useParams();
   const valid = id !== undefined && ID.test(id);
   const state = useApi(
     valid ? id : null,
     (signal) => api.product(Number(id), signal),
     (d) => {
-      if (
-        !d ||
-        !d.product ||
-        typeof d.product.title !== 'string' ||
-        !d.verdict ||
-        !Array.isArray(d.variants) ||
-        !Array.isArray(d.history) ||
-        !Array.isArray(d.others)
-      ) {
-        throw new ApiError(200); // a 200 without the expected shape
-      }
+      if (!d || !d.product || typeof d.product.key !== 'string' || !KEY.test(d.product.key)) throw new ApiError(200);
       return false;
     },
   );
-
-  if (!valid || (state.status === 'error' && state.error instanceof ApiError && (state.error.status === 404 || state.error.status === 400))) {
-    return <NotFound />;
-  }
-  if (state.status === 'error') {
-    return (
-      <div className="flex flex-col gap-4">
-        <h1 className="text-2xl font-bold tracking-tight">Product</h1>
-        <Notice
-          title="This product could not be loaded."
-          action={
-            <Button variant="outline" className="min-h-11" onClick={state.retry}>
-              Try again
-            </Button>
-          }
-        >
-          Check your connection and try again.
-        </Notice>
-      </div>
-    );
-  }
-  if (state.status !== 'ready') {
-    return (
-      <div role="status" aria-label="Loading product" className="flex flex-col gap-4">
-        <h1 className="sr-only">Product</h1>
-        <div aria-hidden="true" className="glass h-48 opacity-60" />
-        <div aria-hidden="true" className="glass h-20 opacity-60" />
-      </div>
-    );
-  }
-  return <ProductContent key={id} data={state.data} />;
+  if (!valid || notFound(state)) return <NotFound />;
+  if (state.status === 'error') return <Failed retry={state.retry} />;
+  if (state.status !== 'ready') return <Loading />;
+  return <Navigate to={productPath(state.data.product.key)} replace />;
 }

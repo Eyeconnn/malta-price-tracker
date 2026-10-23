@@ -5,7 +5,7 @@ import { NO_PRICE } from '@/components/site/DealCard';
 import type { ProductResult } from '@/lib/api';
 import { formatEuro } from '@/lib/format';
 import { cn } from '@/lib/utils';
-import { withSpecs } from '../../../../src/site/identity.js';
+import { withSpecs } from '../../../../src/site/display.js';
 
 const positive = (n: unknown): n is number => typeof n === 'number' && Number.isFinite(n) && n > 0;
 

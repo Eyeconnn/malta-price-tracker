@@ -194,7 +194,4 @@ export function numberSpecText(key: string, unit: string | undefined, n: number)
   return numberText(key, unit, n).text;
 }
 
-/** "Samsung Galaxy S25 Ultra Smartphone · 256GB", or the name alone without a summary. */
-export function withSpecs(name: string, summary: string | null): string {
-  return summary ? `${name} · ${summary}` : name;
-}
+export { withSpecs } from './display.js';
