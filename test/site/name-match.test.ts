@@ -12,6 +12,8 @@ const PORT = 55463;
 // real time: the brand rule reads fresh rows with the database's now()
 const NOW = new Date();
 const HOUR = 3_600_000;
+/** name matching is behind a switch, off by default (owner decision 23 Oct) */
+const ON = { nameMatching: true };
 
 type Listing = {
   key: string;
@@ -126,7 +128,7 @@ describe.skipIf(!process.env.SITE_BUILD_TEST_DB)('site-build name matching on PG
         insert into site_products (shop_id, group_key, title, verdict, canonical_id, match_method, match_confirmed, updated_at)
         values (${shopIds[shop]}, ${key}, 'old', 'none', ${oldCanon}, 'title', true, ${new Date(NOW.getTime() - HOUR)})`;
     }
-    await buildSiteProducts(sql, DEFAULT_SETTINGS, NOW);
+    await buildSiteProducts(sql, DEFAULT_SETTINGS, NOW, ON);
   }, 120_000);
 
   afterAll(async () => {
@@ -229,7 +231,7 @@ describe.skipIf(!process.env.SITE_BUILD_TEST_DB)('site-build name matching on PG
     await buildShop(sql, { id: shopIds.alpha, slug: 'alpha', category: 'electronics' }, DEFAULT_SETTINGS, new Date(NOW.getTime() + 30_000));
     const mid = await rows();
     expect(mid.get('JBL-BLUE')).toMatchObject({ canonical_id: null, match_method: null });
-    await buildSiteProducts(sql, DEFAULT_SETTINGS, new Date(NOW.getTime() + 60_000));
+    await buildSiteProducts(sql, DEFAULT_SETTINGS, new Date(NOW.getTime() + 60_000), ON);
     const after = await rows();
     expect(after.get('JBL-BLACK')!.canonical_id).toBe(before);
     expect(after.get('JBL-WHITE')!.canonical_id).toBe(before);
@@ -239,7 +241,7 @@ describe.skipIf(!process.env.SITE_BUILD_TEST_DB)('site-build name matching on PG
   it('records where a removed product went, so its old link can follow (review I4)', async () => {
     const old = (await rows()).get('S25-A')!.canonical_id!;
     await sql`update products set gtin = '4006381333931' where external_id in ('S25-A', 'S25-B')`;
-    await buildSiteProducts(sql, DEFAULT_SETTINGS, new Date(NOW.getTime() + 90_000));
+    await buildSiteProducts(sql, DEFAULT_SETTINGS, new Date(NOW.getTime() + 90_000), ON);
     const r = await rows();
     expect(r.get('S25-A')!.match_method).toBe('gtin');
     const now = r.get('S25-A')!.canonical_id!;
@@ -266,8 +268,18 @@ describe.skipIf(!process.env.SITE_BUILD_TEST_DB)('site-build name matching on PG
 
   it('keeps the grouping on a rebuild', async () => {
     const before = await rows();
-    await buildSiteProducts(sql, DEFAULT_SETTINGS, new Date(NOW.getTime() + 60_000));
+    await buildSiteProducts(sql, DEFAULT_SETTINGS, new Date(NOW.getTime() + 60_000), ON);
     const after = await rows();
     for (const [k, v] of before) expect(after.get(k)?.canonical_id, k).toBe(v.canonical_id);
+  }, 60_000);
+
+  it('groups nothing by name while the switch is off (the default), and keeps barcode matches', async () => {
+    const before = await rows();
+    const gtin = [...before].filter(([, r]) => r.match_method === 'gtin');
+    expect(gtin.length).toBeGreaterThan(0);
+    await buildSiteProducts(sql, DEFAULT_SETTINGS, new Date(NOW.getTime() + 120_000));
+    const after = await rows();
+    expect([...after.values()].filter((r) => r.match_method === 'name')).toEqual([]);
+    for (const [k, r] of gtin) expect(after.get(k), k).toMatchObject({ match_method: 'gtin', canonical_id: r.canonical_id });
   }, 60_000);
 });

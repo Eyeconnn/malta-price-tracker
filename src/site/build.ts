@@ -301,8 +301,15 @@ type CanonRow = MatchInput & { brand: string | null; canonicalId: string | null;
  * Returns the number of matched rows per method.
  * prior: each row's canonical id before this build's shops were built (they may clear it, as for new codes), so a
  * re-formed product keeps its id and a removed one records where its listings went (review I4).
+ * opts.nameMatching: match by clean name at all (owner decision 23 Oct: off until canonical names exist); while off,
+ * no row is grouped by name, and rows grouped by name before lose that grouping.
  */
-export async function assignCanonicalIds(sql: postgres.Sql, prior: Map<number, string> = new Map()): Promise<Record<string, number>> {
+export async function assignCanonicalIds(
+  sql: postgres.Sql,
+  prior: Map<number, string> = new Map(),
+  opts: { nameMatching?: boolean } = {},
+): Promise<Record<string, number>> {
+  const byName = opts.nameMatching === true;
   // the accepted clean name of each row (name matching): only one stored for the row's current shop title, so a
   // renamed listing waits for the normaliser instead of matching under its old name
   const raw = await sql<
@@ -330,7 +337,7 @@ export async function assignCanonicalIds(sql: postgres.Sql, prior: Map<number, s
       and pn.status = 'ok' and pn.display_name is not null and pn.source_title = sp.title
     order by sp.id`;
   // the brand rule of the name normaliser (src/names/brand.ts): only a reliable (or house) brand counts
-  const brandCtx = raw.some((r) => r.display_name !== null) ? await loadBrandContext(sql) : null;
+  const brandCtx = byName && raw.some((r) => r.display_name !== null) ? await loadBrandContext(sql) : null;
   const reliableBrand = (brand: string | null, shopId: number): string | null => {
     if (!brandCtx || !brand) return null;
     const v = brandStatus(brand, shopId, brandCtx);
@@ -347,7 +354,7 @@ export async function assignCanonicalIds(sql: postgres.Sql, prior: Map<number, s
       canonicalId: r.canonical_id,
       matchMethod: r.match_method,
       name:
-        r.display_name === null
+        !byName || r.display_name === null
           ? null
           : nameMatch(r.display_name, r.name_category ?? r.category, r.name_attrs, reliableBrand(r.brand, r.shop_id), {
               title: r.title,
@@ -489,7 +496,8 @@ async function recordRedirects(
     on conflict (old_id) do update set new_id = excluded.new_id, created_at = now()`;
 }
 
-export type BuildOptions = { shop?: string; log?: (line: string) => void };
+/** nameMatching: group listings by clean name (default off; see assignCanonicalIds) */
+export type BuildOptions = { shop?: string; log?: (line: string) => void; nameMatching?: boolean };
 
 /**
  * Builds site_products for every active, visible shop (or one shop with { shop }), then canonical ids.
@@ -525,7 +533,7 @@ export async function buildSiteProducts(
   }
 
   const started = Date.now();
-  const matched = await assignCanonicalIds(sql, prior);
+  const matched = await assignCanonicalIds(sql, prior, { nameMatching: opts.nameMatching === true });
   log(`matching: ${JSON.stringify(matched)}, ${((Date.now() - started) / 1000).toFixed(1)}s`);
   return { products, judged };
 }
