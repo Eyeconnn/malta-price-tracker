@@ -198,13 +198,20 @@ export function LiveSearch({
   placeholder,
   animated = false,
   className,
+  value: controlled,
+  onValueChange,
 }: {
   shop?: string | null;
   placeholder?: string;
   animated?: boolean;
   className?: string;
+  /** keeps the typed text outside (the search overlay keeps it between openings); uncontrolled when left out */
+  value?: string;
+  onValueChange?: (value: string) => void;
 }) {
-  const [value, setValue] = useState('');
+  const [own, setOwn] = useState('');
+  const value = controlled ?? own;
+  const setValue = onValueChange ?? setOwn;
   const navigate = useNavigate();
   const { term, state } = useSearch(value, shop);
   const headingId = useId();

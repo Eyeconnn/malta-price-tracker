@@ -58,9 +58,12 @@ describe('layout switches at 768px', () => {
     const bar = mobileNav();
     expect(bar).not.toBeNull();
     expect(mainNav()).toBeNull();
-    for (const name of ['Search', 'Deals', 'Shops']) {
+    for (const name of ['Deals', 'Shops']) {
       expect(within(bar!).getByRole('link', { name })).toBeTruthy();
     }
+    // Search opens the search overlay instead of navigating
+    expect(within(bar!).queryByRole('link', { name: 'Search' })).toBeNull();
+    expect(within(bar!).getByRole('button', { name: 'Search' })).toBeTruthy();
     expect(within(bar!).getByRole('button', { name: 'More' })).toBeTruthy();
   });
 
@@ -70,9 +73,11 @@ describe('layout switches at 768px', () => {
     const nav = mainNav();
     expect(nav).not.toBeNull();
     expect(mobileNav()).toBeNull();
-    for (const name of ['Search', 'Deals', 'Shops', 'How we check']) {
+    for (const name of ['Deals', 'Shops', 'How we check']) {
       expect(within(nav!).getByRole('link', { name })).toBeTruthy();
     }
+    expect(within(nav!).queryByRole('link', { name: 'Search' })).toBeNull();
+    expect(within(nav!).getByRole('button', { name: 'Search' })).toBeTruthy();
     expect(screen.queryByRole('button', { name: 'More' })).toBeNull();
   });
 
@@ -106,7 +111,7 @@ describe('current page', () => {
     renderSite('/deals');
     const nav = (width < 768 ? mobileNav() : mainNav())!;
     expect(within(nav).getByRole('link', { name: 'Deals' }).getAttribute('aria-current')).toBe('page');
-    expect(within(nav).getByRole('link', { name: 'Search' }).getAttribute('aria-current')).toBeNull();
+    expect(within(nav).getByRole('button', { name: 'Search' }).getAttribute('aria-current')).toBeNull();
     expect(within(nav).getByRole('link', { name: 'Shops' }).getAttribute('aria-current')).toBeNull();
   });
 
@@ -153,7 +158,7 @@ describe('landmarks and headings', () => {
     setViewport(375);
     renderSite();
     const bar = mobileNav()!;
-    const controls = [...within(bar).getAllByRole('link'), within(bar).getByRole('button', { name: 'More' })];
+    const controls = [...within(bar).getAllByRole('link'), within(bar).getByRole('button', { name: 'Search' }), within(bar).getByRole('button', { name: 'More' })];
     expect(controls).toHaveLength(4);
     for (const c of controls) expect(c.className).toContain('min-h-11');
   });
