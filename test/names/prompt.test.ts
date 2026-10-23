@@ -89,6 +89,21 @@ describe('userMessage', () => {
     expect(JSON.parse(lines[1])).toEqual({ key: '2', title: 'Barbie' });
   });
 
+  it('sends a reliable brand as brand and an unreliable one only flagged, so the model does not add it', () => {
+    const [batch] = makeBatches([
+      group({ category: 'fashion', title: '15 Denier Matt Sheer Hold-Ups', brand: 'Calzedonia Malta', brandStatus: 'unreliable' }),
+      group({ category: 'fashion', title: 'Train Essentials Train Cotton 3-Stripes Pacer Shorts', brand: 'Adidas Performance', brandStatus: 'reliable', groupKey: 'b' }),
+      group({ category: 'fashion', title: 'Striped Baby Yoda slippers', brand: '4993716', brandStatus: 'none', groupKey: 'c' }),
+    ], 10);
+    const [a, b, c] = userMessage(batch).split('\n').filter((l) => l.startsWith('{')).map((l) => JSON.parse(l));
+    expect(a).toEqual({ key: '1', title: '15 Denier Matt Sheer Hold-Ups', not_the_brand: 'Calzedonia Malta' });
+    expect(b).toEqual({ key: '2', title: 'Train Essentials Train Cotton 3-Stripes Pacer Shorts', brand: 'Adidas Performance' });
+    expect(c).toEqual({ key: '3', title: 'Striped Baby Yoda slippers' });
+    const p = systemPrompt('fashion', schemas.fashion);
+    expect(p).toContain('not_the_brand');
+    expect(p).toMatch(/never add it/i);
+  });
+
   it('keeps at most 30 variant titles', () => {
     const [batch] = makeBatches([group({ variantTitles: Array.from({ length: 50 }, (_, i) => `v${i}`) })], 10);
     const line = JSON.parse(userMessage(batch).split('\n').find((l) => l.startsWith('{'))!);

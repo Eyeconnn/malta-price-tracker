@@ -25,6 +25,8 @@ export type RunSummary = {
   wallSeconds: number;
   /** usage per batch, in the order they ran */
   batchStats: BatchStat[];
+  /** how the groups were chosen, when --sample-from was used (for example "out/names/x.csv: 500 of 500 matched") */
+  sample?: string;
 };
 
 export type BatchStat = {
@@ -54,6 +56,12 @@ export type ReportRow = {
   dropped: string[];
   status: 'ok' | 'rejected' | 'failed';
   reason: string | null;
+  /** the group's ids, so a later run can pick exactly these groups (--sample-from) */
+  shopId?: number;
+  groupKey?: string;
+  /** the shop's brand value and whether it names the maker (src/names/brand.ts) */
+  brand?: string | null;
+  brandStatus?: string;
 };
 
 const esc = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
@@ -78,6 +86,7 @@ export function renderHtml(s: RunSummary, rows: ReportRow[]): string {
     ['Effort', s.effort ?? 'CLI default'],
     ['Mode', `${s.pilot ? 'pilot' : 'full'}${s.dryRun ? ', dry run (nothing written)' : ''}`],
     ['Categories', s.categories.join(', ')],
+    ...(s.sample ? ([['Sample', s.sample]] as [string, string][]) : []),
     ['Groups', int(s.groups)],
     ['Accepted', int(s.accepted)],
     ['Rejected', int(s.rejected)],
@@ -143,7 +152,10 @@ ${sections.join('\n')}
 `;
 }
 
-const CSV_HEADER = ['category', 'shop', 'source_title', 'clean_name', 'variant_label', 'attributes', 'dropped_attributes', 'status', 'reason'];
+export const CSV_HEADER = [
+  'category', 'shop', 'source_title', 'clean_name', 'variant_label', 'attributes', 'dropped_attributes', 'status', 'reason',
+  'shop_id', 'group_key', 'brand', 'brand_status',
+];
 
 /** A cell that a spreadsheet could read as a formula gets a leading apostrophe; cells are quoted when needed. */
 function csvCell(v: string): string {
@@ -155,7 +167,10 @@ export function renderCsv(rows: ReportRow[]): string {
   const lines = [CSV_HEADER.join(',')];
   for (const r of rows) {
     lines.push(
-      [r.category, r.shop, r.sourceTitle, r.name ?? '', r.variantLabel ?? '', formatAttrs(r.attrs), r.dropped.join('; '), r.status, r.reason ?? '']
+      [
+        r.category, r.shop, r.sourceTitle, r.name ?? '', r.variantLabel ?? '', formatAttrs(r.attrs), r.dropped.join('; '), r.status, r.reason ?? '',
+        r.shopId === undefined ? '' : String(r.shopId), r.groupKey ?? '', r.brand ?? '', r.brandStatus ?? '',
+      ]
         .map(csvCell)
         .join(','),
     );

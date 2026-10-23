@@ -2,6 +2,9 @@
 // and not hidden) that were never normalised or whose title fingerprint changed. Also the pilot sample.
 import { createHash } from 'node:crypto';
 import type postgres from 'postgres';
+import { categorize } from '../site/categories.js';
+import { loadSettings } from '../site/settings.js';
+import type { BrandStatus } from './brand.js';
 
 export type GroupInput = {
   shopId: number;
@@ -10,8 +13,10 @@ export type GroupInput = {
   /** the shop's title of the group (site_products.title) */
   title: string;
   brand: string | null;
-  /** site category slug */
+  /** site category slug: categorize() of today's rules (loadGroups), not the stored site_products.category */
   category: string;
+  /** site_products.category as the last site build stored it */
+  storedCategory?: string;
   categoryPath: string | null;
   gtin: string | null;
   mpn: string | null;
@@ -19,6 +24,10 @@ export type GroupInput = {
   variantTitles: string[];
   /** product_names.title_hash of the last normalisation, null when never done */
   storedHash: string | null;
+  /** whether brand names the maker (src/names/brand.ts); set by the CLI, judged from the brand text alone when missing */
+  brandStatus?: BrandStatus;
+  /** why the brand is unreliable or none */
+  brandNote?: string | null;
 };
 
 /** Days a site_products row counts as fresh (Ruling R21, as FRESH_DAYS in src/site/build.ts). */
@@ -47,38 +56,53 @@ type GroupRow = {
   brand: string | null;
   category: string;
   category_path: string | null;
+  tags: string[] | null;
+  shop_category: string | null;
   gtin: string | null;
   mpn: string | null;
   stored_hash: string | null;
 };
 
-/** Fresh groups of active, visible shops (optionally only some categories), with their variant titles. */
+/**
+ * Fresh groups of active, visible shops (optionally only some categories), with their variant titles. The category
+ * is recomputed with today's categorize() and the admin overrides (site_settings), as the next site build would set
+ * it, so a rule fix applies before the build runs; the stored one is kept in storedCategory. The category inputs come
+ * from the product site_products.rep_product_id points at (the build uses the group's representative, which is the
+ * same product for most groups).
+ */
 export async function loadGroups(sql: postgres.Sql, opts: { categories?: string[] }): Promise<GroupInput[]> {
-  const cats = opts.categories && opts.categories.length > 0 ? opts.categories : null;
+  const cats = opts.categories && opts.categories.length > 0 ? new Set(opts.categories) : null;
+  const settings = await loadSettings(sql);
   const rows = await sql<GroupRow[]>`
     select sp.shop_id, s.slug as shop_slug, sp.group_key, sp.title, sp.brand, coalesce(sp.category, 'other') as category,
-      p.category_path, sp.gtin, sp.mpn, pn.title_hash as stored_hash
+      p.category_path, p.tags, s.category as shop_category, sp.gtin, sp.mpn, pn.title_hash as stored_hash
     from site_products sp
     join shops s on s.id = sp.shop_id
     left join products p on p.id = sp.rep_product_id
     left join product_names pn on pn.shop_id = sp.shop_id and pn.group_key = sp.group_key
     where s.active and not s.site_hidden and sp.updated_at > now() - ${`${FRESH_DAYS} days`}::interval
-      ${cats === null ? sql`` : sql`and coalesce(sp.category, 'other') = any(${cats}::text[])`}
     order by sp.shop_id, sp.group_key`;
 
-  const groups: GroupInput[] = rows.map((r) => ({
-    shopId: r.shop_id,
-    shopSlug: r.shop_slug,
-    groupKey: r.group_key,
-    title: r.title,
-    brand: r.brand,
-    category: r.category,
-    categoryPath: r.category_path,
-    gtin: r.gtin,
-    mpn: r.mpn,
-    variantTitles: [],
-    storedHash: r.stored_hash,
-  }));
+  const groups: GroupInput[] = rows
+    .map((r) => ({
+      r,
+      category: categorize({ categoryPath: r.category_path, tags: r.tags ?? [], title: r.title, shopCategory: r.shop_category }, settings.categoryOverrides),
+    }))
+    .filter(({ category }) => cats === null || cats.has(category))
+    .map(({ r, category }) => ({
+      shopId: r.shop_id,
+      shopSlug: r.shop_slug,
+      groupKey: r.group_key,
+      title: r.title,
+      brand: r.brand,
+      category,
+      storedCategory: r.category,
+      categoryPath: r.category_path,
+      gtin: r.gtin,
+      mpn: r.mpn,
+      variantTitles: [],
+      storedHash: r.stored_hash,
+    }));
 
   // variant titles, one query per shop (uses the (shop_id, external_id) index prefix)
   const byShop = new Map<number, Map<string, GroupInput>>();

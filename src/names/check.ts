@@ -2,29 +2,42 @@
 //
 // Name rule. A clean name (display_name and variant_label together) is accepted only if:
 // - it is 3 to 140 characters with no HTML, no em dash, no control characters and nothing URL- or domain-like
-//   (http, www., "shop.com"), and is not just the variant label;
-// - it keeps the brand (when the shop gives a real one, not Generic or the like), matched on word boundaries;
-// - it invents no words: every word of 3+ letters is in the shop data (title, variant titles, brand, MPN; case and
-//   accents ignored) or is a unit word (inch, litre, watt, SSD, ...). No product nouns are allowed in: an added
-//   "Laptop" or "Backpack" would hide a wrong category;
+//   (http, www., "shop.com"), and is not just the variant label. A dotted spelling copied from the title (b.box,
+//   Go.Up, Glas.tR) is no web address unless it ends in a web domain (.com, .mt, ...);
+// - it keeps the brand when the brand is reliable (src/names/brand.ts), matched on word boundaries: its words
+//   written together or apart, its first word when it has more (Adidas for Adidas Performance) or its initials (M&S
+//   for Marks & Spencer). A house brand (the shop sells only its own brand, as Calzedonia Malta) is not required and
+//   may be added without its company and place words (Calzedonia). An unreliable brand (the shop's own name, a
+//   domain, a company, a distributor) is not required, and the name may contain it only when the title has it;
+// - it invents no words: every word of 3+ letters is in the shop data (title, variant titles, reliable brand, MPN;
+//   case, accents, trademark signs and UK/US spelling ignored: colour = color, grey = gray, aluminium = aluminum,
+//   centre = center, litre = liter, metre = meter) or is a unit word (inch, litre, watt, SSD, ...). Words joined or
+//   split differently count as the same ("Hotpoint Ariston" for HOTPOINTARISTON, WiFi for Wi-Fi), and "and" stands
+//   for &, "plus" for + and "with" for w/. No product nouns are allowed in: an added "Laptop" or "Backpack" would
+//   hide a wrong category;
 // - numbers keep their unit class and count: every number of the title (with its unit, or bare) appears in the name
-//   as often as in the title, with the same unit in any spelling (16 GB = 16GB, 15.6" = 15.6 inch, 1,000W = 1000W);
-//   a bare number never matches one with a unit (8 is not 8GB), units are never swapped (16GB is not 16TB), and
-//   no number appears that the shop data does not have (A5 is not A55);
+//   as often as in the title, with the same unit in any spelling (16 GB = 16GB, 15.6" = 15.6 inch, 1,000W = 1000W,
+//   40 x 30 cm with the multiplication sign = 40x30cm); a bare number never matches one with a unit (8 is not 8GB), units are never swapped
+//   (16GB is not 16TB), and no number appears that the shop data does not have (A5 is not A55);
 // - codes mixing letters and digits (G6, A515, iPhone15) survive as a token or as adjacent tokens (iPhone 15), and
 //   codes in the name come from the shop data the same way; model words (Pro, Max, Plus, Mini, Ultra, Air, Lite,
-//   SE, FE, Neo, Slim, XL, XS from src/site/matching.ts) survive;
+//   SE, FE, Neo, Slim, XL, XS from src/site/matching.ts) survive ("+" counts as Plus);
 // - only CPU and GPU names (i5, i7-1335U, Ryzen 7, R7, Core Ultra 7, Apple M2, Snapdragon, Exynos, Dimensity,
 //   Celeron, N100, RTX 4060, GTX, RX 7600, Arc) may leave the name, when the cpu or gpu attribute holds them, and
 //   Windows codes (W11P, Win 11, Windows 11 Pro) when the os attribute is set;
 // - letter-only codes such as IRL may go, and so may numeric shop noise: barcodes (8+ digits), percent off
-//   ("-30%", "20% OFF") and prices with a currency ("EUR 99", "99.99 euro").
+//   ("-30%", "20% OFF") and prices with a currency ("EUR 99", "99.99 euro"). A percent may stay in the name (40%
+//   of a whisky) only when the title has the same one.
 //
 // Attributes: keys outside the category schema, enum values outside the allowed list, numbers that are not finite
 // or out of the schema bounds, and text with HTML or a web address are dropped one by one (recorded); the rest is kept.
 import { MODEL } from '../site/matching.js';
+import { basicBrandStatus, brandName, hasBrand, type BrandStatus } from './brand.js';
 import type { Batch, BatchItem } from './prompt.js';
 import type { AttrSpec, CategorySchema } from './schema.js';
+import { compact, inRun, prep, QUANTITY, tokens, UNIT } from './text.js';
+
+export { prep, tokens };
 
 export const NAME_MIN = 3;
 export const NAME_MAX = 140;
@@ -34,25 +47,15 @@ const EM_DASH = '\u2014';
 const HTML = /[<>]|&(?:[a-z]+|#\d+|#x[0-9a-f]+);/i;
 const CONTROL = /[\u0000-\u001f\u007f]/;
 const URL_LIKE = /https?:|\bwww\.|[\p{L}\p{N}][\p{L}\p{N}_-]*\.[a-z]{2,}\b/iu;
+const URL_LIKE_ALL = /https?:\S*|\bwww\.\S*|[\p{L}\p{N}][\p{L}\p{N}_-]*(?:\.[\p{L}\p{N}_-]+)*\.[a-z]{2,}\b/giu;
+/** Endings that make a dotted word a web address even when the title has it. */
+const WEB_ENDING = /\.(?:com|mt|net|org|eu|uk|shop|store|online|info|biz|io|co|de|it)$/i;
 
-/** Brand values shops use when there is no brand. */
-const PLACEHOLDER_BRANDS = new Set(['generic', 'unbranded', 'nobrand', 'none', 'na', 'other', 'others', 'unknown', 'default', 'oem', 'various']);
-const COMPANY_WORDS = new Set(['inc', 'ltd', 'limited', 'co', 'gmbh', 'srl', 'spa', 'llc', 'plc', 'sa', 'ag', 'bv']);
-
-/** Unit spellings to one unit per class. 512SSD means 512GB. */
-const UNIT: Record<string, string> = {
-  gb: 'gb', ssd: 'gb', hdd: 'gb', emmc: 'gb', gbssd: 'gb', gbhdd: 'gb', gbemmc: 'gb', tb: 'tb', tbssd: 'tb', tbhdd: 'tb', mb: 'mb', kb: 'kb',
-  in: 'in', inch: 'in', inches: 'in',
-  w: 'w', watt: 'w', watts: 'w', kw: 'kw', v: 'v', mah: 'mah', wh: 'wh',
-  l: 'l', ltr: 'l', litre: 'l', liter: 'l', litres: 'l', liters: 'l', ml: 'ml', cl: 'cl', dl: 'dl',
-  kg: 'kg', g: 'g', mg: 'mg', mm: 'mm', cm: 'cm', m: 'm', km: 'km',
-  hz: 'hz', khz: 'khz', mhz: 'mhz', ghz: 'ghz', mp: 'mp', k: 'k', p: 'p', x: 'x', pcs: 'pcs', pc: 'pcs', db: 'db',
-};
 /** Words of 3+ letters a name may use without the shop data having them: unit words only. */
-const ALPHA_ALLOW = new Set(['inch', 'inches', 'ssd', 'hdd', 'emmc', 'litre', 'liter', 'litres', 'liters', 'ltr', 'watt', 'watts', 'mah', 'ghz', 'mhz', 'khz', 'pcs']);
+const ALPHA_ALLOW = new Set(['inch', 'inches', 'ssd', 'hdd', 'emmc', 'liter', 'liters', 'ltr', 'meter', 'meters', 'watt', 'watts', 'mah', 'ghz', 'mhz', 'khz', 'pcs']);
 
-const QUANTITY = /^(\d+(?:\.\d+)?)([a-z]*)$/;
 const BARCODE = /^\d{8,}$/;
+const PERCENT = /(\d+(?:\.\d+)?)\s*%/g;
 
 /** CPU and GPU names that may move into the cpu or gpu attribute. */
 const SPEC_PATTERNS = [
@@ -74,17 +77,6 @@ const SPEC_PATTERNS = [
 const OS_PATTERN = /\bw(?:in(?:dows)?)?\s*(?:7|8|10|11)(?:\s*(?:home|pro|h|p|s))?\b/g;
 const VENDOR_WORDS = /\b(?:intel|core|amd|nvidia|geforce|radeon|apple|qualcomm|mediatek|samsung)\b/g;
 
-/** Lower case, accents off, thousands separators and decimal commas read, inch marks written as "in". */
-export function prep(s: string): string {
-  return s
-    .normalize('NFKD')
-    .replace(/\p{M}+/gu, '')
-    .toLowerCase()
-    .replace(/(\d),(?=\d{3}(?!\d))/g, '$1')
-    .replace(/(\d),(\d)/g, '$1.$2')
-    .replace(/(\d)\s*(?:"|''|\u2032\u2032|\u2033|\u201d|\u201c)/g, '$1in ');
-}
-
 /** Percent off and prices with a currency: shop noise, never required. */
 function stripNoise(t: string): string {
   return t
@@ -93,27 +85,7 @@ function stripNoise(t: string): string {
     .replace(/\d+(?:\.\d+)?\s*(?:\u20ac|\u00a3|\$|\beuros?\b|\beur\b)/g, ' ');
 }
 
-/** Tokens of prepped text; a number followed by a unit word becomes one token ("16 gb" is "16gb"). */
-export function tokens(t: string): string[] {
-  const raw = t
-    .split(/[^\p{L}\p{N}.]+/u)
-    .flatMap((x) => {
-      const u = x.replace(/^\.+|\.+$/g, '');
-      return QUANTITY.test(u) ? [u] : u.split('.');
-    })
-    .filter((x) => x !== '');
-  const out: string[] = [];
-  for (let i = 0; i < raw.length; i++) {
-    if (/^\d+(?:\.\d+)?$/.test(raw[i]) && i + 1 < raw.length && Object.hasOwn(UNIT, raw[i + 1])) {
-      out.push(raw[i] + raw[i + 1]);
-      i++;
-    } else out.push(raw[i]);
-  }
-  return out;
-}
-
 const hasDigit = (t: string) => /[0-9]/.test(t);
-const compact = (s: string) => prep(s).replace(/[^\p{L}\p{N}]+/gu, '');
 
 /** A number with its unit class ("16|gb", "15.6|in", "8|"), or null when the token is not a quantity. */
 function quantity(t: string): string | null {
@@ -130,18 +102,6 @@ function atoms(t: string): string[] {
   return (t.match(/\d+/g) ?? []).map((d) => `${Number.parseInt(d, 10)}|`);
 }
 
-/** Whether target is one token of the list or adjacent tokens written together. */
-function inRun(list: string[], target: string): boolean {
-  for (let i = 0; i < list.length; i++) {
-    let s = '';
-    for (let j = i; j < list.length && s.length < target.length; j++) {
-      s += list[j];
-      if (s === target) return true;
-    }
-  }
-  return false;
-}
-
 type Bag = Map<string, { n: number; text: string }>;
 function bag(list: string[], skip: (t: string) => boolean = () => false): Bag {
   const b: Bag = new Map();
@@ -156,7 +116,14 @@ function bag(list: string[], skip: (t: string) => boolean = () => false): Bag {
   return b;
 }
 
-export type NameSource = { title: string; brand: string | null; variantTitles?: string[]; mpn?: string | null };
+export type NameSource = {
+  title: string;
+  brand: string | null;
+  /** from src/names/brand.ts; when missing, the brand is judged by its own text only (basicBrandStatus) */
+  brandStatus?: BrandStatus;
+  variantTitles?: string[];
+  mpn?: string | null;
+};
 export type NameAnswer = { display_name: string; variant_label: string | null; attrs: Record<string, unknown> };
 export type NameCheck = { ok: true } | { ok: false; reason: string };
 
@@ -165,6 +132,19 @@ function textProblem(s: string): string | null {
   if (s.includes(EM_DASH)) return 'contains an em dash';
   if (CONTROL.test(s)) return 'contains control characters';
   if (URL_LIKE.test(s)) return 'contains a web address';
+  return null;
+}
+
+/** As textProblem, but a dotted word copied from the title (b.box, Go.Up) is no web address unless it ends in a web domain. */
+function nameTextProblem(s: string, title: string): string | null {
+  if (HTML.test(s)) return 'contains HTML';
+  if (s.includes(EM_DASH)) return 'contains an em dash';
+  if (CONTROL.test(s)) return 'contains control characters';
+  const t = prep(title);
+  for (const m of s.matchAll(URL_LIKE_ALL)) {
+    const w = m[0];
+    if (/^(?:https?:|www\.)/i.test(w) || WEB_ENDING.test(w) || !t.includes(prep(w))) return 'contains a web address';
+  }
   return null;
 }
 
@@ -184,32 +164,38 @@ function requiredText(title: string, attrs: Record<string, unknown>): string {
   return t;
 }
 
+const stripPercent = (t: string) => t.replace(/[-+]?\d+(?:\.\d+)?\s*%/g, ' ');
+const percents = (t: string) => [...t.matchAll(PERCENT)].map((m) => Number(m[1]));
+
 /** The safety rule for one clean name (see the top of this file). attrs must already be checked. */
 export function checkName(source: NameSource, a: NameAnswer): NameCheck {
   const name = a.display_name.trim();
   const label = (a.variant_label ?? '').trim();
   if (name.length < NAME_MIN) return { ok: false, reason: 'name too short' };
   if (name.length > NAME_MAX) return { ok: false, reason: 'name too long' };
-  const problem = textProblem(name) ?? (label ? textProblem(label) : null);
+  const problem = nameTextProblem(name, source.title) ?? (label ? nameTextProblem(label, source.title) : null);
   if (problem) return { ok: false, reason: problem };
   if (!/[\p{L}\p{N}]/u.test(name)) return { ok: false, reason: 'name has no letters or digits' };
 
-  const nameToks = tokens(prep(name));
-  const labelToks = tokens(prep(label));
+  const nameToks = tokens(stripPercent(prep(name)));
+  const labelToks = tokens(stripPercent(prep(label)));
   if (label) {
     const ls = new Set(labelToks);
     if (compact(name) === compact(label) || nameToks.every((t) => ls.has(t))) return { ok: false, reason: 'name is only the variant label' };
   }
 
-  if (source.brand) {
-    const words = tokens(prep(source.brand)).filter((w) => !COMPANY_WORDS.has(w));
-    const b = words.join('');
-    if (b !== '' && !PLACEHOLDER_BRANDS.has(b) && !inRun(nameToks, b)) return { ok: false, reason: `brand ${source.brand} missing` };
+  const title = stripNoise(prep(source.title));
+  const status = source.brandStatus ?? basicBrandStatus(source.brand);
+  if (source.brand && status === 'reliable' && !hasBrand(nameToks, source.brand)) return { ok: false, reason: `brand ${source.brand} missing` };
+  if (source.brand && status === 'unreliable' && !hasBrand(tokens(title), source.brand) && (hasBrand(nameToks, source.brand) || hasBrand(labelToks, source.brand))) {
+    return { ok: false, reason: `unreliable brand ${source.brand} added (shop name, distributor or company, not in the title)` };
   }
 
-  // the shop data the name may draw on
-  const title = stripNoise(prep(source.title));
-  const dataLists = [title, ...(source.variantTitles ?? []), source.mpn ?? '', source.brand ?? ''].map((s) => tokens(stripNoise(prep(s))));
+  // the shop data the name may draw on: a reliable brand, a house brand without its company and place words, not an
+  // unreliable brand
+  const brandData = !source.brand ? '' : status === 'reliable' ? source.brand : status === 'house' ? brandName(source.brand) : '';
+  const dataTexts = [source.title, ...(source.variantTitles ?? []), source.mpn ?? '', brandData];
+  const dataLists = dataTexts.map((s) => tokens(stripNoise(prep(s))));
   const vocab = new Set<string>();
   for (const list of dataLists) {
     for (const t of list) {
@@ -217,22 +203,52 @@ export function checkName(source: NameSource, a: NameAnswer): NameCheck {
       for (const run of t.match(/\p{L}+/gu) ?? []) vocab.add(run);
     }
   }
+  const rawData = dataTexts.join(' ');
+  if (rawData.includes('&')) vocab.add('and');
+  if (rawData.includes('+')) vocab.add('plus');
+  if (/\bw\//i.test(rawData)) vocab.add('with');
+
+  /** Indexes of tokens that are shop data written apart (WiFi for Wi-Fi) or together (Hotpoint Ariston for HOTPOINTARISTON). */
+  const joined = (list: string[]): Set<number> => {
+    const out = new Set<number>();
+    for (let i = 0; i < list.length; i++) {
+      if (dataLists.some((l) => inRun(l, list[i]))) out.add(i);
+      let s = list[i];
+      for (let j = i + 1; j < list.length && s.length < 60; j++) {
+        s += list[j];
+        if (vocab.has(s)) for (let k = i; k <= j; k++) out.add(k);
+      }
+    }
+    return out;
+  };
+  const isNew = (t: string) => /^\p{L}{3,}$/u.test(t) && !vocab.has(t) && !ALPHA_ALLOW.has(t);
+  const invented: string[] = [];
+  for (const list of [nameToks, labelToks]) {
+    const ok = joined(list);
+    list.forEach((t, i) => {
+      if (isNew(t) && !ok.has(i) && !invented.includes(t)) invented.push(t);
+    });
+  }
+
   const kept = [nameToks, labelToks];
   const keptAll = [...nameToks, ...labelToks];
   const keptSet = new Set(keptAll);
-
-  const invented = [...new Set(keptAll.filter((t) => /^\p{L}{3,}$/u.test(t) && !vocab.has(t) && !ALPHA_ALLOW.has(t)))];
+  if (/\+/.test(`${name} ${label}`)) keptSet.add('plus');
 
   const required = tokens(requiredText(title, a.attrs));
   const lost: string[] = [];
+  // a model word also survives inside the title's words written together (Air of "Air Fryer" in Airfryer)
+  const inJoined = (t: string) => keptAll.some((k) => k !== t && (k.startsWith(t) || k.endsWith(t)) && dataLists.some((l) => inRun(l, k)));
   for (const t of new Set(required)) {
-    if (MODEL.has(t) && !keptSet.has(t)) lost.push(t);
+    if (MODEL.has(t) && !keptSet.has(t) && !inJoined(t)) lost.push(t);
     else if (isCode(t) && !BARCODE.test(t) && !kept.some((l) => inRun(l, t))) lost.push(t);
   }
   const newTokens: string[] = [];
   for (const t of new Set(keptAll)) {
     if (isCode(t) && !dataLists.some((l) => inRun(l, t))) newTokens.push(t);
   }
+  const dataPercents = new Set(percents(prep(rawData)));
+  for (const p of percents(prep(`${name} ${label}`))) if (!dataPercents.has(p)) newTokens.push(`${p}%`);
 
   const need = bag(required, (t) => BARCODE.test(t));
   const allowed: Bag = new Map();
@@ -313,6 +329,7 @@ export type ItemResult = {
   dropped: string[];
   /** what Claude proposed, for the report */
   proposedName: string | null;
+  proposedLabel: string | null;
 };
 
 type RawAnswer = { key?: unknown; display_name?: unknown; variant_label?: unknown; attrs?: unknown };
@@ -333,20 +350,26 @@ export function checkBatch(batch: Batch, output: unknown, schema: CategorySchema
   }
 
   const results = batch.items.map((item): ItemResult => {
-    const reject = (reason: string, proposedName: string | null = null, dropped: string[] = []): ItemResult => ({
-      item, status: 'rejected', reason, displayName: null, variantLabel: null, attrs: {}, dropped, proposedName,
+    const reject = (reason: string, proposedName: string | null = null, dropped: string[] = [], proposedLabel: string | null = null): ItemResult => ({
+      item, status: 'rejected', reason, displayName: null, variantLabel: null, attrs: {}, dropped, proposedName, proposedLabel,
     });
     const a = byKey.get(item.key);
     if (!a) return reject('missing from answer');
     if (typeof a.display_name !== 'string') return reject('no display name');
     const name = tidy(a.display_name);
     const label = typeof a.variant_label === 'string' && a.variant_label.trim() !== '' ? tidy(a.variant_label) : null;
-    if (label !== null && label.length > NAME_MAX) return reject('variant label too long', name);
+    if (label !== null && label.length > NAME_MAX) return reject('variant label too long', name, [], label);
     const { attrs, dropped } = checkAttrs(a.attrs, schema);
     const g = item.group;
-    const check = checkName({ title: g.title, brand: g.brand, variantTitles: g.variantTitles, mpn: g.mpn }, { display_name: name, variant_label: label, attrs });
-    if (!check.ok) return reject(check.reason, name, dropped);
-    return { item, status: 'ok', reason: null, displayName: name, variantLabel: label, attrs, dropped, proposedName: name };
+    const brandStatus = g.brandStatus ?? basicBrandStatus(g.brand);
+    // an unreliable brand (shop name, distributor, company) is no maker for the brand attribute either
+    if (brandStatus === 'unreliable' && typeof attrs.brand === 'string' && g.brand && compact(attrs.brand) === compact(g.brand) && !hasBrand(tokens(prep(g.title)), g.brand)) {
+      delete attrs.brand;
+      dropped.push('brand (unreliable brand, not the maker)');
+    }
+    const check = checkName({ title: g.title, brand: g.brand, brandStatus, variantTitles: g.variantTitles, mpn: g.mpn }, { display_name: name, variant_label: label, attrs });
+    if (!check.ok) return reject(check.reason, name, dropped, label);
+    return { item, status: 'ok', reason: null, displayName: name, variantLabel: label, attrs, dropped, proposedName: name, proposedLabel: label };
   });
   return { results, unknownKeys };
 }

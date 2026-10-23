@@ -15,7 +15,7 @@ const summary: RunSummary = {
 };
 
 const rows: ReportRow[] = [
-  { category: 'laptops', shop: 'scan', sourceTitle: 'LENOVO <script>alert(1)</script>', name: 'Lenovo ThinkBook 16 G6', variantLabel: null, attrs: { ram_gb: 16, colour: ['black'] }, dropped: [], status: 'ok', reason: null },
+  { category: 'laptops', shop: 'scan', sourceTitle: 'LENOVO <script>alert(1)</script>', name: 'Lenovo ThinkBook 16 G6', variantLabel: null, attrs: { ram_gb: 16, colour: ['black'] }, dropped: [], status: 'ok', reason: null, shopId: 7, groupKey: 'g-1', brand: 'Lenovo', brandStatus: 'reliable' },
   { category: 'toys', shop: 'toyshop', sourceTitle: '=HYPERLINK("x")', name: 'LEGO "Technic" 42115', variantLabel: 'Default', attrs: {}, dropped: ['flavour (not in schema)'], status: 'rejected', reason: 'lost tokens: 42115' },
   { category: 'toys', shop: 'toyshop', sourceTitle: 'Barbie, Dream House', name: null, variantLabel: null, attrs: {}, dropped: [], status: 'failed', reason: 'batch failed' },
 ];
@@ -51,7 +51,9 @@ describe('writeReport', () => {
     expect(html).not.toContain('\u2014');
 
     const csv = await readFile(files.csv, 'utf8');
-    expect(csv.split('\r\n')[0].replace(/^\uFEFF/, '')).toBe('category,shop,source_title,clean_name,variant_label,attributes,dropped_attributes,status,reason');
+    expect(csv.split('\r\n')[0].replace(/^\uFEFF/, '')).toBe('category,shop,source_title,clean_name,variant_label,attributes,dropped_attributes,status,reason,shop_id,group_key,brand,brand_status');
+    // the group ids let a later run pick exactly these groups (--sample-from)
+    expect(csv.split('\r\n')[1]).toMatch(/,7,g-1,Lenovo,reliable$/);
   });
 });
 

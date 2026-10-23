@@ -84,7 +84,7 @@ function Rules() {
     <div className="flex flex-col gap-2">
       <h3 className="font-semibold">Built-in rules (read-only)</h3>
       <p className="text-sm text-muted-foreground">
-        Tried in this order on the shop's category path, then tags, then the title. The first match wins; overrides are checked before all rules.
+        Tried in this order on the shop's category path, then tags, then the title. The title is used only for shops without a specialist category (electronics shops); other shops fall back to their own category. Rules marked "title first" are tried before the path. The first match wins; overrides are checked before all rules.
       </p>
       <div className="overflow-x-auto">
         <table className="w-full text-left text-sm">
@@ -102,13 +102,13 @@ function Rules() {
             </tr>
           </thead>
           <tbody>
-            {CATEGORY_RULES.map((r) => (
-              <tr key={r.slug} className="border-b border-line align-top">
+            {CATEGORY_RULES.map((r, i) => (
+              <tr key={`${i}-${r.slug}`} className="border-b border-line align-top">
                 <td className="py-2 pr-3 whitespace-nowrap">{categoryName(r.slug)}</td>
                 <td className="py-2 pr-3">
                   <code className="text-xs break-all">{r.pattern.source}</code>
                 </td>
-                <td className="py-2">{r.on.join(', ')}</td>
+                <td className="py-2">{r.first ? 'title first' : r.on.join(', ')}</td>
               </tr>
             ))}
           </tbody>

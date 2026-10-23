@@ -3,6 +3,7 @@ import { readdir, readFile } from 'node:fs/promises';
 import path from 'node:path';
 import postgres from 'postgres';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { brandStatus, loadBrandContext } from '../../src/names/brand.js';
 import { changedGroups, loadGroups, titleHash } from '../../src/names/select.js';
 import { finishRun, saveResults, startRun } from '../../src/names/store.js';
 
@@ -36,13 +37,14 @@ describe.skipIf(!process.env.SITE_BUILD_TEST_DB)('name normaliser on PGlite', ()
     shopA = await shop('a');
     const hidden = await shop('hidden', true);
 
-    const product = async (shopId: number, externalId: string, parent: string | null, title: string, variant: string | null) =>
+    const product = async (shopId: number, externalId: string, parent: string | null, title: string, variant: string | null, path = 'Computers > Laptops') =>
       (await sql<{ id: string }[]>`
         insert into products (shop_id, external_id, parent_external_id, title, variant_title, category_path)
-        values (${shopId}, ${externalId}, ${parent}, ${title}, ${variant}, 'Computers > Laptops') returning id`)[0].id;
+        values (${shopId}, ${externalId}, ${parent}, ${title}, ${variant}, ${path}) returning id`)[0].id;
     const p1 = await product(shopA, 'P1-8', 'P1', 'Lenovo IdeaPad Slim 5', '8GB');
     await product(shopA, 'P1-16', 'P1', 'Lenovo IdeaPad Slim 5', '16GB');
-    const k = await product(shopA, 'K1', null, 'Kettle 1.7L', null);
+    const k = await product(shopA, 'K1', null, 'Kettle 1.7L', null, 'Kitchen > Kettles');
+    const s1 = await product(shopA, 'S1', null, 'Kalkara Champagne Sunglasses', null, 'Type_Sunglasses');
     const h = await product(hidden, 'H1', null, 'Hidden', null);
 
     const sp = async (shopId: number, key: string, title: string, category: string, rep: string, ageDays = 0) =>
@@ -50,6 +52,8 @@ describe.skipIf(!process.env.SITE_BUILD_TEST_DB)('name normaliser on PGlite', ()
           values (${shopId}, ${key}, ${title}, 'Lenovo', ${category}, ${rep}, 'none', now() - ${`${ageDays} days`}::interval)`;
     await sp(shopA, 'P1', 'Lenovo IdeaPad Slim 5', 'laptops', p1);
     await sp(shopA, 'K1', 'Kettle 1.7L', 'appliances', k);
+    // stored under drinks by the old rules; today's rules file it under fashion
+    await sp(shopA, 'S1', 'Kalkara Champagne Sunglasses', 'drinks', s1);
     await sp(shopA, 'OLD', 'Old', 'appliances', k, 5);
     await sp(hidden, 'H1', 'Hidden', 'other', h);
   });
@@ -58,13 +62,29 @@ describe.skipIf(!process.env.SITE_BUILD_TEST_DB)('name normaliser on PGlite', ()
 
   it('loads fresh groups of visible shops with their variant titles and category path', async () => {
     const groups = await loadGroups(sql, {});
-    expect(groups.map((g) => g.groupKey).sort()).toEqual(['K1', 'P1']);
+    expect(groups.map((g) => g.groupKey).sort()).toEqual(['K1', 'P1', 'S1']);
     const p1 = groups.find((g) => g.groupKey === 'P1')!;
     expect(p1.variantTitles.sort()).toEqual(['16GB', '8GB']);
     expect(p1.categoryPath).toBe('Computers > Laptops');
     expect(p1.shopSlug).toBe('a');
     expect(p1.storedHash).toBeNull();
     expect((await loadGroups(sql, { categories: ['laptops'] })).map((g) => g.groupKey)).toEqual(['P1']);
+  });
+
+  it('recomputes the category with the current rules and keeps the stored one', async () => {
+    const s1 = (await loadGroups(sql, {})).find((g) => g.groupKey === 'S1')!;
+    expect(s1.category).toBe('fashion');
+    expect(s1.storedCategory).toBe('drinks');
+    expect((await loadGroups(sql, { categories: ['drinks'] })).map((g) => g.groupKey)).toEqual([]);
+    expect((await loadGroups(sql, { categories: ['fashion'] })).map((g) => g.groupKey)).toEqual(['S1']);
+  });
+
+  it('loads the brand context: shops and the distributor statistic, in one query', async () => {
+    const ctx = await loadBrandContext(sql);
+    expect(ctx.shops.map((s) => s.slug).sort()).toEqual(['a', 'hidden']);
+    expect(ctx.distributors.size).toBe(0);
+    expect(brandStatus('Lenovo', shopA, ctx).status).toBe('reliable');
+    expect(brandStatus('Lenovo Malta Ltd', shopA, ctx).status).toBe('unreliable');
   });
 
   it('records a run, upserts product_names and then skips unchanged groups', async () => {

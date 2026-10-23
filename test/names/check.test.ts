@@ -164,6 +164,117 @@ describe('checkName: the safety rule', () => {
   });
 });
 
+// Real false rejects of the pilot runs out/names/dry-20261022-222157-haiku.csv, -222802-haiku.csv and -223558-sonnet.csv.
+describe('checkName: unreliable brands (shop names, domains, distributors, companies)', () => {
+  const ok = (r: ReturnType<typeof checkName>) => expect(r).toEqual({ ok: true });
+
+  it('does not require a shop name, domain or company as the brand', () => {
+    ok(checkName({ title: 'Far Cry Instincts (Xbox) (Pre-owned)', brand: 'GameStore.mt', brandStatus: 'unreliable' }, name('Far Cry Instincts (Xbox)')));
+    ok(checkName({ title: 'LAURA BIAGIOTTI WOMEN LOAFERS', brand: 'OKFASHION.COM.MT', brandStatus: 'unreliable' }, name('Laura Biagiotti Women Loafers')));
+    ok(checkName({ title: '15 Denier Matt Sheer Hold-Ups', brand: 'Calzedonia Malta', brandStatus: 'unreliable' }, name('15 Denier Matt Sheer Hold-Ups')));
+    ok(checkName({ title: '46834 Frozen 16"', brand: 'Toysmalta', brandStatus: 'unreliable' }, name('46834 Frozen 16"')));
+    ok(checkName({ title: 'DGH Large Ruled Notebook Textile Cover Ref :TCC026TCAE7UB003', brand: 'Sterling Holdings', brandStatus: 'unreliable' }, name('DGH Large Ruled Notebook Textile Cover Ref TCC026TCAE7UB003')));
+    ok(checkName({ title: 'Childs Farm Sun Cream 50+ SPF Fragrance-Free 200ml', brand: 'M&Z', brandStatus: 'unreliable' }, name('Childs Farm Sun Cream 50+ SPF Fragrance-Free 200ml')));
+    ok(checkName({ title: 'Addo Games Unique Boutique My First Makeup Set', brand: 'ADDO PLAY LTD', brandStatus: 'unreliable' }, name('Addo Games Unique Boutique My First Makeup Set')));
+    ok(checkName({ title: 'Typhur Sync One 1-Probe Wireless Meat Thermometer', brand: 'iCentre', brandStatus: 'unreliable' }, name('Typhur Sync One 1-Probe Wireless Meat Thermometer')));
+    ok(checkName({ title: 'Striped Baby Yoda slippers', brand: '4993716' }, name('Striped Baby Yoda Slippers')));
+  });
+
+  it('rejects a name that adds an unreliable brand the title does not have (Tezenis, Carnival, Atmosphera, M&Z)', () => {
+    const tez = checkName({ title: 'Canvas Beauty Pochette with Zip', brand: 'Tezenis Malta', brandStatus: 'unreliable' }, name('Tezenis Canvas Beauty Pochette with Zip'));
+    expect(tez.ok).toBe(false);
+    expect(reasonOf(tez)).toMatch(/tezenis/i);
+    expect(checkName({ title: '63708 Little Red Riding Hood', brand: 'Carnival S.R.L.', brandStatus: 'unreliable' }, name('Carnival 63708 Little Red Riding Hood')).ok).toBe(false);
+    ok(checkName({ title: '63708 Little Red Riding Hood', brand: 'Carnival S.R.L.', brandStatus: 'unreliable' }, name('63708 Little Red Riding Hood')));
+    const tks = { title: 'TKS \u2013 Luca Tea Tree Essential Oil 30ml', brand: 'Atmosphera', brandStatus: 'unreliable' as const };
+    expect(checkName(tks, name('Atmosphera Luca Tea Tree Essential Oil 30ml')).ok).toBe(false);
+    ok(checkName(tks, name('TKS Luca Tea Tree Essential Oil 30ml')));
+    const mz = checkName({ title: 'Childs Farm Nappy Cream 100ml', brand: 'M&Z', brandStatus: 'unreliable' }, name('M&Z Childs Farm Nappy Cream 100ml'));
+    expect(mz.ok).toBe(false);
+    expect(reasonOf(mz)).toMatch(/M&Z/);
+  });
+
+  it('lets a house brand (the shop sells only its own brand) be added without the place word, and not be required', () => {
+    const src = { title: '15 Denier Matt Sheer Hold-Ups', brand: 'Calzedonia Malta', brandStatus: 'house' as const };
+    ok(checkName(src, name('Calzedonia 15 Denier Matt Sheer Hold-Ups')));
+    ok(checkName(src, name('15 Denier Matt Sheer Hold-Ups')));
+    expect(reasonOf(checkName(src, name('Calzedonia Malta 15 Denier Matt Sheer Hold-Ups')))).toBe('invented words: malta');
+    ok(checkName({ title: 'Securipak 2.0 Laptop Backpack 15.6" - Light Sage', brand: 'Samsonite', brandStatus: 'house' }, name('Samsonite Securipak 2.0 Laptop Backpack 15.6"', {}, 'Light Sage')));
+  });
+
+  it('still rejects a real web address, also the shop domain the model adds', () => {
+    const r = checkName({ title: 'TV Superstars (PS3) (Pre-owned)', brand: 'GameStore.mt', brandStatus: 'unreliable' }, name('GameStore.mt TV Superstars (PS3) (Pre-owned)'));
+    expect(reasonOf(r)).toContain('web address');
+  });
+
+  it('requires a reliable brand, and its first word is enough for a brand with a sub-label (Adidas Performance, Superior Electronics, VTECH KIDS)', () => {
+    const adidas = { title: 'Train Essentials Train Cotton 3-Stripes Pacer Shorts', brand: 'Adidas Performance', brandStatus: 'reliable' as const };
+    ok(checkName(adidas, name('Adidas Train Essentials Train Cotton 3-Stripes Pacer Shorts')));
+    expect(reasonOf(checkName(adidas, name('Train Essentials Train Cotton 3-Stripes Pacer Shorts')))).toMatch(/brand Adidas Performance missing/);
+    ok(checkName({ title: 'Superior  Tower Slim \u2013 Support to stack washing machine and dryer \u2013 SUPSLW002', brand: 'Superior Electronics', brandStatus: 'reliable' }, name('Superior Tower Slim Support to Stack Washing Machine and Dryer SUPSLW002')));
+    ok(checkName({ title: 'Pop-A-Block Truck', brand: 'VTECH KIDS', brandStatus: 'reliable' }, name('VTech Pop-A-Block Truck')));
+    ok(checkName({ title: 'Fee Brothers - Old Fashion Aromatic Bitters 15cl', brand: 'Fee Bros', brandStatus: 'reliable' }, name('Fee Brothers Old Fashion Aromatic Bitters 15cl')));
+  });
+
+  it('accepts the initials of a brand that the title uses (M&S for Marks & Spencer)', () => {
+    ok(checkName({ title: 'M&S Food Microwave Chow Mein Noodle Box 300g', brand: 'Marks & Spencer', brandStatus: 'reliable' }, name('M&S Food Microwave Chow Mein Noodle Box 300g')));
+  });
+
+  it('without a status, judges the brand by its own text only (company words, web address, numbers)', () => {
+    ok(checkName({ title: 'Mummy Bear and Babies Figurine REF: 1009290', brand: 'Sterling Holdings' }, name('Mummy Bear and Babies Figurine 1009290')));
+    expect(checkName({ title: 'Dell Gaming Monitor 27"', brand: 'LG' }, name('Dell Gaming Monitor 27"')).ok).toBe(false);
+  });
+});
+
+describe('checkName: spelling variants, joined and split words, symbols', () => {
+  const ok = (r: ReturnType<typeof checkName>) => expect(r).toEqual({ ok: true });
+
+  it('counts UK and US spellings as the same word', () => {
+    ok(checkName({ title: 'LEXIBOOK Multicolor Magic Magnetic Nintendo Super Mario Drawing Board', brand: 'Lexibook' }, name('Lexibook Magic Magnetic Nintendo Super Mario Drawing Board', {}, 'Multicolour')));
+    ok(checkName({ title: 'APPLE WATCH SE 3 GPS 44MM MIDNIGHT ALUMINIUM CASE WITH MIDNIGHT SPORT BAND - S/M', brand: 'Apple' }, name('Apple Watch SE 3 GPS 44mm Midnight Aluminum Case with Midnight Sport Band', {}, 'S/M')));
+    ok(checkName({ title: 'Apple iPad Mini (7th Gen) Cellular 8.3 inch 256GB Space Grey', brand: 'Apple' }, name('Apple iPad Mini (7th Gen) Cellular 8.3" 256GB', {}, 'Space Gray')));
+    ok(checkName({ title: 'Philips Kettle 1.7 Litre Centre Base', brand: 'Philips' }, name('Philips Kettle 1.7 Liter Center Base')));
+    ok(checkName({ title: 'T\u2019nB Jack 3.5mm Coiled Cable 1.8 metre', brand: "T'nB" }, name('T\u2019nB Jack 3.5mm Coiled Cable 1.8m')));
+  });
+
+  it('accepts words joined or split differently from the title (HOTPOINTARISTON, Wi-Fi)', () => {
+    ok(checkName({ title: 'HOTPOINTARISTON HAFC8-TIA22W 335Ltr Free-Standing Fridge-Freezer', brand: 'HOTPOINTARISTON' }, name('Hotpoint Ariston HAFC8-TIA22W 335Ltr Free-Standing Fridge-Freezer')));
+    ok(checkName({ title: 'TP-Link 3-Piece Set WiFi Powerline Kit 300Mbps \u2013 TLWPA4220X3', brand: 'TP-Link' }, name('TP-Link 3-Piece Set Wi-Fi Powerline Kit 300Mbps TLWPA4220X3')));
+    ok(checkName({ title: 'Reolink 4K 8MP Wi-Fi 6 IP Camera with Colour Night Vision \u2013 W330', brand: 'Reolink' }, name('Reolink 4K 8MP WiFi 6 IP Camera with Color Night Vision W330')));
+    // joining the title's words is fine; a word the data does not have is still invented
+    expect(checkName({ title: 'Severin Air Fryer 7L', brand: 'Severin' }, name('Severin Airfryer 7L')).ok).toBe(true);
+    expect(reasonOf(checkName({ title: 'Severin Air Fryer 7L', brand: 'Severin' }, name('Severin Airfryer Pro 7L')))).toBe('invented words: pro');
+  });
+
+  it('treats & as and, + as plus and w/ as with', () => {
+    ok(checkName({ title: 'Trevi IP68 Smart Fitness Watch for iOS & Android Black \u2013 TFIT320BK', brand: 'Trevi' }, name('Trevi IP68 Smart Fitness Watch for iOS and Android TFIT320BK', {}, 'Black')));
+    ok(checkName({ title: 'JBL Tune 500 Wired Headphones + Mic White \u2013 T500WHT', brand: 'JBL' }, name('JBL Tune 500 Wired Headphones Plus Mic T500WHT', {}, 'White')));
+    ok(checkName({ title: 'Samsung Galaxy S24 Plus 256GB', brand: 'Samsung' }, name('Samsung Galaxy S24+ 256GB')));
+    ok(checkName({ title: 'Philips SHC5200M2 Black Wireless Headphones w/ Transmitter', brand: 'Philips' }, name('Philips SHC5200M2 Wireless Headphones with Transmitter', {}, 'Black')));
+    ok(checkName({ title: 'Xiaomi Watch S5 46mm Ceramic Blue w/Leather Strap Smartwatch', brand: 'Xiaomi' }, name('Xiaomi Watch S5 46mm Ceramic Blue with Leather Strap Smartwatch')));
+  });
+
+  it('reads trademark signs as nothing, not as TM (DualSense\u2122, UltraGear\u2122)', () => {
+    ok(checkName({ title: 'Sony DualSense\u2122 Wireless Controller', brand: 'Sony' }, name('Sony DualSense Wireless Controller')));
+    ok(checkName({ title: 'LG 32\u2033 UltraGear\u2122 QHD 180Hz Monitor', brand: 'LG' }, name('LG 32" UltraGear QHD 180Hz Monitor')));
+    ok(checkName({ title: 'CRY BABY\u00ae CUSTOM BADASS\u2122 DUAL-INDUCTOR EDITION WAH', brand: null }, name('Cry Baby Custom Badass Dual-Inductor Edition Wah')));
+  });
+
+  it('reads 40\u00d730 cm as 40x30cm and keeps a percent the title has (40% ABV), but not a new one', () => {
+    ok(checkName({ title: 'EDM BBQ Mat 40\u00d730 cm', brand: 'EDM' }, name('EDM BBQ Mat 40x30cm')));
+    ok(checkName({ title: "Ballantine's 10 Years Old 40% 1Ltr", brand: "Ballantine's" }, name("Ballantine's 10 Years Old 40% 1L")));
+    expect(checkName({ title: "Ballantine's 10 Years Old 40% 1Ltr", brand: "Ballantine's" }, name("Ballantine's 10 Years Old 43% 1L")).ok).toBe(false);
+  });
+
+  it('accepts a dotted brand or product spelling copied from the title (b.box, Go.Up, Glas.tR), never a shop domain', () => {
+    ok(checkName({ title: 'b.box spoon twin pack - blue/green', brand: 'b.box' }, name('b.box Spoon Twin Pack', {}, 'Blue/Green')));
+    ok(checkName({ title: 'Globber Helmet Go.Up XXS/XS Pastel Blue', brand: 'Globber' }, name('Globber Helmet Go.Up', {}, 'XXS/XS, Pastel Blue')));
+    ok(checkName({ title: 'Spigen Glas.tR Ez Fit Screen Protector iPhone Air Clear 2-pk', brand: 'Spigen' }, name('Spigen Glas.tR Ez Fit Screen Protector iPhone Air 2-pk', {}, 'Clear')));
+    expect(reasonOf(checkName({ title: 'b.box spoon twin pack', brand: 'b.box' }, name('b.box Spoon vanillamummy.com')))).toContain('web address');
+    expect(reasonOf(checkName({ title: 'Philips Kettle 1.7L shop.com.mt', brand: 'Philips' }, name('Philips Kettle 1.7L shop.com.mt')))).toContain('web address');
+  });
+});
+
 describe('checkAttrs', () => {
   it('drops keys outside the category schema and records them', () => {
     const r = checkAttrs({ ram_gb: 16, flavour: 'mint' }, laptops);
@@ -232,5 +343,26 @@ describe('checkBatch', () => {
     expect(r.results[0].proposedName).toBe('Lenovo ThinkBook');
     expect(r.results[1].status).toBe('ok');
     expect(r.results[1].dropped).toEqual(['bogus (not in schema)']);
+  });
+
+  it('uses the group brand status and drops an unreliable brand from attrs; keeps the proposed variant label of a rejected item', () => {
+    const fashion = schemas.fashion;
+    const b: Batch = {
+      category: 'fashion',
+      items: [
+        { key: '1', group: group({ category: 'fashion', title: '15 Denier Matt Sheer Hold-Ups', brand: 'Calzedonia Malta', brandStatus: 'unreliable' }) },
+        { key: '2', group: group({ category: 'fashion', groupKey: 'b', title: 'Canvas Beauty Pochette with Zip', brand: 'Tezenis Malta', brandStatus: 'unreliable' }) },
+      ],
+    };
+    const out = { items: [
+      { key: '1', display_name: '15 Denier Matt Sheer Hold-Ups', variant_label: null, attrs: { brand: 'Calzedonia Malta' } },
+      { key: '2', display_name: 'Canvas Beauty Pochette with Zip', variant_label: 'tezenismalta.com', attrs: {} },
+    ] };
+    const r = checkBatch(b, out, fashion);
+    expect(r.results[0].status).toBe('ok');
+    expect(r.results[0].attrs).toEqual({});
+    expect(r.results[0].dropped).toEqual(['brand (unreliable brand, not the maker)']);
+    expect(r.results[1].status).toBe('rejected');
+    expect(r.results[1].proposedLabel).toBe('tezenismalta.com');
   });
 });

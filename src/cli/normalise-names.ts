@@ -1,11 +1,15 @@
-// pnpm normalise-names --model haiku [--effort low] [--pilot] [--limit 500] [--category laptops ...] [--batch-size 40]
-//   [--parallel 2] [--max-batches N] [--dry-run] [--seed pilot] [--timeout 300] [--save-raw]
+// pnpm normalise-names --model haiku [--effort low] [--pilot] [--limit 500] [--sample-from out/names/<run>.csv]
+//   [--category laptops ...] [--batch-size 40] [--parallel 2] [--max-batches N] [--dry-run] [--seed pilot] [--timeout 300]
+//   [--save-raw]
 // Sends batches of one site category's product groups to Claude Code (claude -p, on the owner's own login) for clean
 // names and the category's attributes, checks every answer (src/names/check.ts) and writes a report to out/names/.
 // Reads with DASHBOARD_DATABASE_URL (read-only role). Without --dry-run, writes product_names and name_runs with
-// DATABASE_URL; such a run needs --pilot or --max-batches. Ctrl+C stops after the running batches; a second Ctrl+C
-// quits at once and kills the running claude processes with everything they started.
-import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
+// DATABASE_URL; such a run needs --pilot, --sample-from or --max-batches. Ctrl+C stops after the running batches; a
+// second Ctrl+C quits at once and kills the running claude processes with everything they started.
+// --sample-from takes exactly the groups of an earlier run's CSV (by shop_id and group_key, or by shop and title for
+// CSVs written before those columns), new or changed or not. Every group's category is today's categorize(), not the
+// stored site_products.category; the run prints how many sample groups changed category against the CSV.
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { parseArgs } from 'node:util';
@@ -13,13 +17,15 @@ import postgres from 'postgres';
 import { closeDb, db } from '../db.js';
 import { env } from '../env.js';
 import { SITE_CATEGORIES } from '../site/categories.js';
+import { brandStatus, loadBrandContext } from '../names/brand.js';
 import { checkBatch } from '../names/check.js';
 import { addUsage, callClaude, killAllChildren, NO_USAGE, spawnRunner, type Usage } from '../names/claude.js';
 import { checkRunScope, parseEffort } from '../names/options.js';
 import { makeBatches, systemPrompt, userMessage, type Batch } from '../names/prompt.js';
 import { writeReport, type BatchStat, type ReportRow } from '../names/report.js';
 import { answerJsonSchema, loadAttributeSchemas } from '../names/schema.js';
-import { changedGroups, loadGroups, pilotSample } from '../names/select.js';
+import { pickSample, readSampleCsv } from '../names/sample.js';
+import { changedGroups, loadGroups, pilotSample, type GroupInput } from '../names/select.js';
 import { finishRun, saveResults, startRun } from '../names/store.js';
 
 const { values } = parseArgs({
@@ -28,6 +34,7 @@ const { values } = parseArgs({
     effort: { type: 'string' },
     pilot: { type: 'boolean', default: false },
     limit: { type: 'string', default: '500' },
+    'sample-from': { type: 'string' },
     category: { type: 'string', multiple: true },
     'batch-size': { type: 'string', default: '40' },
     parallel: { type: 'string', default: '2' },
@@ -62,6 +69,9 @@ function interleave(batches: Batch[]): Batch[] {
   return out;
 }
 
+/** The report columns that identify a group and its brand. */
+const ids = (g: GroupInput) => ({ shopId: g.shopId, groupKey: g.groupKey, brand: g.brand, brandStatus: g.brandStatus });
+
 const stamp = () => new Date().toISOString().replace(/[-:]/g, '').replace(/\..*$/, '').replace('T', '-');
 
 async function main() {
@@ -69,7 +79,9 @@ async function main() {
   if (!model) throw new Error('--model is required (for example haiku, sonnet, opus)');
   if (!/^[A-Za-z0-9._\-[\]]+$/.test(model)) throw new Error(`--model has unexpected characters: ${model}`);
   const effort = parseEffort(values.effort);
-  const pilot = values.pilot;
+  const sampleFrom = values['sample-from'];
+  // a sample run is bounded like a pilot
+  const pilot = values.pilot || sampleFrom !== undefined;
   const dryRun = values['dry-run'];
   const limit = intOption('limit', values.limit, 1, 100000);
   const batchSize = intOption('batch-size', values['batch-size'], 1, 100);
@@ -83,14 +95,37 @@ async function main() {
 
   const schemas = await loadAttributeSchemas();
   const ro = postgres(env('DASHBOARD_DATABASE_URL'), { max: 2, idle_timeout: 20, connect_timeout: 30, onnotice: () => {} });
-  let groupsAll: Awaited<ReturnType<typeof loadGroups>>;
+  const sampleText = sampleFrom === undefined ? null : await readFile(sampleFrom, 'utf8');
+  let groupsAll: GroupInput[];
+  let brandCtx: Awaited<ReturnType<typeof loadBrandContext>>;
   try {
     groupsAll = await loadGroups(ro, { categories });
+    brandCtx = await loadBrandContext(ro);
   } finally {
     await ro.end({ timeout: 5 });
   }
+  const recategorised = groupsAll.filter((g) => g.storedCategory !== undefined && g.storedCategory !== g.category).length;
+  console.log(`normalise-names: ${recategorised} of ${groupsAll.length} fresh groups have another category with today's rules than the stored one`);
   const candidates = changedGroups(groupsAll);
-  const chosen = pilot ? pilotSample(candidates, limit, values.seed) : candidates;
+  let chosen: GroupInput[];
+  let sampleNote: string | undefined;
+  if (sampleText !== null) {
+    const rows = readSampleCsv(sampleText);
+    const pick = pickSample(groupsAll, rows);
+    chosen = pick.chosen;
+    const moves = new Map<string, number>();
+    for (const c of pick.changedCategory) moves.set(`${c.from} -> ${c.to}`, (moves.get(`${c.from} -> ${c.to}`) ?? 0) + 1);
+    sampleNote = `${sampleFrom}: ${pick.matched} of ${rows.length} groups matched (${pick.byIds} by shop_id and group_key, ` +
+      `${pick.matched - pick.byIds} by shop and title); ${pick.changedCategory.length} changed category against the CSV`;
+    console.log(`normalise-names: sample ${sampleNote}`);
+    if (moves.size > 0) console.log(`  category changes: ${[...moves].sort((a, b) => b[1] - a[1]).map(([k, n]) => `${k} ${n}`).join(', ')}`);
+    if (pick.missing.length > 0) console.log(`  not found: ${pick.missing.slice(0, 10).map((m) => `${m.shop} "${m.sourceTitle}"`).join('; ')}${pick.missing.length > 10 ? ' ...' : ''}`);
+  } else chosen = values.pilot ? pilotSample(candidates, limit, values.seed) : candidates;
+  for (const g of chosen) {
+    const v = brandStatus(g.brand, g.shopId, brandCtx);
+    g.brandStatus = v.status;
+    g.brandNote = v.why;
+  }
   const batches = interleave(makeBatches(chosen, batchSize)).slice(0, maxBatches ?? Infinity);
   const runCats = [...new Set(batches.map((b) => b.category))];
   const groupCount = batches.reduce((n, b) => n + b.items.length, 0);
@@ -160,7 +195,10 @@ async function main() {
     if (!call.ok) {
       failedBatches++;
       for (const { group } of batch.items) {
-        rows.push({ category: batch.category, shop: group.shopSlug, sourceTitle: group.title, name: null, variantLabel: null, attrs: {}, dropped: [], status: 'failed', reason: call.error ?? 'batch failed' });
+        rows.push({
+          category: batch.category, shop: group.shopSlug, sourceTitle: group.title, name: null, variantLabel: null, attrs: {}, dropped: [],
+          status: 'failed', reason: call.error ?? 'batch failed', ...ids(group),
+        });
       }
       console.log(`${tag}: FAILED after ${call.attempts} attempts (${call.error}), ${cost}`);
       return;
@@ -174,7 +212,8 @@ async function main() {
     for (const r of results) {
       rows.push({
         category: batch.category, shop: r.item.group.shopSlug, sourceTitle: r.item.group.title, name: r.proposedName,
-        variantLabel: r.variantLabel, attrs: r.attrs, dropped: r.dropped, status: r.status, reason: r.reason,
+        variantLabel: r.status === 'ok' ? r.variantLabel : r.proposedLabel, attrs: r.attrs, dropped: r.dropped, status: r.status, reason: r.reason,
+        ...ids(r.item.group),
       });
     }
     if (rw) {
@@ -209,7 +248,7 @@ async function main() {
   rows.sort((a, b) => a.category.localeCompare(b.category) || a.shop.localeCompare(b.shop) || a.sourceTitle.localeCompare(b.sourceTitle));
   const summary = {
     runId, model, effort: effort ?? null, categories: runCats, pilot, dryRun, batches: done, groups: items, accepted, rejected, failedBatches,
-    ...usage, costUsd, wallSeconds, batchStats: [...batchStats].sort((a, b) => a.index - b.index),
+    ...usage, costUsd, wallSeconds, batchStats: [...batchStats].sort((a, b) => a.index - b.index), sample: sampleNote,
   };
   const files = await writeReport(OUT_DIR, summary, rows);
   if (rw) {

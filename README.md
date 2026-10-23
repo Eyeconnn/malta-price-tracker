@@ -162,7 +162,9 @@ To switch on: set the repository variable `SCRAPE_DUE_ENABLED` to `true`.
 `pnpm normalise-names` sends batches of one site category's product groups to Claude Code (`claude -p`, on the
 owner's own Claude login, never an API key and never `--bare`) and gets back a clean name, a variant label and the
 category's attributes (`config/attribute-schemas.json`). Every answer is checked in code (`src/names/check.ts`: the
-brand, every number with its unit and every model code must survive, and no word or number may be invented); a failed check is stored as rejected and the site keeps the
+brand, every number with its unit and every model code must survive, and no word or number may be invented; brand
+values that are the shop's own name, a domain, a company or a distributor are not required and may not be added, see
+`src/names/brand.ts`); a failed check is stored as rejected and the site keeps the
 shop's title. Claude runs with tools off, no MCP servers, no user or project settings (so no hooks or plugins), no
 session saved, in an empty temp folder with an allowlisted environment (no API keys, tokens or database URLs); shop
 text is passed as data. A run that writes to the database needs `--pilot` or `--max-batches`.
@@ -171,9 +173,10 @@ text is passed as data. A run that writes to the database needs `--pilot` or `--
 pnpm normalise-names --model haiku --pilot --dry-run             # 500 groups spread over categories and shops, no writes
 pnpm normalise-names --model sonnet --pilot --limit 200 --dry-run
 pnpm normalise-names --model haiku --category toys --max-batches 5
+pnpm normalise-names --model haiku --effort low --sample-from out/names/<run>-haiku.csv --dry-run   # the same groups again
 ```
 
-Options: `--model` (required), `--effort` (low, medium, high, xhigh or max, passed to `claude --effort`; left out it is the CLI default), `--pilot` with `--limit` (default 500) and `--seed`, `--category <slug>` (repeatable),
+Options: `--model` (required), `--effort` (low, medium, high, xhigh or max, passed to `claude --effort`; left out it is the CLI default), `--pilot` with `--limit` (default 500) and `--seed`, `--sample-from <csv>` (exactly the groups of an earlier report, by shop_id and group_key or, for older CSVs, by shop and title), `--category <slug>` (repeatable; filters on the category of today's rules, which every run recomputes),
 `--batch-size` (default 40), `--parallel` (default 2, max 6), `--max-batches`, `--timeout` (seconds per call,
 default 300), `--dry-run`, `--save-raw` (keeps each batch's raw JSON). Each run writes `out/names/<run>-<model>.html`
 and `.csv` (names before and after, attributes, rejects, tokens and the cost Claude Code reports, which on a plan is
