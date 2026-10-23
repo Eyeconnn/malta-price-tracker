@@ -505,3 +505,54 @@ describe('checkName: condition and currency values stay in the clean name (revie
     expect(checkName({ title: 'PSN Card $10', brand: null }, name('PSN Card $10')).ok).toBe(true);
   });
 });
+
+describe('checkName: model words, pack sizes and distinguishing words stay in the clean name (re-review)', () => {
+  const bad = (r: ReturnType<typeof checkName>, what: RegExp) => {
+    expect(r.ok).toBe(false);
+    expect(r.ok ? '' : r.reason).toMatch(what);
+  };
+  const good = (r: ReturnType<typeof checkName>) => expect(r).toEqual({ ok: true });
+
+  it('keeps model words in the name itself, never only in the variant label', () => {
+    bad(checkName({ title: 'Apple iPhone 15 Plus 128GB Black', brand: 'Apple' }, name('Apple iPhone 15', {}, 'Plus, 128GB, Black')), /lost tokens: plus/);
+    good(checkName({ title: 'Apple iPhone 15 Plus 128GB Black', brand: 'Apple' }, name('Apple iPhone 15 Plus', {}, '128GB, Black')));
+    bad(checkName({ title: 'Samsung Galaxy S24 Ultra 256GB', brand: 'Samsung' }, name('Samsung Galaxy S24', {}, 'Ultra, 256GB')), /lost tokens: ultra/);
+    good(checkName({ title: 'Samsung Galaxy S24 Ultra 256GB', brand: 'Samsung' }, name('Samsung Galaxy S24 Ultra', {}, '256GB')));
+    bad(checkName({ title: 'Samsung Galaxy Buds2 Pro Graphite', brand: 'Samsung' }, name('Samsung Galaxy Buds2', {}, 'Pro, Graphite')), /lost tokens: pro/);
+    bad(checkName({ title: 'Nintendo Switch OLED Console White', brand: 'Nintendo' }, name('Nintendo Switch Console', {}, 'OLED, White')), /lost tokens: oled/);
+    good(checkName({ title: 'Nintendo Switch OLED Console White', brand: 'Nintendo' }, name('Nintendo Switch OLED Console', {}, 'White')));
+    bad(checkName({ title: 'Sony PS5 Slim Digital Edition Console', brand: 'Sony' }, name('Sony PS5 Slim Edition Console', {}, 'Digital')), /lost tokens: digital/);
+    bad(checkName({ title: 'Sony PS5 Slim Digital Edition Console', brand: 'Sony' }, name('Sony PS5 Digital Edition Console')), /lost tokens: slim/);
+    good(checkName({ title: 'Sony PS5 Slim Digital Edition Console', brand: 'Sony' }, name('Sony PS5 Slim Digital Edition Console')));
+    // a + glued to a model must stay in the name too
+    bad(checkName({ title: 'Samsung Galaxy S23+ 256GB', brand: 'Samsung' }, name('Samsung Galaxy S23', {}, '+, 256GB')), /S23\+|s23\+/i);
+  });
+
+  it('keeps edition and format words (Twin, Bundle, Deluxe, Kids) in the name', () => {
+    bad(checkName({ title: 'Ninja Foodi Power Blender Twin Pack', brand: 'Ninja' }, name('Ninja Foodi Power Blender')), /lost tokens: twin/);
+    good(checkName({ title: 'Ninja Foodi Power Blender Twin Pack', brand: 'Ninja' }, name('Ninja Foodi Power Blender Twin Pack')));
+    bad(checkName({ title: 'Hogwarts Legacy Deluxe Edition (PS5)', brand: null }, name('Hogwarts Legacy (PS5)', {}, 'Deluxe Edition')), /lost tokens: deluxe/);
+    bad(checkName({ title: 'Nike Air Max 90 Kids Trainers', brand: 'Nike' }, name('Nike Air Max 90 Trainers')), /lost tokens: kids/);
+    // a size may still go to the variant label when the attributes list it
+    good(checkName({ title: 'Nike Club Fleece Hoodie XL', brand: 'Nike' }, name('Nike Club Fleece Hoodie', { sizes: ['XL'] }, 'XL')));
+  });
+
+  it('keeps pack and count numbers in the name or as the pack count', () => {
+    bad(checkName({ title: 'Cisk Lager 330ml Pack of 6', brand: 'Cisk' }, name('Cisk Lager 330ml', {}, 'Pack of 6')), /pack size lost: 6/);
+    good(checkName({ title: 'Cisk Lager 330ml Pack of 6', brand: 'Cisk' }, name('Cisk Lager 330ml Pack of 6')));
+    good(checkName({ title: 'Cisk Lager 330ml Pack of 6', brand: 'Cisk' }, name('Cisk Lager 330ml', { pack_count: 6 }, 'Pack of 6')));
+    bad(checkName({ title: 'Cisk Lager 6x330ml', brand: 'Cisk' }, name('Cisk Lager 330ml', {}, '6x')), /pack size lost: 6/);
+    bad(checkName({ title: 'Pampers Baby-Dry Size 4 44 Nappies', brand: 'Pampers' }, name('Pampers Baby-Dry Size 4 Nappies', {}, '44')), /pack size lost: 44/);
+    good(checkName({ title: 'Pampers Baby-Dry Size 4 44 Nappies', brand: 'Pampers' }, name('Pampers Baby-Dry Size 4 Nappies', { pack_count: 44 }, '44')));
+    good(checkName({ title: 'Pampers Baby-Dry Size 4 44 Nappies', brand: 'Pampers' }, name('Pampers Baby-Dry Size 4 44 Nappies')));
+  });
+
+  it('keeps more condition words: damaged, like new, excellent condition, preloved, second hand', () => {
+    bad(checkName({ title: 'Dyson V11 Vacuum - Damaged item', brand: 'Dyson' }, name('Dyson V11 Vacuum')), /condition lost: damaged/);
+    good(checkName({ title: 'Dyson V11 Vacuum - Damaged item', brand: 'Dyson' }, name('Dyson V11 Vacuum Damaged Item')));
+    bad(checkName({ title: 'iPad Air Like New', brand: 'Apple' }, name('Apple iPad Air')), /condition lost: like new/);
+    bad(checkName({ title: 'Gucci Bag (Excellent Condition)', brand: 'Gucci' }, name('Gucci Bag')), /condition lost: excellent condition/);
+    bad(checkName({ title: 'Preloved Barbour Jacket', brand: 'Barbour' }, name('Barbour Jacket')), /condition lost: used/);
+    bad(checkName({ title: 'Second Hand Bike', brand: null }, name('Bike')), /condition lost: used/);
+  });
+});

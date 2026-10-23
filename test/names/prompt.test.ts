@@ -105,6 +105,12 @@ describe('systemPrompt', () => {
     expect(p).toMatch(/currency[^.]*€20[^.]*20 EUR[^.]*display_name/);
   });
 
+  it('says to keep model, edition and pack words and pack sizes in display_name (re-review)', () => {
+    const p = systemPrompt('phones', schemas.phones);
+    expect(p).toMatch(/Plus, Pro, Max, Ultra, Mini, Lite, OLED[^.]*display_name itself/);
+    expect(p).toMatch(/Pack of 6[^.]*44 Nappies[^.]*display_name or[^.]*pack_count/);
+  });
+
   it('says to keep the not_the_brand value when the title contains it', () => {
     expect(systemPrompt('toys', schemas.toys)).toMatch(/not_the_brand[^.]*\. When the title contains it, keep it/);
   });

@@ -76,7 +76,10 @@ export function inRun(list: string[], target: string): boolean {
 
 /** Condition words: a used, refurbished or open-box item is another product than a new one (review C1). */
 const CONDITIONS: [string, RegExp][] = [
-  ['used', /\b(?:pre[\s-]?owned|used|second[\s-]?hand)\b/],
+  ['used', /\b(?:pre[\s-]?owned|pre[\s-]?loved|used|second[\s-]?hand)\b/],
+  ['damaged', /\bdamaged\b/],
+  ['like new', /\blike[\s-]?new\b/],
+  ['excellent condition', /\bexcellent\s+condition\b/],
   ['refurbished', /\b(?:refurbished|refurb|renewed|reconditioned)\b/],
   ['open box', /\bopen[\s-]?box(?:ed)?\b/],
   ['ex-display', /\bex[\s-]?display\b/],
@@ -112,4 +115,25 @@ export function moneyValues(text: string): string[] {
     }
   }
   return [...out].sort();
+}
+
+const COUNT_WORDS = 'pack|pk|pcs?|pieces|count|ct|nappies|diapers|capsules|caps|tablets|tabs|pods|sachets|wipes|rolls|cans|bottles|bags';
+const PACK_PATTERNS: RegExp[] = [
+  /\bpack\s+of\s+(\d+)\b/g,
+  new RegExp(`\\b(\\d+)\\s*-?\\s*(?:${COUNT_WORDS})\\b`, 'g'),
+  // 6 x 330ml, 24x0.5l: a count of a volume or weight (not 40 x 30 cm)
+  /\b(\d+)\s*x\s*\d+(?:\.\d+)?\s*(?:ml|cl|l|ltr|g|kg|oz)\b/g,
+];
+
+/**
+ * Pack and count numbers a text names ("Pack of 6", "6x330ml", "44 Nappies"; "Twin Pack" is 2), each once. word: a
+ * word that says the count by itself (twin, triple), which a name may keep instead of the number.
+ */
+export function packCounts(text: string): { n: number; word: string | null }[] {
+  const t = prep(text);
+  const out = new Map<number, string | null>();
+  for (const re of PACK_PATTERNS) for (const m of t.matchAll(re)) if (!out.has(Number(m[1]))) out.set(Number(m[1]), null);
+  if (/\btwin[\s-]?pack\b/.test(t)) out.set(2, 'twin');
+  if (/\btriple[\s-]?pack\b/.test(t)) out.set(3, 'triple');
+  return [...out.entries()].map(([n, word]) => ({ n, word }));
 }
