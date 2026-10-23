@@ -1,6 +1,9 @@
 // pnpm normalise-names --model haiku [--effort low] [--pilot] [--limit 500] [--sample-from out/names/<run>.csv]
 //   [--category laptops ...] [--batch-size 40] [--parallel 2] [--max-batches N] [--max-cost 5] [--dry-run] [--seed pilot]
-//   [--timeout 300] [--save-raw] [--retry-rejected] [--recheck-stored] [--backfill-canonical]
+//   [--timeout 300] [--save-raw] [--retry-rejected] [--recheck-stored] [--recheck-canonical] [--backfill-canonical]
+// --recheck-canonical makes no model call: it runs today's canonical rules over the canonical names stored as ok,
+// rewrites the ones they write otherwise and demotes (canonical_status rejected) the ones they reject or whose group
+// changed category; the display names stay (only reports with --dry-run). --backfill-canonical runs it first.
 // --backfill-canonical takes only the groups stored as ok whose canonical name was never tried (names saved before
 // migration 012; with --retry-rejected also those tried and rejected), whether their title changed or not. It refuses
 // to run before migration 012. A name whose stored attrs give a canonical name that passes today's check gets it with
@@ -36,7 +39,7 @@ import { interleaveBatches, makeBatches, systemPrompt, userMessage, type Batch }
 import { writeReport, type BatchStat, type ReportRow } from '../names/report.js';
 import { answerJsonSchema, loadAttributeSchemas } from '../names/schema.js';
 import { pickSample, readSampleCsv } from '../names/sample.js';
-import { splitBackfill } from '../names/backfill.js';
+import { recheckCanonical, splitBackfill } from '../names/backfill.js';
 import { changedGroups, loadGroups, pilotSample, type GroupInput } from '../names/select.js';
 import { recheckStored, type StoredName } from '../names/recheck.js';
 import { finishRun, hasCanonicalColumns, loadStoredOk, markRejected, saveCanonical, saveResults, startRun, type CanonicalResult } from '../names/store.js';
@@ -60,6 +63,7 @@ const { values } = parseArgs({
     'retry-rejected': { type: 'boolean', default: false },
     'recheck-stored': { type: 'boolean', default: false },
     'backfill-canonical': { type: 'boolean', default: false },
+    'recheck-canonical': { type: 'boolean', default: false },
   },
 });
 
@@ -93,8 +97,9 @@ async function main() {
   const maxBatches = values['max-batches'] === undefined ? undefined : intOption('max-batches', values['max-batches'], 1, 100000);
   const maxCost = parseMaxCost(values['max-cost']);
   const recheck = values['recheck-stored'];
+  const recheckCanon = values['recheck-canonical'];
   // a recheck makes no model call, so it needs no cap
-  if (!recheck) checkRunScope({ dryRun, pilot, maxBatches });
+  if (!recheck && !recheckCanon) checkRunScope({ dryRun, pilot, maxBatches });
   const timeoutMs = intOption('timeout', values.timeout, 10, 3600) * 1000;
   const slugs = SITE_CATEGORIES.map((c) => c.slug as string);
   const categories = values.category ?? [];
@@ -113,6 +118,8 @@ async function main() {
   const backfill = values['backfill-canonical'];
   /** --backfill-canonical: canonical names built from the stored attrs, saved without a model call */
   let direct: CanonicalResult[] = [];
+  /** --recheck-canonical (and --backfill-canonical first): stored canonical names today's rules rewrite or demote */
+  let canonRecheck: ReturnType<typeof recheckCanonical> = { checked: 0, updates: [] };
   const withBrands = (list: GroupInput[]) => {
     for (const g of list) {
       const v = brandStatus(g.brand, g.shopId, brandCtx!);
@@ -122,19 +129,34 @@ async function main() {
     }
   };
   try {
-    if (backfill && !(await hasCanonicalColumns(ro))) {
-      throw new Error('--backfill-canonical needs migration 012 (product_names.canonical_name, canonical_status, canonical_reason); run pnpm migrate first');
+    if ((backfill || recheckCanon) && !(await hasCanonicalColumns(ro))) {
+      throw new Error(`--${backfill ? 'backfill' : 'recheck'}-canonical needs migration 012 (product_names.canonical_name, canonical_status, canonical_reason); run pnpm migrate first`);
     }
     groupsAll = await loadGroups(ro, { categories });
+    if (backfill || recheckCanon) {
+      const storedCanon = groupsAll.filter((g) => g.storedStatus === 'ok' && g.storedCanonicalStatus === 'ok');
+      if (storedCanon.length > 0) {
+        brandCtx = await loadBrandContext(ro);
+        withBrands(storedCanon);
+      }
+      canonRecheck = recheckCanonical(storedCanon);
+      const demoted = canonRecheck.updates.filter((u) => u.canonicalName === null);
+      console.log(
+        `normalise-names: canonical recheck of ${canonRecheck.checked} stored names: ${canonRecheck.updates.length - demoted.length} rewritten, ${demoted.length} demoted`,
+      );
+      for (const u of demoted.slice(0, 20)) console.log(`  ${u.shopId} ${u.groupKey}: ${u.reason}`);
+    }
     const recategorised = groupsAll.filter((g) => g.storedCategory !== undefined && g.storedCategory !== g.category).length;
     console.log(`normalise-names: ${recategorised} of ${groupsAll.length} fresh groups have another category with today's rules than the stored one`);
     if (recheck) {
       stored = await loadStoredOk(ro);
       if (stored.length > 0) brandCtx = await loadBrandContext(ro);
+    } else if (recheckCanon) {
+      // only the recheck above
     } else {
       candidates = changedGroups(groupsAll, { retryRejected: values['retry-rejected'], backfillCanonical: backfill });
       if (backfill && candidates.length > 0) {
-        brandCtx = await loadBrandContext(ro);
+        brandCtx ??= await loadBrandContext(ro);
         withBrands(candidates);
         const split = splitBackfill(candidates);
         direct = split.direct.map((d) => ({ shopId: d.group.shopId, groupKey: d.group.groupKey, canonicalName: d.canonicalName, reason: null }));
@@ -149,6 +171,12 @@ async function main() {
   } finally {
     await ro.end({ timeout: 5 });
   }
+
+  if (canonRecheck.updates.length > 0) {
+    if (dryRun) console.log(`normalise-names: dry run, ${canonRecheck.updates.length} canonical recheck results not written`);
+    else console.log(`normalise-names: ${await saveCanonical(db(), canonRecheck.updates)} canonical recheck results written`);
+  }
+  if (recheckCanon) return;
 
   if (recheck) {
     const keys = new Set(stored.map((r) => `${r.shopId}|${r.groupKey}`));

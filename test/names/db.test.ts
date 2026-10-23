@@ -96,6 +96,7 @@ describe.skipIf(!process.env.SITE_BUILD_TEST_DB)('name normaliser on PGlite', ()
     ]);
     const stored = (await loadGroups(sql, { categories: ['laptops'] }))[0];
     expect(stored.storedCanonicalStatus).toBe('ok');
+    expect(stored.storedCanonicalName).toBe('lenovo ideapadslim5');
     expect(stored.storedAttrs).toEqual({ ram_gb: [8, 16] });
     await finishRun(sql, runId, {
       batches: 1, items: 1, accepted: 1, rejected: 0, failedBatches: 0,

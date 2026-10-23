@@ -28,6 +28,8 @@ export type GroupInput = {
   storedStatus?: 'ok' | 'rejected' | null;
   /** product_names.canonical_status (migration 012): ok, rejected, or null when never tried (--backfill-canonical) */
   storedCanonicalStatus?: 'ok' | 'rejected' | null;
+  /** product_names.canonical_name (--recheck-canonical compares it with the one today's rules write) */
+  storedCanonicalName?: string | null;
   /** product_names.attrs and category of the stored name (--backfill-canonical builds the canonical name from them) */
   storedAttrs?: Record<string, unknown>;
   storedNameCategory?: string | null;
@@ -79,6 +81,7 @@ type GroupRow = {
   stored_hash: string | null;
   stored_status: 'ok' | 'rejected' | null;
   stored_canonical_status: 'ok' | 'rejected' | null;
+  stored_canonical_name: string | null;
   stored_attrs: Record<string, unknown> | null;
   stored_name_category: string | null;
 };
@@ -97,7 +100,7 @@ export async function loadGroups(sql: postgres.Sql, opts: { categories?: string[
     select sp.shop_id, s.slug as shop_slug, sp.group_key, sp.title, sp.brand, coalesce(sp.category, 'other') as category,
       p.category_path, p.tags, s.category as shop_category, sp.gtin, sp.mpn, pn.title_hash as stored_hash, pn.status as stored_status,
       -- read through to_jsonb so this works before migration 012 adds the column
-      to_jsonb(pn) ->> 'canonical_status' as stored_canonical_status, pn.attrs as stored_attrs, pn.category as stored_name_category
+      to_jsonb(pn) ->> 'canonical_status' as stored_canonical_status, to_jsonb(pn) ->> 'canonical_name' as stored_canonical_name, pn.attrs as stored_attrs, pn.category as stored_name_category
     from site_products sp
     join shops s on s.id = sp.shop_id
     left join products p on p.id = sp.rep_product_id
@@ -126,6 +129,7 @@ export async function loadGroups(sql: postgres.Sql, opts: { categories?: string[
       storedHash: r.stored_hash,
       storedStatus: r.stored_status,
       storedCanonicalStatus: r.stored_canonical_status ?? null,
+      storedCanonicalName: r.stored_canonical_name ?? null,
       ...(r.stored_attrs ? { storedAttrs: r.stored_attrs } : {}),
       storedNameCategory: r.stored_name_category,
     }));
