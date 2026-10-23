@@ -70,6 +70,7 @@ function lenovo(extra: Partial<ProductResponse> = {}): ProductResponse {
   return {
     product: {
       id: 7,
+      key: 's7',
       productId: REP,
       title: 'Lenovo V15 G5 15.6" i5, 16GB, 512GB',
       brand: 'Lenovo',

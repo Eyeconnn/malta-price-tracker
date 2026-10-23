@@ -158,24 +158,40 @@ function numberText(key: string, unit: string | undefined, n: number): { text: s
  * (the name may have moved storage into the attributes). Null when there is nothing to add. Defaults are never shown.
  */
 export function specsSummary(category: string | null, attrs: Record<string, unknown> | null, name: string, cfg: IdentityConfig = IDENTITY): string | null {
-  if (category === null || !attrs || !Object.hasOwn(cfg, category)) return null;
   const toks = nameTokens(name);
-  const parts: string[] = [];
+  const parts = specParts(category, attrs, cfg)
+    .filter((p) => !p.present(toks))
+    .map((p) => p.text);
+  if (parts.length === 0) return null;
+  const s = parts.join(', ');
+  return s.charAt(0).toUpperCase() + s.slice(1);
+}
+
+/** Each identity spec a listing gives, as written in a summary ("512GB", "12GB RAM"), with its in-name check. */
+export function specParts(
+  category: string | null,
+  attrs: Record<string, unknown> | null,
+  cfg: IdentityConfig = IDENTITY,
+): { key: string; text: string; present: (nameToks: string[]) => boolean }[] {
+  if (category === null || !attrs || !Object.hasOwn(cfg, category)) return [];
+  const out: { key: string; text: string; present: (nameToks: string[]) => boolean }[] = [];
   for (const spec of cfg[category]) {
     if (!Object.hasOwn(attrs, spec.key)) continue;
     const v = attrs[spec.key];
     if (spec.type === 'number') {
       if (!finite(v) || v <= 0) continue;
-      const { text, present } = numberText(spec.key, spec.unit, v);
-      if (!present(toks)) parts.push(text);
+      out.push({ key: spec.key, ...numberText(spec.key, spec.unit, v) });
     } else if (typeof v === 'string' && v.trim() !== '' && v.length <= 60) {
       const target = tokens(prep(v)).map(unitForm).join('');
-      if (target !== '' && !inRun(toks, target)) parts.push(v.trim());
+      if (target !== '') out.push({ key: spec.key, text: v.trim(), present: (toks) => inRun(toks, target) });
     }
   }
-  if (parts.length === 0) return null;
-  const s = parts.join(', ');
-  return s.charAt(0).toUpperCase() + s.slice(1);
+  return out;
+}
+
+/** A number attribute as the site writes it ("512GB", "1TB", "15.6"", "330ml", "pack of 6"). */
+export function numberSpecText(key: string, unit: string | undefined, n: number): string {
+  return numberText(key, unit, n).text;
 }
 
 /** "Samsung Galaxy S25 Ultra Smartphone · 256GB", or the name alone without a summary. */

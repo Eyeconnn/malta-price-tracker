@@ -7,7 +7,7 @@ import { neonData } from './data.js';
 import type { Env } from './env.js';
 import { json } from './http.js';
 import { injectNonce, newNonce, withSecurityHeaders } from './security.js';
-import { type AccessSettings, loadSiteSettings, searchSettingsCache } from './settings.js';
+import { type AccessSettings, loadSiteSettings } from './settings.js';
 
 /** Env plus the static assets binding declared in wrangler.toml. */
 export interface Bindings extends Env {
@@ -16,8 +16,8 @@ export interface Bindings extends Env {
 
 export { json };
 
-/** Production API dependencies: Neon with the read-only role, the Workers cache, search thresholds cached per isolate. */
-const DEFAULT_API: ApiDeps = { data: (env) => neonData(env.DATABASE_URL), cache: defaultCache, searchSettings: searchSettingsCache };
+/** Production API dependencies: Neon with the read-only role and the Workers cache. */
+const DEFAULT_API: ApiDeps = { data: (env) => neonData(env.DATABASE_URL), cache: defaultCache };
 
 /** Static asset (SPA fallback to index.html). HTML gets a fresh nonce on its script tags. */
 async function serveAsset(req: Request, env: Bindings): Promise<{ res: Response; nonce?: string }> {
