@@ -53,7 +53,7 @@ describe('renderJudgeHtml', () => {
     expect(html).not.toContain('<script>alert(1)');
     expect(html).toContain('&lt;script&gt;');
   });
-  it('has no long dashes', () => expect(html).not.toMatch(/[–—]/));
+  it('has no long dashes', () => expect(html).not.toMatch(/[\u2013\u2014]/));
 });
 
 describe('renderJudgeCsv', () => {
