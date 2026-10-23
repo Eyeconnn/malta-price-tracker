@@ -3,7 +3,8 @@
 // condition, money, pack or piece count, audience, platform, edition, format, bundle, OS, region or the shop
 // category's gender. Every adversarial and review pair must be vetoed; the true matches must not be.
 import { describe, expect, it } from 'vitest';
-import { applyVeto, modelCodes, vetoReasons, type VetoListing } from '../../src/match/veto.js';
+import { applyVeto, modelCodes, vetoReasons, withoutColours, type VetoListing } from '../../src/match/veto.js';
+import { colourPartNumbers, colourSiblings } from '../../src/site/matching.js';
 import { PAIRS, SAME, type L } from '../names/adversarial-pairs.js';
 import { APART, TOGETHER, type PairListing } from '../site/review-pairs.js';
 import { PROBE_DIFF, PROBE_MORE, PROBE_RR5, PROBE_SAME } from './probe-pairs.js';
@@ -195,6 +196,49 @@ describe('veto: barcodes, part numbers and prices', () => {
     expectVetoed(ip('APPLE IPHONE 17 PRO 512GB ORANGE', 'MG8M4', 4), ip('APPLE IPHONE 17 PRO 512GB DEEP BLUE', 'MG8N4', 5));
     expectVetoed(ip('APPLE IPHONE 17 PRO 512GB ORANGE', 'MG8M4'), ip('APPLE IPHONE 17 PRO 512GB DEEP BLUE ESIM', 'MG8N4'));
     expectVetoed(v('tv-audio', 'Sony Bravia 55 inch TV', 'Sony', { mpn: 'KD55X80L', shopId: 1 }), v('tv-audio', 'Sony Bravia 55 inch TV Black', 'Sony', { mpn: 'KD55X85L', shopId: 1 }));
+  });
+});
+
+describe('veto: colour siblings at one shop (review I1, I2): only colour words and their colour modifiers may differ', () => {
+  // the reviewer's live examples: a word before a colour that names a model, a line or a part keeps them apart
+  const APART_PAIRS: [string, string, string][] = [
+    ['phones', 'Samsung Galaxy S25 Edge Black', 'Samsung Galaxy S25 Black'],
+    ['phones', 'Samsung Galaxy Watch8 Classic Black 46mm', 'Samsung Galaxy Watch8 Silver 46mm'],
+    ['phones', 'Apple iPhone 17 Pro 256GB eSIM Blue', 'Apple iPhone 17 Pro 256GB White'],
+    ['phones', 'Samsung Galaxy S25 Navy', 'Samsung Galaxy S25 Edge Titanium Silver'],
+    ['gaming', 'Nintendo Joy-Con Right Red', 'Nintendo Joy-Con Left Blue'],
+    ['tv-audio', 'Sennheiser SGS40 Fabric Black/Grey', 'Sennheiser SGS40 Black'],
+    ['phones', 'Celly Watch Strap Adjustable Pink', 'Celly Watch Strap Braided Blue'],
+    ['appliances', 'Kenwood Chef Titanium Silver', 'Kenwood Chef Black'],
+    ['phones', 'Google Pixel 9 Pro Fold Obsidian', 'Google Pixel 9 Pro Porcelain'],
+  ];
+  it.each(APART_PAIRS)('%s: %s vs %s stay apart', (cat, a, b) => {
+    const x = v(cat, a, null, { mpn: 'MG8M4ZD/A', shopId: 4 });
+    const y = v(cat, b, null, { mpn: 'MG8N4ZD/A', shopId: 4 });
+    expect(colourSiblings(x, y)).toBe(false);
+    expect(withoutColours(a)).not.toBe(withoutColours(b));
+    expectVetoed(x, y);
+  });
+  it('keeps the intercomp colour siblings with part numbers of one stem together', () => {
+    const ic = (title: string, mpn: string) => v('phones', title, null, { mpn, shopId: 4 });
+    expectKept([ic('APPLE IPHONE 17 PRO 512GB ORANGE', 'MG8M4'), ic('APPLE IPHONE 17 PRO 512GB DEEP BLUE', 'MG8N4')]);
+    expectKept([ic('APPLE IPHONE 17 256GB SAGE', 'MFYP4'), ic('APPLE IPHONE 17 256GB MIST BLUE', 'MFYM4')]);
+    expect(colourPartNumbers(ic('APPLE IPHONE 17 256GB SAGE', 'MFYP4'), ic('APPLE IPHONE 17 256GB MIST BLUE', 'MFYM4'))).toBe(true);
+  });
+  it('needs the two part numbers to share their stem (same length, same first 3 characters, at most a third of them (at least 2) differ)', () => {
+    const ic = (title: string, mpn: string) => v('phones', title, null, { mpn, shopId: 4 });
+    const pairs: [string, string, boolean][] = [
+      ['MG8M4', 'MG8N4', true],
+      ['MG8M4ZD/A', 'MG8N4ZD/A', true],
+      ['MG8M4', 'MG8K4-E', false],
+      ['MG8M4', 'MYW93', false],
+      ['SM-S931BZKD', 'SM-S931BLBD', true],
+      ['SM-S931BZKD', 'SM-S931BLBDXEU', false],
+      ['ABC12345', 'ABX99945', false],
+    ];
+    for (const [a, b, ok] of pairs) {
+      expect(colourPartNumbers(ic('APPLE IPHONE 17 PRO 512GB ORANGE', a), ic('APPLE IPHONE 17 PRO 512GB DEEP BLUE', b)), `${a} ${b}`).toBe(ok);
+    }
   });
   it('vetoes a price more than 3 times another of the same condition', () => {
     expectVetoed(v('tv-audio', 'Sony WH-1000XM5', 'Sony', { priceCents: 9000 }), v('tv-audio', 'Sony WH-1000XM5', 'Sony', { priceCents: 30000 }));

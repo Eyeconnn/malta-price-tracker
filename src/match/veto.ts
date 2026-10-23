@@ -10,7 +10,8 @@
 // helpers of the name checks. Pure: the judge run and the site build both call it.
 import { bundleWords, canonText, PRICE_INCLUDES } from '../names/canon-text.js';
 import { conditions, inRun, packCounts, prep, quantityClass, QUANTITY, tokens, UNIT } from '../names/text.js';
-import { COLOUR_SUFFIX, colourSiblings, gtinIdentity, guardOf, MODEL, mpnIdentity } from '../site/matching.js';
+import { COLOUR_SUFFIX, colourPartNumbers, gtinIdentity, guardOf, MODEL, mpnIdentity } from '../site/matching.js';
+import { COLOURS, withoutColourWords } from '../names/colours.js';
 
 export type VetoListing = {
   title: string;
@@ -63,12 +64,6 @@ function withoutBrands(text: string, brands: string[]): string {
     .replace(/\b([a-z])\.([a-z]{2,})\b/gi, '$1$2');
 }
 
-/** Colour words (a colour or a marketing colour name next to "titanium" keeps it a colour). */
-const COLOURS = new Set(
-  ('black white silver grey gray blue red green pink purple gold yellow orange beige brown navy natural desert midnight starlight ' +
-    'graphite space sage mist lavender cream rose violet teal mint coral obsidian porcelain jet onyx phantom cobalt icy amber marble ' +
-    'silverblue jetblack titaniumblack whitesilver').split(' '),
-);
 
 const isQuantity = (t: string) => {
   const m = QUANTITY.exec(t);
@@ -606,8 +601,8 @@ export function vetoReasons(a: VetoListing, b: VetoListing): string[] {
   if (ga && gb && ga !== gb && (a.shopId === undefined || b.shopId === undefined || a.shopId !== b.shopId)) add(`barcode ${ga} vs ${gb}`);
   const pa = mpnIdentity(a.mpn);
   const pb = mpnIdentity(b.mpn);
-  // the colours one shop lists on their own may each have their own part number (Apple: one per colour)
-  if (pa && pb && pa !== pb && !colourSiblings(a, b)) add(`part number ${pa} vs ${pb}`);
+  // the colours one shop lists on their own may each have their own part number of one stem (Apple: one per colour)
+  if (pa && pb && pa !== pb && !colourPartNumbers(a, b)) add(`part number ${pa} vs ${pb}`);
 
   const qa = quantities(xa);
   const qb = quantities(xb);
@@ -804,17 +799,9 @@ export function colourWords(title: string): string[] {
 }
 
 /**
- * A title's words without its colour phrases (a colour word and the word before it: Deep Blue, Cosmic Orange, Jet
- * Black), in order: two listings with the same words here differ at most in colour.
+ * A title's words without its colour words and the colour modifier before each (Deep Blue, Cosmic Orange, Jet Black;
+ * src/names/colours.ts), in order: two listings with the same words here differ at most in colour.
  */
 export function withoutColours(title: string): string {
-  const ws = words(title);
-  const drop = new Set<number>();
-  ws.forEach((w, i) => {
-    if (!COLOURS.has(w)) return;
-    drop.add(i);
-    const before = ws[i - 1];
-    if (before !== undefined && !/\d/.test(before) && !MODEL.has(before) && !COLOURS.has(before)) drop.add(i - 1);
-  });
-  return ws.filter((_, i) => !drop.has(i)).join(' ');
+  return withoutColourWords(words(title)).join(' ');
 }
