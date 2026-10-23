@@ -10,3 +10,11 @@ const DASHES = ['', '6 4', '2 3', '10 3 2 3', '1 3', '12 6'];
 export function seriesStyle(i: number): { stroke: string; dash: string } {
   return { stroke: COLOURS[i % COLOURS.length]!, dash: DASHES[i % DASHES.length]! };
 }
+
+/** A seller's was price is drawn as a thin, faded, finely dotted line in the seller's own colour. */
+export const WAS_DASH = '1 4';
+
+/** Whether a seller's readings ever show a was price (only then is its was line drawn). */
+export function hasWas(line: { rows: { was: number | null }[] }): boolean {
+  return line.rows.some((r) => typeof r.was === 'number' && r.was > 0);
+}
