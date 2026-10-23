@@ -7,7 +7,7 @@ import path from 'node:path';
 import postgres from 'postgres';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { candidateKey, fingerprint, normText } from '../../src/match/fingerprint.js';
-import { loadJudgements, saveJudgements, type JudgementRow } from '../../src/match/store.js';
+import { loadJudgements, saveJudgements, supersedeJudgements, type JudgementRow } from '../../src/match/store.js';
 import { buildSiteProducts } from '../../src/site/build.js';
 import { DEFAULT_SETTINGS } from '../../src/site/settings.js';
 
@@ -91,7 +91,8 @@ describe.skipIf(!process.env.SITE_BUILD_TEST_DB)('site-build with a merge-pass j
     const big = before.get('A-S')!.canonical_id;
     const small = before.get('B-DB')!.canonical_id;
     const merge = row('m', ['A-S', 'A-B', 'B-O', 'G-S', 'B-DB', 'G-DB'], [[0, 1, 2, 3, 4, 5]]);
-    expect(await saveJudgements(sql, runId, [merge], { merge: true })).toEqual({ saved: 1, superseded: 0 });
+    expect(await saveJudgements(sql, runId, [merge])).toEqual({ saved: 1 });
+    expect(await supersedeJudgements(sql, { complete: true })).toBe(0);
     // the chunk judgements stay
     expect((await loadJudgements(sql)).map((j) => j.key[0]).sort()).toEqual(['c', 'c', 'm']);
     await build();
@@ -102,9 +103,23 @@ describe.skipIf(!process.env.SITE_BUILD_TEST_DB)('site-build with a merge-pass j
     expect(red.new_id).toBe(big);
   });
 
-  it('a later normal judgement sharing a listing removes the merge judgement', async () => {
-    const r = await saveJudgements(sql, runId, [row('c', ['B-DB', 'G-DB'], [[0], [1]])]);
-    expect(r.superseded).toBe(1);
+  it('a later normal judgement sharing a listing removes the merge judgement when the run is superseded', async () => {
+    await saveJudgements(sql, runId, [row('c', ['B-DB', 'G-DB'], [[0], [1]])]);
+    expect(await supersedeJudgements(sql, { complete: true })).toBe(1);
     expect((await loadJudgements(sql)).map((j) => j.key[0]).sort()).toEqual(['c', 'c']);
+  });
+
+  it('a run stopped after half its batches keeps every old match (review I4)', async () => {
+    // back to the two chunk judgements and one product per chunk
+    await sql`delete from match_judgements`;
+    await saveJudgements(sql, runId, [row('c', ['A-S', 'A-B', 'B-O', 'G-S'], [[0, 1, 2, 3]]), row('c', ['B-DB', 'G-DB'], [[0, 1]])]);
+    await build();
+    const before = await rows();
+    const pairs = (r: Map<string, Row>) => LISTINGS.flatMap((x) => LISTINGS.filter((y) => x.key < y.key && r.get(x.key)!.canonical_id === r.get(y.key)!.canonical_id).map((y) => `${x.key}+${y.key}`));
+    // the run re-splits them into two new groups and stops after the first batch was saved
+    await saveJudgements(sql, runId, [row('c', ['A-S', 'A-B', 'B-O'], [[0, 1, 2]])]);
+    expect(await supersedeJudgements(sql, { complete: false })).toBe(0);
+    await build();
+    expect(pairs(await rows())).toEqual(pairs(before));
   });
 });

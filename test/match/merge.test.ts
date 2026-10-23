@@ -8,7 +8,7 @@ import { describe, expect, it } from 'vitest';
 import { resolveJudgements, type CurrentListing } from '../../src/match/apply.js';
 import { buildCandidates, MAX_GROUP, type Candidate, type Listing } from '../../src/match/candidates.js';
 import { judgeMessage, makeJudgeBatches, shownMembers, type JudgeBatch } from '../../src/match/judge.js';
-import { mergeCandidateOf, mergeCandidates, overlayJudgements, settleMergeBatch } from '../../src/match/merge.js';
+import { mergeCandidateOf, mergeCandidates, overlayJudgements, planMerge, settleMergeBatch } from '../../src/match/merge.js';
 import { settleBatch } from '../../src/match/settle.js';
 import type { JudgementRow, StoredJudgement } from '../../src/match/store.js';
 import { assignMatches } from '../../src/site/matching.js';
@@ -199,8 +199,8 @@ describe('merge pass', () => {
     return { p, stored: overlayJudgements([], rows, new Date(1), false), icS };
   }
 
-  it('merges the clusters of two chunks and the listing left alone into one product when Claude says same', () => {
-    const { p, stored } = liveSplit();
+  it('merges the clusters of two chunks into one product when Claude says same; the listing a chunk kept apart stays apart (review M2)', () => {
+    const { p, stored, icS } = liveSplit();
     expect(productsOf(products(stored, p), p).size).toBeGreaterThan(1);
     const after = mergePass(stored, p, () => 'same');
     expect(after.candidates).toHaveLength(1);
@@ -210,15 +210,18 @@ describe('merge pass', () => {
     // the fingerprint covers every member
     expect(after.rows[0].members).toHaveLength(12);
     const m = products(after.stored, p);
-    expect(productsOf(m, p).size).toBe(1);
+    const rest = p.filter((l) => l !== icS);
+    expect(productsOf(m, rest).size).toBe(1);
+    // intercomp Silver was judged apart from the chunk 1 cluster side by side: the merge pass does not overrule that
+    expect(m.get(icS.id)?.key).not.toBe(m.get(rest[0].id)!.key);
     // the old chunk judgements stay (they are not deleted by a merge), the merge is newer and wins
     expect(after.stored.filter((j) => j.key.startsWith('c'))).toHaveLength(2);
     // a second merge pass finds nothing new to ask
     expect(mergePass(after.stored, p, () => 'same', 3).candidates).toHaveLength(0);
   });
 
-  it('merges the live listings although the colours one shop lists on their own carry their own part numbers', () => {
-    const { p } = liveSplit();
+  it('merges the live listings although the colours one shop lists on their own carry their own part numbers of one stem', () => {
+    const { p, icS } = liveSplit();
     const mpn: Record<string, string> = { 'APPLE IPHONE 17 PRO 512GB ORANGE': 'MG8M4', 'APPLE IPHONE 17 PRO 512GB DEEP BLUE': 'MG8N4', 'APPLE IPHONE 17 PRO 512GB SILVER': 'MG8K4-E' };
     const withMpn = p.map((l) => (mpn[l.title] ? { ...l, mpn: mpn[l.title] } : l));
     const rows: JudgementRow[] = [];
@@ -228,7 +231,11 @@ describe('merge pass', () => {
     }
     const stored = overlayJudgements([], rows, new Date(1), false);
     const after = mergePass(stored, withMpn, () => 'same');
-    expect(productsOf(products(after.stored, withMpn), withMpn).size).toBe(1);
+    const m = products(after.stored, withMpn);
+    // MG8M4 and MG8N4 share their stem; MG8K4-E (intercomp Silver, vetoed apart in chunk 1) does not
+    const rest = withMpn.filter((l) => l.id !== icS.id);
+    expect(productsOf(m, rest).size).toBe(1);
+    expect(m.get(icS.id)?.key).not.toBe(m.get(rest[0].id)!.key);
   });
 
   it('keeps the clusters apart when Claude says different, and does not ask again', () => {
@@ -241,8 +248,8 @@ describe('merge pass', () => {
   });
 
   it('asks again with every cluster of a merge judgement when a new listing pairs with one of them', () => {
-    const { p, stored } = liveSplit();
-    const after = mergePass(stored, p, (l) => String(l.id));
+    const { p, stored, icS } = liveSplit();
+    const after = mergePass(stored, p, () => 'same');
     // a new shop lists the phone; its own candidate group judged it apart from a phone case
     const x = L('klikk', 'Apple iPhone 17 Pro 512GB Cosmic Orange', { brand: 'Apple' });
     const caseX = L('klikk', 'Apple iPhone 17 Pro 512GB Cosmic Orange Case', { brand: 'Apple', priceCents: 2999 });
@@ -251,9 +258,22 @@ describe('merge pass', () => {
     const stored2 = overlayJudgements(after.stored, settleBatch(bt, claude(bt, (l) => String(l.id)), ctx).judgements, new Date(3), false);
     const again = mergePass(stored2, list, () => 'same', 4);
     expect(again.candidates).toHaveLength(1);
-    // the three clusters of the merge judgement and the new listing
-    expect(shownMembers(again.candidates[0])).toHaveLength(4);
-    expect(productsOf(products(again.stored, list), [...p, x]).size).toBe(1);
+    // the two clusters of the merge judgement (the merged one, intercomp Silver) and the new listing
+    expect(shownMembers(again.candidates[0])).toHaveLength(3);
+    expect(again.candidates[0].members).toHaveLength(13);
+    const m = products(again.stored, list);
+    expect(productsOf(m, [...p, x].filter((l) => l !== icS)).size).toBe(1);
+  });
+
+  it('asks again on the night a re-judged chunk removed the merge, with the fingerprints of the judgements after the first pass (review I3)', () => {
+    const { p, stored } = liveSplit();
+    const after = mergePass(stored, p, () => 'same');
+    // night 2: chunk 1 is judged again (same verdict, newer); saving it removes the merge judgement sharing its listings
+    const chunk1 = stored.find((j) => j.members.length === 6 && j.members.some((m) => m.title === 'apple iphone 17 pro 512gb silver'))!;
+    const night2 = overlayJudgements(after.stored, [chunk1], new Date(3), false);
+    expect(night2.some((j) => j.key.startsWith('m'))).toBe(false);
+    const plan = planMerge(night2, p);
+    expect(plan.todo).toHaveLength(1);
   });
 
   it('never merges 256GB and 512GB, also when Claude wrongly says same', () => {
@@ -327,7 +347,7 @@ describe('merge pass', () => {
 });
 
 describe('overlayJudgements', () => {
-  it('replaces judgements as saveJudgements does: a normal one removes every older one sharing a listing, a merge only older merges', () => {
+  it('replaces judgements as a complete run does: a normal one removes every older one sharing a listing, a merge only older merges', () => {
     const [x, y, z] = [L('a', 'Apple iPhone 17 Pro 512GB Silver'), L('b', 'Apple iPhone 17 Pro 512GB Blue'), L('c', 'Apple iPhone 17 Pro 512GB Orange')];
     const row = (key: string, ms: Listing[]): JudgementRow => ({
       key, fingerprint: 'f', model: 'haiku', effort: null, verdict: { clusters: [ms.map((_, i) => i)], apart: [], vetoed: [], final: [] },

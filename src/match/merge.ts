@@ -161,7 +161,8 @@ export function mergeCandidateOf(clusters: Cluster[]): Candidate {
   const attached = clusters.map((c, i) => c.members.filter((m) => m !== reps[i]));
   const members = clusters.flatMap((c) => c.members);
   const c = toCandidate({ members, reps, attached }, `m${candidateKey(members).slice(1)}`);
-  c.merge = { sources: [...new Set(clusters.map((x) => x.source))].sort() };
+  const sourceOf = new Map(reps.map((r, i) => [r, clusters[i].source]));
+  c.merge = { sources: [...new Set(clusters.map((x) => x.source))].sort(), repSources: (c.reps ?? []).map((i) => sourceOf.get(c.members[i])!) };
   return c;
 }
 
@@ -183,6 +184,7 @@ export function settleMergeBatch(batch: JudgeBatch, output: unknown, ctx: { mode
       return;
     }
     const reps = c.reps ?? c.members.map((_, i) => i);
+    const repSources = c.merge?.repSources;
     const own = reps.map((r, i) => [r, ...(c.attached?.[i] ?? [])]);
     const vl = c.members.map(vetoListing);
     const vetoed: { a: number; b: number; reasons: string[] }[] = [];
@@ -192,6 +194,8 @@ export function settleMergeBatch(batch: JudgeBatch, output: unknown, ctx: { mode
       const homes: { reps: number[]; members: number[] }[] = [];
       for (const s of shown) {
         const home = homes.find((h) => {
+          // clusters of one judgement were judged apart side by side already (review M2): never joined here
+          if (repSources && h.reps.some((r) => repSources[r] === repSources[s])) return false;
           for (const x of h.members) {
             for (const y of own[s]) {
               const reasons = vetoReasons(vl[x], vl[y]);
@@ -231,9 +235,10 @@ export function settleMergeBatch(batch: JudgeBatch, output: unknown, ctx: { mode
 const refsOf = (j: { members: { shop_id: number; group_key: string }[] }) => j.members.map((m) => memberRef({ shopId: m.shop_id, groupKey: m.group_key }));
 
 /**
- * Stored judgements after saving rows, as saveJudgements does it (src/match/store.ts): a row replaces the judgement
- * of its key; a normal row removes every older judgement sharing a listing with it, a merge row only older merge
- * judgements (the chunk judgements keep their other listings). For a dry run and for the merge pass after judging.
+ * Stored judgements after saving rows, as saveJudgements and then supersedeJudgements of a complete run do it
+ * (src/match/store.ts): a row replaces the judgement of its key; a normal row removes every older judgement sharing a
+ * listing with it, a merge row only older merge judgements (the chunk judgements keep their other listings). For a
+ * dry run and for the merge pass after judging.
  */
 export function overlayJudgements(stored: StoredJudgement[], rows: JudgementRow[], at: Date, merge: boolean): StoredJudgement[] {
   if (rows.length === 0) return stored;
@@ -254,19 +259,17 @@ export function hasTitle(c: Candidate, text: string): boolean {
 export type MergePlan = { candidates: Candidate[]; todo: Candidate[]; stats: MergeStats };
 
 /**
- * The merge pass's groups for today's listings: the stored judgements (with this run's saved ones overlaid, see
- * overlayJudgements) resolved as the site build does, their clusters paired (mergeCandidates), and those whose stored
- * judgement is current left out (storedFingerprints by key). Filters: categories (none: all) and a title text.
+ * The merge pass's groups for today's listings: the judgements (stored ones with this run's saved ones overlaid, see
+ * overlayJudgements) resolved as the site build does, their clusters paired (mergeCandidates), and those with a
+ * current judgement among these same judgements left out (a merge removed by this run's first pass is asked again,
+ * review I3). Filters: categories (none: all) and a title text.
  */
-export function planMerge(
-  judgements: StoredJudgement[],
-  listings: Listing[],
-  opts: { storedFingerprints: Map<string, string>; categories?: string[]; title?: string },
-): MergePlan {
+export function planMerge(judgements: StoredJudgement[], listings: Listing[], opts: { categories?: string[]; title?: string } = {}): MergePlan {
+  const fingerprints = new Map(judgements.map((j) => [j.key, j.fingerprint]));
   const current = new Map(listings.map((l) => [memberRef(l), l]));
   const { groups } = resolveJudgements(judgements, current);
   const { candidates: all, stats } = mergeCandidates(groups, new Map(listings.map((l) => [l.id, l])));
   const cats = opts.categories ?? [];
   const candidates = all.filter((c) => (cats.length === 0 || cats.includes(c.category)) && (opts.title === undefined || hasTitle(c, opts.title)));
-  return { candidates, todo: candidates.filter((c) => opts.storedFingerprints.get(c.key) !== c.fingerprint), stats };
+  return { candidates, todo: candidates.filter((c) => fingerprints.get(c.key) !== c.fingerprint), stats };
 }

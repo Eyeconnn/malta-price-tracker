@@ -1,6 +1,6 @@
 // pnpm judge-matches --model sonnet [--effort low] [--pilot] [--limit 300] [--seed pilot] [--category phones ...]
 //   [--batch-size 15] [--max-listings 120] [--parallel 2] [--max-batches N] [--max-cost 5] [--dry-run] [--timeout 600]
-//   [--save-raw] [--merge-pass] [--title "iphone 17 pro"] [--plan]
+//   [--save-raw] [--merge-pass | --no-merge-pass] [--title "iphone 17 pro"] [--plan]
 // Design "Update 23 Oct, afternoon: Claude judges candidate groups side by side". Builds the candidate groups of fresh
 // listings (src/match/candidates.ts), skips those whose stored judgement has the current fingerprint, and sends the
 // rest to Claude Code (claude -p on the owner's own login, the billing-safe runner of the name normaliser: never
@@ -8,10 +8,12 @@
 // groups. Claude says which listings are exactly the same product and lists every difference; the veto in code
 // (src/match/veto.ts) overrules any "same" the listings' facts contradict. Then the merge pass (src/match/merge.ts):
 // clusters of different judgements that look like one product are judged again together, one listing per cluster,
-// and merged only when Claude says same and the veto agrees. --merge-pass runs the merge pass alone; it has the same
-// caps (--max-batches and --max-cost count both passes, --pilot samples --limit merge groups). --title keeps only
-// groups with a listing whose title has the text; --plan prints the plan and calls Claude for nothing. Every run
-// writes a report to out/judge/.
+// and merged only when Claude says same and the veto agrees (--no-merge-pass skips it). --merge-pass runs the merge
+// pass alone. Both passes share the caps (--max-batches and --max-cost count both, --pilot samples --limit merge
+// groups). --title keeps only groups with a listing whose title has the text; --plan prints the plan and calls Claude
+// for nothing. Every run
+// writes a report to out/judge/. Saved judgements replace older ones sharing their listings only at the end of the run
+// (src/match/store.ts supersedeJudgements), so a stopped run keeps every match it did not judge again.
 // Reads with DASHBOARD_DATABASE_URL (read-only role; works before migration 013). Without --dry-run, writes
 // match_judgements and judge_runs with DATABASE_URL (needs migration 013); such a run needs --pilot or --max-batches.
 // A run stops after 5 failed batches in a row, and at once on a login or usage-limit error; --max-cost starts no new
@@ -47,6 +49,7 @@ import {
   loadStoredFingerprints,
   saveJudgements,
   startJudgeRun,
+  supersedeJudgements,
   type JudgementRow,
   type StoredJudgement,
 } from '../match/store.js';
@@ -71,6 +74,7 @@ const { values } = parseArgs({
     timeout: { type: 'string', default: '600' },
     'save-raw': { type: 'boolean', default: false },
     'merge-pass': { type: 'boolean', default: false },
+    'no-merge-pass': { type: 'boolean', default: false },
     title: { type: 'string' },
     plan: { type: 'boolean', default: false },
   },
@@ -95,6 +99,8 @@ async function main() {
   const pilot = values.pilot;
   const dryRun = values['dry-run'];
   const mergeOnly = values['merge-pass'];
+  const noMerge = values['no-merge-pass'];
+  if (mergeOnly && noMerge) throw new Error('--merge-pass and --no-merge-pass exclude each other');
   const planOnly = values.plan;
   const title = values.title?.trim() || undefined;
   const limit = intOption('limit', values.limit, 1, 100000);
@@ -140,7 +146,7 @@ async function main() {
   );
   /** The merge pass's batches over the stored judgements with this run's saved ones overlaid. */
   const mergePlan = (savedRows: JudgementRow[], usedBatches: number) => {
-    const plan = planMerge(overlayJudgements(storedJudgements, savedRows, new Date(), false), listings, { storedFingerprints: stored, categories, title });
+    const plan = planMerge(overlayJudgements(storedJudgements, savedRows, new Date(), false), listings, { categories, title });
     const chosenM = pilot ? spreadSample(plan.todo, limit, `${values.seed}|merge`) : plan.todo;
     const room = maxBatches === undefined ? Infinity : Math.max(0, maxBatches - usedBatches);
     const every = makeJudgeBatches(chosenM, batchSize, maxListings);
@@ -154,7 +160,7 @@ async function main() {
     return { plan, batches: mb };
   };
   if (planOnly) {
-    mergePlan([], batches.length);
+    if (!noMerge) mergePlan([], batches.length);
     return;
   }
 
@@ -257,14 +263,15 @@ async function main() {
       totals.matched += s.matched;
       totals.vetoes += s.vetoes;
       if (kind === 'merge') counts.merged += s.matched;
-      else saved.push(...s.judgements);
       stat.judged = s.judged;
       stat.rejected = s.rejected;
       let note = '';
       if (rw) {
-        const r = await saveJudgements(rw, Number(runId), s.judgements, { merge: kind === 'merge' });
-        note = `, ${r.saved} saved, ${r.superseded} older removed`;
+        const r = await saveJudgements(rw, Number(runId), s.judgements);
+        note = `, ${r.saved} saved`;
       }
+      // the merge pass reads only judgements that were saved (or would be, in a dry run; review M3)
+      if (kind === 'judge') saved.push(...s.judgements);
       const what = kind === 'merge' ? `${s.matched} with a merge` : `${s.matched} with a match`;
       console.log(`${tag}: ${s.judged} judged, ${s.rejected} rejected, ${what}, ${s.vetoes} vetoed pairs${note}, ${cost} (${totals.done}/${total} done)`);
     }
@@ -292,7 +299,8 @@ async function main() {
 
   try {
     await runPass(batches, 'judge', 0, 1, batches.length);
-    if (!stopping && !budgetStop) {
+    if (noMerge) console.log('judge-matches: merge pass off (--no-merge-pass)');
+    else if (!stopping && !budgetStop) {
       const m = mergePlan(saved, totals.done);
       const counts = await runPass(m.batches, 'merge', totals.done, groupCount(batches) + 1, totals.done + m.batches.length);
       mergeSummary = {
@@ -302,6 +310,17 @@ async function main() {
     } else console.log('judge-matches: merge pass skipped (the run was stopped)');
   } finally {
     await rm(work, { recursive: true, force: true }).catch(() => {});
+    // older judgements the saved ones replace go only now (review I4): after a stopped, capped or failing run only
+    // those whose every listing was judged again
+    if (rw) {
+      const complete = !stopping && !budgetStop && !breakerStop && totals.failedBatches === 0;
+      try {
+        const removed = await supersedeJudgements(rw, { complete });
+        console.log(`judge-matches: ${removed} older judgements replaced${complete ? '' : ' (only those wholly judged again: the run did not finish every batch)'}`);
+      } catch (e) {
+        console.log(`judge-matches: older judgements not removed (${(e as Error).message}); the next run removes them`);
+      }
+    }
     await finalize();
   }
   if (breakerStop || (totals.done > 0 && totals.failedBatches === totals.done)) process.exitCode = 1;

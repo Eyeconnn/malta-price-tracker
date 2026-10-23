@@ -42,8 +42,7 @@ export type Listing = {
 /**
  * A candidate group. members: every listing the judgement covers (sorted by id). reps: when set, the indexes of the
  * members Claude is shown (a family larger than MAX_GROUP, or one listing per cluster in the merge pass), and
- * attached[i] the members that follow reps[i] into its cluster. merge: a merge-pass group (src/match/merge.ts) and
- * the judgements its clusters came from.
+ * attached[i] the members that follow reps[i] into its cluster. merge: a merge-pass group (src/match/merge.ts).
  */
 export type Candidate = {
   key: string;
@@ -52,7 +51,8 @@ export type Candidate = {
   members: Listing[];
   reps?: number[];
   attached?: number[][];
-  merge?: { sources: string[] };
+  /** sources: the judgements its clusters came from; repSources[i]: the judgement of reps[i]'s cluster */
+  merge?: { sources: string[]; repSources: string[] };
 };
 
 export const MAX_GROUP = 12;

@@ -1,7 +1,6 @@
 // Reads and writes of match_judgements and judge_runs (migration 013). The judge writes only with the owner
 // connection and never in --dry-run; reads work before the migration (no tables: nothing stored).
 import type postgres from 'postgres';
-import { memberRef } from './fingerprint.js';
 
 /**
  * A judged listing. title and variants (normalised, as the fingerprint reads them) are what Claude saw: the site build
@@ -79,33 +78,42 @@ export async function finishJudgeRun(sql: postgres.Sql, runId: number, t: JudgeT
 }
 
 /**
- * Upserts judgements by candidate key, and deletes older judgements of other candidate keys that share a listing
- * with them (the group the listing belongs to changed), in one transaction. Returns how many were saved and removed.
- * opts.merge: merge-pass judgements (src/match/merge.ts) delete only older merge judgements (keys "m..."); the chunk
- * judgements they cover stay for their other listings, and the newer merge judgement wins at the site build.
+ * Upserts judgements by candidate key (one statement). Older judgements the new ones replace are removed only by
+ * supersedeJudgements after the run (review I4), so a stopped or partial run never drops a match it did not judge again.
  */
-export async function saveJudgements(sql: postgres.Sql, runId: number, rows: JudgementRow[], opts: { merge?: boolean } = {}): Promise<{ saved: number; superseded: number }> {
-  if (rows.length === 0) return { saved: 0, superseded: 0 };
-  const keys = rows.map((r) => r.key);
-  const refs = [...new Set(rows.flatMap((r) => r.members.map((m) => memberRef({ shopId: m.shop_id, groupKey: m.group_key }))))];
-  let superseded = 0;
-  await sql.begin(async (tx) => {
-    await tx`
-      insert into match_judgements (candidate_key, members, fingerprint, verdict, model, effort, judged_at, run_id)
-      select t.key, t.members::jsonb, t.fingerprint, t.verdict::jsonb, t.model, t.effort, now(), ${runId}
-      from unnest(${keys}::text[], ${rows.map((r) => JSON.stringify(r.members))}::text[], ${rows.map((r) => r.fingerprint)}::text[],
-        ${rows.map((r) => JSON.stringify(r.verdict))}::text[], ${rows.map((r) => r.model)}::text[], ${rows.map((r) => r.effort)}::text[])
-        as t(key, members, fingerprint, verdict, model, effort)
-      on conflict (candidate_key) do update set members = excluded.members, fingerprint = excluded.fingerprint, verdict = excluded.verdict,
-        model = excluded.model, effort = excluded.effort, judged_at = excluded.judged_at, run_id = excluded.run_id`;
-    const res = await tx`
-      delete from match_judgements j
-      where not (j.candidate_key = any(${keys}::text[]))
-        ${opts.merge === true ? tx`and j.candidate_key like 'm%'` : tx``}
-        and exists (
-          select 1 from jsonb_array_elements(j.members) m
-          where (m ->> 'shop_id') || '|' || (m ->> 'group_key') = any(${refs}::text[]))`;
-    superseded = res.count;
-  });
-  return { saved: rows.length, superseded };
+export async function saveJudgements(sql: postgres.Sql, runId: number, rows: JudgementRow[]): Promise<{ saved: number }> {
+  if (rows.length === 0) return { saved: 0 };
+  await sql`
+    insert into match_judgements (candidate_key, members, fingerprint, verdict, model, effort, judged_at, run_id)
+    select t.key, t.members::jsonb, t.fingerprint, t.verdict::jsonb, t.model, t.effort, now(), ${runId}
+    from unnest(${rows.map((r) => r.key)}::text[], ${rows.map((r) => JSON.stringify(r.members))}::text[], ${rows.map((r) => r.fingerprint)}::text[],
+      ${rows.map((r) => JSON.stringify(r.verdict))}::text[], ${rows.map((r) => r.model)}::text[], ${rows.map((r) => r.effort)}::text[])
+      as t(key, members, fingerprint, verdict, model, effort)
+    on conflict (candidate_key) do update set members = excluded.members, fingerprint = excluded.fingerprint, verdict = excluded.verdict,
+      model = excluded.model, effort = excluded.effort, judged_at = excluded.judged_at, run_id = excluded.run_id`;
+  return { saved: rows.length };
+}
+
+/**
+ * Removes the judgements newer ones replace: a newer normal judgement replaces an older judgement it shares a listing
+ * with; a newer merge judgement (key "m...", src/match/merge.ts) only older merge judgements (the chunk judgements
+ * keep their other listings). complete (a run that judged everything it planned, no batch failed): an older judgement
+ * goes when it shares a listing with a newer one; otherwise (a stopped or partial run) only when every one of its
+ * listings is in a newer one, so no listing loses the judgement it had. Returns how many were removed.
+ */
+export async function supersedeJudgements(sql: postgres.Sql, opts: { complete: boolean }): Promise<number> {
+  const res = await sql`
+    with m as (
+      select j.id, j.judged_at, j.candidate_key like 'm%' as is_merge, (e ->> 'shop_id') || '|' || (e ->> 'group_key') as ref
+      from match_judgements j, jsonb_array_elements(j.members) e
+    ),
+    covered as (
+      select o.id, o.ref, bool_or(n.id is not null) as c
+      from m o
+      left join m n on n.ref = o.ref and n.id <> o.id and (n.judged_at, n.id) > (o.judged_at, o.id) and (not n.is_merge or o.is_merge)
+      group by o.id, o.ref
+    )
+    delete from match_judgements
+    where id in (select id from covered group by id having ${opts.complete ? sql`bool_or(c)` : sql`bool_and(c)`})`;
+  return res.count;
 }
