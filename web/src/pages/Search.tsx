@@ -28,8 +28,7 @@ function ResultRow({ item, groupTitle, stretch }: { item: GroupItem; groupTitle:
     <li
       className={cn(
         'flex min-h-11 items-start gap-3 border-t border-line py-3 first:border-t-0 first:pt-1 last:pb-0',
-        stretch === 'row' &&
-          'relative -mx-2 rounded-xl px-2 transition-colors hover:bg-secondary has-[a:focus-visible]:ring-[3px] has-[a:focus-visible]:ring-ring/50',
+        stretch === 'row' && 'relative -mx-2 rounded-xl px-2',
       )}
     >
       <ShopBadge name={item.shop} size="sm" className="mt-0.5" />
@@ -37,7 +36,12 @@ function ResultRow({ item, groupTitle, stretch }: { item: GroupItem; groupTitle:
         <Link
           to={`/p/${item.id}`}
           aria-label={`${item.title} at ${item.shop}, ${item.priceCents === null ? NO_PRICE : formatEuro(item.priceCents)}`}
-          className="self-start rounded-sm font-semibold outline-none after:absolute after:inset-0 after:content-[''] hover:underline"
+          className={cn(
+            // The ::after fills the positioned box (row or card): it takes the taps, the hover tint and the focus ring,
+            // so the ring needs no :has and the glass card keeps its own shadow.
+            "self-start rounded-sm font-semibold outline-none after:absolute after:inset-0 after:content-[''] hover:underline hover:after:bg-secondary focus-visible:after:ring-[3px] focus-visible:after:ring-ring",
+            stretch === 'row' ? 'after:rounded-xl' : 'after:rounded-2xl',
+          )}
         >
           {item.shop}
         </Link>
@@ -81,7 +85,7 @@ function GroupCard({ group }: { group: GroupResult }) {
       aria-labelledby={id}
       className={cn(
         'glass min-h-11 p-4',
-        single && 'relative transition-shadow hover:ring-2 hover:ring-ring/30 has-[a:focus-visible]:ring-[3px] has-[a:focus-visible]:ring-ring/50',
+        single && 'relative',
       )}
     >
       <h2 id={id} className="leading-snug font-semibold">

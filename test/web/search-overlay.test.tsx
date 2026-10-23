@@ -1,11 +1,12 @@
 // @vitest-environment jsdom
 // The search overlay opened from the navigation (web/src/components/site/SearchOverlay.tsx).
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
-import { MemoryRouter, useLocation } from 'react-router';
+import { MemoryRouter, useLocation, useNavigate } from 'react-router';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { App } from '@/App';
 import { ModeProvider } from '@/components/site/ModeProvider';
 import type { GroupResult } from '@/lib/api';
+import { SEARCH_EXAMPLES } from '@/lib/searchExamples';
 
 /** matchMedia: (min-width: Npx) answers for the viewport width; prefers-reduced-motion answers `reduced`. */
 function setMedia(width: number, reduced = false): void {
@@ -69,15 +70,50 @@ function Where() {
   return <output data-testid="where">{loc.pathname + loc.search}</output>;
 }
 
-function renderAt(path: string) {
+/** Lets a test press the browser's Back button. */
+function BackButton() {
+  const navigate = useNavigate();
+  return (
+    <button type="button" data-testid="browser-back" onClick={() => navigate(-1)}>
+      back
+    </button>
+  );
+}
+const back = () => fireEvent.click(screen.getByTestId('browser-back'));
+
+function renderAt(path: string | string[]) {
+  const entries = Array.isArray(path) ? path : [path];
   return render(
     <ModeProvider>
-      <MemoryRouter initialEntries={[path]}>
+      <MemoryRouter initialEntries={entries} initialIndex={entries.length - 1}>
         <App />
         <Where />
+        <BackButton />
       </MemoryRouter>
     </ModeProvider>,
   );
+}
+
+/** Makes Radix think the closing dialog has a CSS exit animation, so it stays mounted until animationend. */
+function holdExitAnimation() {
+  const real = window.getComputedStyle.bind(window);
+  vi.spyOn(window, 'getComputedStyle').mockImplementation((el: Element, pseudo?: string | null) => {
+    const cs = real(el, pseudo);
+    if (el.getAttribute('role') !== 'dialog') return cs;
+    // Radix keeps the style object it read when the node mounted, so answer live from the data-state
+    return new Proxy(cs, {
+      get: (t, k) => {
+        if (k === 'animationName') return el.getAttribute('data-state') === 'closed' ? 'search-out' : 'none';
+        const v = (t as unknown as Record<string | symbol, unknown>)[k];
+        return typeof v === 'function' ? v.bind(t) : v;
+      },
+    });
+  });
+}
+function endExitAnimation() {
+  const e = new Event('animationend', { bubbles: true });
+  Object.assign(e, { animationName: 'search-out' });
+  fireEvent(screen.getByRole('dialog', { hidden: true }), e);
 }
 
 const where = () => screen.getByTestId('where').textContent;
@@ -102,6 +138,7 @@ beforeEach(() => {
 });
 afterEach(() => {
   cleanup();
+  vi.restoreAllMocks();
   vi.unstubAllGlobals();
   Reflect.deleteProperty(window, 'scrollY');
 });
@@ -273,9 +310,20 @@ describe('searching in the overlay', () => {
     renderAt('/how-we-check');
     const { d } = await openDesktop();
     const input = within(d).getByRole('searchbox');
-    expect(input.getAttribute('placeholder')).toBeNull();
     act(() => input.blur());
     await waitFor(() => expect(within(d).getByTestId('search-example')).toBeTruthy());
+    expect(input.getAttribute('placeholder')).toBeNull();
+  });
+
+  it('shows a static example as the placeholder while the empty field is focused (autofocus)', async () => {
+    renderAt('/how-we-check');
+    const { d } = await openDesktop();
+    const input = within(d).getByRole('searchbox') as HTMLInputElement;
+    await waitFor(() => expect(document.activeElement).toBe(input));
+    expect(within(d).queryByTestId('search-example')).toBeNull();
+    const examples = Object.values(SEARCH_EXAMPLES).flat() as string[];
+    expect(examples).toContain(input.getAttribute('placeholder'));
+    expect(input.className).toContain('placeholder:text-muted-foreground');
   });
 
   it('Enter goes to /search?q= and closes the overlay', async () => {
@@ -313,6 +361,103 @@ describe('searching in the overlay', () => {
   });
 });
 
+describe('after choosing a result', () => {
+  it('keeps the panel as it was until the closing animation ends, then clears the query', async () => {
+    holdExitAnimation();
+    renderAt('/how-we-check');
+    const { d } = await openDesktop();
+    fireEvent.change(within(d).getByRole('searchbox'), { target: { value: 'ip' } });
+    fireEvent.click(await within(d).findByRole('link', { name: /ip result/ }, { timeout: 2000 }));
+    await waitFor(() => expect(where()).toBe('/p/41'));
+    await waitFor(() => expect(screen.getByRole('dialog', { hidden: true }).getAttribute('data-state')).toBe('closed'));
+    // still fading out: the text is still there, so the panel does not shrink
+    expect((within(screen.getByRole('dialog', { hidden: true })).getByRole('searchbox', { hidden: true }) as HTMLInputElement).value).toBe('ip');
+    endExitAnimation();
+    await gone();
+    const reopened = await openDesktop();
+    expect((within(reopened.d).getByRole('searchbox') as HTMLInputElement).value).toBe('');
+  });
+
+  it('moves focus to the new page main content, not back to the nav button', async () => {
+    renderAt('/how-we-check');
+    const { opener, d } = await openDesktop();
+    fireEvent.change(within(d).getByRole('searchbox'), { target: { value: 'ip' } });
+    fireEvent.click(await within(d).findByRole('link', { name: /ip result/ }, { timeout: 2000 }));
+    await gone();
+    await waitFor(() => expect(document.activeElement).toBe(screen.getByRole('main')));
+    expect(document.activeElement).not.toBe(opener);
+  });
+});
+
+describe('the Back button', () => {
+  it('closes the overlay without leaving the page', async () => {
+    renderAt(['/shops', '/how-we-check']);
+    await openDesktop();
+    back();
+    await gone();
+    expect(where()).toBe('/how-we-check');
+    expect(screen.getByRole('heading', { level: 1, name: 'How we check' })).toBeTruthy();
+    // focus is given back to the opener as with Escape
+    await waitFor(() => expect(document.activeElement).toBe(desktopOpener()));
+    back();
+    await waitFor(() => expect(where()).toBe('/shops'));
+  });
+
+  it('after closing with Escape, Back still goes to the previous page', async () => {
+    renderAt(['/shops', '/how-we-check']);
+    await openDesktop();
+    fireEvent.keyDown(document.activeElement!, { key: 'Escape' });
+    await gone();
+    expect(where()).toBe('/how-we-check');
+    back();
+    await waitFor(() => expect(where()).toBe('/shops'));
+  });
+
+  it('after closing with the Close button, Back still goes to the previous page', async () => {
+    renderAt(['/shops', '/how-we-check']);
+    const { d } = await openDesktop();
+    fireEvent.click(within(d).getByRole('button', { name: 'Close search' }));
+    await gone();
+    back();
+    await waitFor(() => expect(where()).toBe('/shops'));
+  });
+
+  it('after a chosen result Back returns to the page, not to an open overlay', async () => {
+    renderAt(['/shops', '/how-we-check']);
+    const { d } = await openDesktop();
+    fireEvent.change(within(d).getByRole('searchbox'), { target: { value: 'ip' } });
+    fireEvent.click(await within(d).findByRole('link', { name: /ip result/ }, { timeout: 2000 }));
+    await gone();
+    expect(where()).toBe('/p/41');
+    back();
+    await waitFor(() => expect(where()).toBe('/how-we-check'));
+    expect(dialog()).toBeNull();
+  });
+
+  it('after Enter Back returns to the page, not to an open overlay', async () => {
+    renderAt(['/shops', '/how-we-check']);
+    const { d } = await openDesktop();
+    const input = within(d).getByRole('searchbox');
+    fireEvent.change(input, { target: { value: 'ipad' } });
+    fireEvent.submit(input.closest('form')!);
+    await gone();
+    expect(where()).toBe('/search?q=ipad');
+    back();
+    await waitFor(() => expect(where()).toBe('/how-we-check'));
+    expect(dialog()).toBeNull();
+  });
+
+  it('keeps the query when closed by Back and reopened', async () => {
+    renderAt(['/shops', '/how-we-check']);
+    let { d } = await openDesktop();
+    fireEvent.change(within(d).getByRole('searchbox'), { target: { value: 'ipad' } });
+    back();
+    await gone();
+    ({ d } = await openDesktop());
+    expect((within(d).getByRole('searchbox') as HTMLInputElement).value).toBe('ipad');
+  });
+});
+
 describe('keyboard shortcuts', () => {
   it('/ and Ctrl+K open the overlay when focus is not in a text field', async () => {
     renderAt('/how-we-check');
@@ -322,6 +467,48 @@ describe('keyboard shortcuts', () => {
     await gone();
     fireEvent.keyDown(document.body, { key: 'k', ctrlKey: true });
     await screen.findByRole('dialog', { name: 'Search products' });
+  });
+
+  it('Cmd+K and the physical K key (any layout) open it', async () => {
+    renderAt('/how-we-check');
+    fireEvent.keyDown(document.body, { key: 'k', metaKey: true });
+    await screen.findByRole('dialog', { name: 'Search products' });
+    fireEvent.keyDown(document.activeElement!, { key: 'Escape' });
+    await gone();
+    fireEvent.keyDown(document.body, { key: 'l', code: 'KeyK', ctrlKey: true });
+    await screen.findByRole('dialog', { name: 'Search products' });
+  });
+
+  it('"/" with Ctrl, Alt or Meta is left alone, and so is a plain k', () => {
+    renderAt('/how-we-check');
+    fireEvent.keyDown(document.body, { key: '/', ctrlKey: true });
+    fireEvent.keyDown(document.body, { key: '/', altKey: true });
+    fireEvent.keyDown(document.body, { key: '/', metaKey: true });
+    fireEvent.keyDown(document.body, { key: 'k' });
+    expect(dialog()).toBeNull();
+  });
+
+  it('do nothing in a textarea or an editable element', () => {
+    renderAt('/how-we-check');
+    const area = document.body.appendChild(document.createElement('textarea'));
+    const editable = document.body.appendChild(document.createElement('div'));
+    editable.setAttribute('contenteditable', 'true');
+    for (const el of [area, editable]) {
+      fireEvent.keyDown(el, { key: '/' });
+      fireEvent.keyDown(el, { key: 'k', ctrlKey: true });
+    }
+    expect(dialog()).toBeNull();
+    area.remove();
+    editable.remove();
+  });
+
+  it('do nothing while another dialog is open', async () => {
+    setMedia(375);
+    renderAt('/how-we-check');
+    fireEvent.click(within(mobileNav()).getByRole('button', { name: 'More' }));
+    const more = await screen.findByRole('dialog', { name: 'More' });
+    fireEvent.keyDown(more, { key: '/' });
+    expect(dialog()).toBeNull();
   });
 
   it('do nothing while typing in a field', async () => {

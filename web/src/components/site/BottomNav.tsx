@@ -26,6 +26,7 @@ export function BottomNav() {
         type="button"
         aria-haspopup="dialog"
         aria-expanded={open}
+        aria-current={onSearchPage ? 'page' : undefined}
         onClick={(e) => openSearch(e.currentTarget)}
         className={cn(item, onSearchPage ? 'bg-secondary font-semibold text-ink' : 'text-muted-foreground')}
       >

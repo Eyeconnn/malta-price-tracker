@@ -115,6 +115,17 @@ describe('current page', () => {
     expect(within(nav).getByRole('link', { name: 'Shops' }).getAttribute('aria-current')).toBeNull();
   });
 
+  it.each([[375], [1024]])('marks the Search button with aria-current on /search at %ipx, and only there', (width) => {
+    setViewport(width);
+    renderSite('/search');
+    const nav = (width < 768 ? mobileNav() : mainNav())!;
+    expect(within(nav).getByRole('button', { name: 'Search' }).getAttribute('aria-current')).toBe('page');
+    cleanup();
+    renderSite('/shops');
+    const other = (width < 768 ? mobileNav() : mainNav())!;
+    expect(within(other).getByRole('button', { name: 'Search' }).getAttribute('aria-current')).toBeNull();
+  });
+
   it('keeps Shops current on a shop page', () => {
     setViewport(375);
     renderSite('/shops/digital-zone');

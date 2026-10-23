@@ -88,8 +88,12 @@ describe('Search page results', () => {
     expect(link.className).toContain('after:inset-0');
     expect(card.className).toContain('relative');
     expect(link.closest('li')!.className).not.toMatch(/(^|\s)relative(\s|$)/);
-    expect(card.className).toContain('has-[a:focus-visible]:ring-[3px]');
-    expect(card.className).toContain('hover:ring-2');
+    // the ring and the hover tint are drawn by the link's own ::after (no :has, and the card keeps its glass shadow)
+    expect(link.className).toContain('focus-visible:after:ring-[3px]');
+    expect(link.className).toContain('focus-visible:after:ring-ring');
+    expect(link.className).not.toContain('ring-ring/');
+    expect(link.className).toContain('hover:after:bg-secondary');
+    expect(card.className).not.toMatch(/ring|has-\[/);
     expect(card.className).toContain('min-h-11');
     fireEvent.click(link);
     expect(where()).toBe('/p/77');
@@ -112,11 +116,47 @@ describe('Search page results', () => {
       expect(l.className).toContain('after:absolute');
       expect(l.closest('li')!.className).toContain('relative');
       expect(l.closest('li')!.className).toContain('min-h-11');
-      expect(l.closest('li')!.className).toContain('hover:bg-secondary');
-      expect(l.closest('li')!.className).toContain('has-[a:focus-visible]:ring-[3px]');
+      expect(l.className).toContain('focus-visible:after:ring-[3px]');
+      expect(l.className).toContain('focus-visible:after:ring-ring');
+      expect(l.className).toContain('hover:after:bg-secondary');
+      expect(l.closest('li')!.className).not.toContain('has-[');
     }
     fireEvent.click(links[1]!);
     expect(where()).toBe('/p/78');
+  });
+});
+
+describe('live result names', () => {
+  const open = async () => {
+    renderAt('/', 375);
+    fireEvent.change(screen.getByRole('searchbox'), { target: { value: 'thinkbook' } });
+    return within(await screen.findByRole('region', { name: 'Search results' }, { timeout: 2000 }));
+  };
+
+  it('one shop: "<title> at <shop>, <price>", from sr-only text (no aria-label)', async () => {
+    results = [{ canonicalId: 1, title: 'Lenovo ThinkBook 16 G6', items: [item(77, 'AtoZ', 'atoz', 71900)] }];
+    const region = await open();
+    const link = await region.findByRole('link', { name: 'Lenovo ThinkBook 16 G6 at AtoZ, \u20ac719.00' });
+    expect(link.getAttribute('aria-label')).toBeNull();
+    expect(link.querySelector('.sr-only')!.textContent).toBe('Lenovo ThinkBook 16 G6 at AtoZ, \u20ac719.00');
+    // the visible text carries the same words, so the name contains the visible label
+    expect(link.textContent).toContain('Lenovo ThinkBook 16 G6');
+    expect(link.textContent).toContain('AtoZ');
+    expect(link.textContent).toContain('719.00');
+  });
+
+  it('several shops: "<title>, from <cheapest price> at <N> shops"', async () => {
+    results = [{ canonicalId: 1, title: 'Lenovo ThinkBook 16 G6', items: [item(77, 'AtoZ', 'atoz', 71900), item(78, 'Beta', 'beta', 75900)] }];
+    const region = await open();
+    expect(await region.findByRole('link', { name: 'Lenovo ThinkBook 16 G6, from \u20ac719.00 at 2 shops' })).toBeTruthy();
+  });
+
+  it('keeps the verdict as the description, not in the name', async () => {
+    results = [{ canonicalId: 1, title: 'Lenovo ThinkBook 16 G6', items: [item(77, 'AtoZ', 'atoz', 71900)] }];
+    const region = await open();
+    const link = await region.findByRole('link', { name: /^Lenovo ThinkBook 16 G6 at AtoZ/ });
+    expect(link.getAttribute('aria-describedby')).toBeTruthy();
+    expect(document.getElementById(link.getAttribute('aria-describedby')!)!.textContent).toBe('Real deal');
   });
 });
 
@@ -128,11 +168,12 @@ describe('live results', () => {
       fireEvent.change(screen.getByRole('searchbox'), { target: { value: 'thinkbook' } });
       const region = await screen.findByRole('region', { name: 'Search results' }, { timeout: 2000 });
       const link = await within(region).findByRole('link', { name: /Lenovo ThinkBook 16 G6/ });
-      expect(link.getAttribute('aria-label') ?? link.textContent).toMatch(/Lenovo ThinkBook 16 G6.*AtoZ/);
+      expect(link.getAttribute('aria-label')).toBeNull();
       expect(link.className).toContain('min-h-11');
       expect(link.className).toContain('hover:bg-secondary');
       expect(link.className).toContain('focus-visible:ring-[3px]');
-      const el = target === 'title' ? within(link).getByText('Lenovo ThinkBook 16 G6') : target === 'price' ? within(link).getByText(/719/) : link;
+      expect(link.className).toMatch(/focus-visible:ring-ring(\s|$)/);
+      const el = target === 'title' ? within(link).getByText('Lenovo ThinkBook 16 G6') : target === 'price' ? link.querySelector<HTMLElement>('.tabular-nums')! : link;
       fireEvent.click(el);
       await waitFor(() => expect(where()).toBe('/p/77'));
       cleanup();

@@ -26,6 +26,7 @@ export function TopNav() {
             aria-label="Search"
             aria-haspopup="dialog"
             aria-expanded={open}
+            aria-current={onSearchPage ? 'page' : undefined}
             onClick={(e) => openSearch(e.currentTarget)}
             className={cn(
               'inline-flex min-h-11 min-w-11 items-center justify-center rounded-md border-b-2 outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50',
