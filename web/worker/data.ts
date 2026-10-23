@@ -46,6 +46,8 @@ export type SearchHit = Card & {
   inStock: boolean | null;
   /** the row's accepted clean name (product_names, stored for its current shop title), null without one */
   displayName: string | null;
+  /** the clean variant label ("512GB, 12GB, Grey"), null without one */
+  variantLabel: string | null;
   /** the category the clean name and attributes were made for */
   nameCategory: string | null;
   attrs: Record<string, unknown> | null;
@@ -377,7 +379,7 @@ export function createData(db: SqlRunner, opts: DataOptions = {}): Data {
             select t.group_key, t.hit_rank, t.group_title, t.hit_id from top t where not t.trusted
           ), ranked as (
             select m.group_key, m.hit_rank, m.group_title, ${CARD_COLUMNS}, sp.in_stock, sp.canonical_id, sp.match_method,
-              sp.match_confirmed, sp.image_url, pn.display_name, pn.category as name_category, pn.attrs,
+              sp.match_confirmed, sp.image_url, pn.display_name, pn.variant_label, pn.category as name_category, pn.attrs,
               -- a stored 0 is no price (serialised null): it sorts with the nulls, last
               row_number() over (partition by m.group_key order by nullif(sp.price_cents, 0) asc nulls last, sp.id) as rn
             from members m join site_products sp on sp.id = m.id join shops s on s.id = sp.shop_id
@@ -402,6 +404,7 @@ export function createData(db: SqlRunner, opts: DataOptions = {}): Data {
           possible: groupKey.startsWith('c') && !trusted,
           inStock: boolOrNull(r.in_stock),
           displayName: strOrNull(r.display_name),
+          variantLabel: strOrNull(r.variant_label),
           nameCategory: strOrNull(r.name_category),
           attrs: objOrNull(r.attrs),
           imageUrl: strOrNull(r.image_url),

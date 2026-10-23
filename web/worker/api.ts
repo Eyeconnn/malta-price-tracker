@@ -67,7 +67,8 @@ function slugParam(url: URL, name: string): string | null | undefined {
  * title; specs: its identity specs the name does not carry ("256GB"). priceCents: the lowest price of a seller
  * not known to be out of stock, else the lowest price (inStock false), null when no seller shows one (never 0).
  * shop: the one shop when only one sells it. good / avoid: how many sellers have that verdict (verdicts stay per
- * seller, never merged into one product verdict).
+ * seller, never merged into one product verdict). option: for a product sold as one listing, its variant option
+ * (the colour of a shop that lists each colour on its own), so such listings stay apart; null otherwise.
  */
 export type ProductResult = {
   key: string;
@@ -81,6 +82,7 @@ export type ProductResult = {
   imageUrl: string | null;
   good: number;
   avoid: number;
+  option: string | null;
 };
 
 /** A link or image address from scraped data, only when it is plain http(s) (no user name or password). */
@@ -139,6 +141,7 @@ export function productResults(hits: SearchHit[]): ProductResult[] {
       imageUrl: g.rows.map((r) => webAddress(r.imageUrl)).find((u) => u !== null) ?? null,
       good: g.rows.filter((r) => r.verdict === 'good').length,
       avoid: g.rows.filter((r) => r.verdict === 'avoid').length,
+      option: g.rows.length === 1 ? optionLabel(g.rows[0].variantLabel, g.rows[0].nameCategory, g.rows[0].attrs) : null,
     };
   });
 }

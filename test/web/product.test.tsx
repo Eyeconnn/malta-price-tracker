@@ -334,6 +334,8 @@ describe('product page, variant options', () => {
     cleanup();
     await openProduct(page({ variants: [{ id: 80, sellerId: 2, label: 'Black', priceCents: 69900, inStock: true }] }));
     expect(screen.queryByRole('radiogroup', { name: 'Option' })).toBeNull();
+    // the one option is named, so a shop that lists each colour on its own shows which one this is
+    expect(screen.getByText('Option: Black')).toBeTruthy();
   });
 
   it("choosing an option lists the sellers that have it, at that option's price", async () => {

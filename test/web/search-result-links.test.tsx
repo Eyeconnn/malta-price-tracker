@@ -30,6 +30,7 @@ const result = (key: string, extra: Partial<ProductResult> = {}): ProductResult 
   imageUrl: null,
   good: 1,
   avoid: 0,
+  option: null,
   ...extra,
 });
 const S25 = (extra: Partial<ProductResult> = {}) =>
@@ -111,6 +112,14 @@ describe('Search page results', () => {
     expect(link.getAttribute('aria-label')).toBe('Samsung Galaxy S25 Ultra Smartphone, 256GB, from €1,199.00 at 3 shops');
     expect(link.getAttribute('href')).toBe('/product/c5');
     expect(screen.getAllByRole('heading', { level: 1 })).toHaveLength(1);
+  });
+
+  it('names the option of a product sold as one listing after another middle dot', async () => {
+    results = [S25({ shops: 1, shop: 'AtoZ', option: 'Grey', avoid: 0, bf: false })];
+    renderAt('/search?q=s25');
+    const card = await screen.findByRole('article');
+    expect(within(card).getByRole('heading', { level: 2 }).textContent).toBe('Samsung Galaxy S25 Ultra Smartphone · 256GB · Grey');
+    expect(within(card).getByRole('link').getAttribute('aria-label')).toBe('Samsung Galaxy S25 Ultra Smartphone, 256GB, Grey at AtoZ, €1,199.00');
   });
 
   it('never shows a zero price, and says when no shop has it in stock', async () => {

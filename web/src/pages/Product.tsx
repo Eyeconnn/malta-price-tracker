@@ -449,6 +449,8 @@ function ProductContent({ data }: { data: ProductPage }) {
               {withSpecs(product.name, product.specs)}
             </h1>
             <p className="text-sm text-muted-foreground">{summary}</p>
+            {/* one option only (a shop that lists each colour on its own): say which one this is */}
+            {options.length === 1 && <p className="text-sm font-medium">{`Option: ${options[0]!.label}`}</p>}
           </div>
         </div>
         {options.length > 1 && (

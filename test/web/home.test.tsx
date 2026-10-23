@@ -311,6 +311,7 @@ describe('home search box', () => {
     imageUrl: null,
     good: 0,
     avoid: 0,
+    option: null,
     ...extra,
   });
   const groups = (q: string): ProductResult[] => [result('c1', { name: `${q} result` })];
@@ -440,6 +441,7 @@ describe('search page', () => {
     imageUrl: null,
     good: 0,
     avoid: 0,
+    option: null,
     ...extra,
   });
 

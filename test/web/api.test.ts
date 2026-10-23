@@ -189,7 +189,7 @@ describe('GET /api/search', () => {
   });
 
   it('gives one result per product in data order (max 40): clean name, specs, lowest in-stock price, shops, BF, image', async () => {
-    const c5 = { groupKey: 'c5', groupTitle: 'SAMSUNG S25 ULTRA 256GB', canonicalId: 5, possible: false, nameCategory: 'phones', imageUrl: null };
+    const c5 = { groupKey: 'c5', groupTitle: 'SAMSUNG S25 ULTRA 256GB', canonicalId: 5, possible: false, nameCategory: 'phones', imageUrl: null, variantLabel: null };
     const named = { displayName: 'Samsung Galaxy S25 Ultra Smartphone', attrs: { storage_gb: 256 } };
     const hits = [
       { ...card(1, { shop: 'Alpha', shopSlug: 'alpha', priceCents: 90000, bf: false, verdict: 'none' }), ...c5, ...named, inStock: true, imageUrl: 'javascript:alert(1)' },
@@ -203,6 +203,7 @@ describe('GET /api/search', () => {
         possible: false,
         inStock: true,
         displayName: null,
+        variantLabel: null,
         nameCategory: null,
         attrs: null,
         imageUrl: null,
@@ -223,11 +224,31 @@ describe('GET /api/search', () => {
       bf: true,
       // http(s) only
       imageUrl: 'https://beta.example/s25.jpg',
+      option: null,
       good: 1,
       avoid: 1,
     });
     // no clean name: the best hit's shop title; a 0 price is no price, never 0
     expect(body.results[1]).toMatchObject({ key: 's100', name: 'Product 100', specs: null, priceCents: null, shops: 1, shop: 'Scan' });
+  });
+
+  it('names the option (the colour) of a product sold as one listing, so its colours stay apart', async () => {
+    const base = { ...card(1), groupTitle: 'x', canonicalId: null, possible: false, inStock: true, displayName: 'Samsung Galaxy S25 Ultra Smartphone', nameCategory: 'phones', imageUrl: null };
+    const hits = [
+      { ...base, groupKey: 's1', variantLabel: '512GB, 12GB, Grey', attrs: { storage_gb: 512, ram_gb: 12 } },
+      { ...base, id: 2, groupKey: 's2', variantLabel: null, attrs: {} },
+      { ...base, id: 3, groupKey: 'c4', variantLabel: 'Blue', attrs: {} },
+      { ...base, id: 5, shopSlug: 'other', groupKey: 'c4', variantLabel: 'Black', attrs: {} },
+    ];
+    const w = setup(fakeData({ search: vi.fn(async () => hits) }));
+    const body = (await (await w.fetch('/api/search?q=s25')).json()) as { results: { key: string; option: string | null; specs: string | null }[] };
+    expect(body.results.map((r) => [r.key, r.option])).toEqual([
+      ['s1', 'Grey'],
+      ['s2', null],
+      // a product of several listings has its options on its page
+      ['c4', null],
+    ]);
+    expect(body.results[0]!.specs).toBe('512GB, 12GB RAM');
   });
 
   it('takes the lowest price when every seller is out of stock, and never reads the thresholds', async () => {
@@ -239,6 +260,7 @@ describe('GET /api/search', () => {
       possible: false,
       inStock: false,
       displayName: null,
+      variantLabel: null,
       nameCategory: null,
       attrs: null,
       imageUrl: null,

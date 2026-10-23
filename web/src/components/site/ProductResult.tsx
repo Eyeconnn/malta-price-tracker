@@ -12,11 +12,11 @@ const positive = (n: unknown): n is number => typeof n === 'number' && Number.is
 /** The link to a product's page. */
 export const productPath = (key: string) => `/product/${encodeURIComponent(key)}`;
 
-/** The visible title: "Samsung Galaxy S25 Ultra Smartphone · 256GB". */
-export const resultTitle = (r: Pick<ProductResult, 'name' | 'specs'>) => withSpecs(r.name, r.specs);
+/** The visible title: "Samsung Galaxy S25 Ultra Smartphone · 256GB", and " · Grey" for a one-listing option. */
+export const resultTitle = (r: Pick<ProductResult, 'name' | 'specs' | 'option'>) => withSpecs(withSpecs(r.name, r.specs), r.option);
 
-/** The title as a screen reader hears it: the specs after a comma, not a middle dot. */
-const spokenTitle = (r: Pick<ProductResult, 'name' | 'specs'>) => (r.specs ? `${r.name}, ${r.specs}` : r.name);
+/** The title as a screen reader hears it: the specs and option after commas, not middle dots. */
+const spokenTitle = (r: Pick<ProductResult, 'name' | 'specs' | 'option'>) => [r.name, r.specs, r.option].filter((x) => x).join(', ');
 
 /** "€719.00", or "Price not shown by the shop" (never €0.00). */
 export const resultPrice = (r: ProductResult) => (positive(r.priceCents) ? formatEuro(r.priceCents) : NO_PRICE);

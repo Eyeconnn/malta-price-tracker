@@ -432,7 +432,7 @@ describe('data.ts products by clean name (design Part 3)', () => {
     const g = hits.filter((h) => h.groupKey === 'c800');
     // 81 has no such words in its shop title: found through its clean name
     expect(g.map((h) => h.id)).toEqual([81, 80]);
-    expect(g[0]).toMatchObject({ displayName: 'Samsung Galaxy S25 Ultra Smartphone', nameCategory: 'phones', attrs: { storage_gb: 256, colour: ['black'] }, possible: false });
+    expect(g[0]).toMatchObject({ displayName: 'Samsung Galaxy S25 Ultra Smartphone', variantLabel: '256GB, Titanium Black', nameCategory: 'phones', attrs: { storage_gb: 256, colour: ['black'] }, possible: false });
     expect(g[1].imageUrl).toBe('https://alpha.example/s25.jpg');
     expect(g[0].groupTitle).toBe('Samsung Galaxy S25 Ultra Smartphone');
     // the title-only member is never pulled in
