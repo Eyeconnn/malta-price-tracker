@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { budgetReached, checkRunScope, parseEffort, parseMaxCost } from '../../src/names/options.js';
+import { budgetReached, checkRunScope, FailureBreaker, parseEffort, parseMaxCost } from '../../src/names/options.js';
 
 describe('checkRunScope', () => {
   it('refuses a run that writes to the database without --pilot or --max-batches', () => {
@@ -35,5 +35,27 @@ describe('parseMaxCost and budgetReached (--max-cost for the nightly run)', () =
     expect(budgetReached(5, 5)).toBe(true);
     expect(budgetReached(7, 5)).toBe(true);
     expect(budgetReached(1000, undefined)).toBe(false);
+  });
+});
+
+describe('FailureBreaker (review I6/I7)', () => {
+  it('stops after 5 failed batches in a row; a good batch resets the count', () => {
+    const b = new FailureBreaker();
+    for (let i = 0; i < 4; i++) expect(b.record(false, 'claude timed out after 300s')).toBe('continue');
+    expect(b.record(true)).toBe('continue');
+    for (let i = 0; i < 4; i++) expect(b.record(false, 'claude exited with code 1')).toBe('continue');
+    expect(b.record(false, 'claude exited with code 1')).toBe('consecutive');
+  });
+
+  it('stops at once on a login or usage-limit error', () => {
+    for (const e of [
+      'claude reported an error: Claude AI usage limit reached|1761300000',
+      'claude exited with code 1: Invalid API key \u00b7 Please run /login',
+      'claude reported an error: OAuth token has expired',
+      "claude reported an error: You've hit your limit \u00b7 resets 3am",
+      'claude exited with code 1: 401 Unauthorized',
+    ]) {
+      expect(new FailureBreaker().record(false, e)).toBe('auth');
+    }
   });
 });

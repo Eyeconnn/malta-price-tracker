@@ -249,7 +249,8 @@ describe('checkName: spelling variants, joined and split words, symbols', () => 
   it('treats & as and, + as plus and w/ as with', () => {
     ok(checkName({ title: 'Trevi IP68 Smart Fitness Watch for iOS & Android Black \u2013 TFIT320BK', brand: 'Trevi' }, name('Trevi IP68 Smart Fitness Watch for iOS and Android TFIT320BK', {}, 'Black')));
     ok(checkName({ title: 'JBL Tune 500 Wired Headphones + Mic White \u2013 T500WHT', brand: 'JBL' }, name('JBL Tune 500 Wired Headphones Plus Mic T500WHT', {}, 'White')));
-    ok(checkName({ title: 'Samsung Galaxy S24 Plus 256GB', brand: 'Samsung' }, name('Samsung Galaxy S24+ 256GB')));
+    // a + the data does not have is not added (review I2)
+    expect(checkName({ title: 'Samsung Galaxy S24 Plus 256GB', brand: 'Samsung' }, name('Samsung Galaxy S24+ 256GB')).ok).toBe(false);
     ok(checkName({ title: 'Philips SHC5200M2 Black Wireless Headphones w/ Transmitter', brand: 'Philips' }, name('Philips SHC5200M2 Wireless Headphones with Transmitter', {}, 'Black')));
     ok(checkName({ title: 'Xiaomi Watch S5 46mm Ceramic Blue w/Leather Strap Smartwatch', brand: 'Xiaomi' }, name('Xiaomi Watch S5 46mm Ceramic Blue with Leather Strap Smartwatch')));
   });
@@ -281,7 +282,9 @@ describe('checkName: rerun rejects of 2026-10-23', () => {
 
   it('treats +, & and and as the same word, and lets the variant label join values with and', () => {
     ok(checkName({ title: 'Kids Beauty Vanity Table + Stool White', brand: 'Small Foot', brandStatus: 'reliable' }, name('Small Foot Kids Beauty Vanity Table and Stool', {}, 'White')));
-    ok(checkName({ title: 'Philips SHC5200M2 Headphones & Transmitter', brand: 'Philips' }, name('Philips SHC5200M2 Headphones Plus Transmitter')));
+    // & reads as and, not as plus (review I2)
+    ok(checkName({ title: 'Philips SHC5200M2 Headphones & Transmitter', brand: 'Philips' }, name('Philips SHC5200M2 Headphones and Transmitter')));
+    expect(checkName({ title: 'Philips SHC5200M2 Headphones & Transmitter', brand: 'Philips' }, name('Philips SHC5200M2 Headphones Plus Transmitter')).ok).toBe(false);
     // iPad Pro M4: "and" came from the label joining the two sizes of the variants
     const ipad = { title: 'iPad Pro M4', brand: 'Apple', brandStatus: 'reliable' as const, variantTitles: ['Storage: 256GB, Size: 11\u2033', 'Storage: 256GB, Size: 13\u2033'] };
     ok(checkName(ipad, name('Apple iPad Pro M4', {}, '256GB, 11" and 13"')));
@@ -304,6 +307,59 @@ describe('checkName: rerun rejects of 2026-10-23', () => {
     // the title's maker wins, so the brand field's value is not required then
     ok(checkName(src, name('Therabody TheraCup', {}, 'Single')));
     ok(checkName({ title: 'Paw Patrol My First Laptop', brand: 'Colorbaby', brandStatus: 'unreliable', titleBrand: 'Paw Patrol', variantTitles: ['Chase', 'Marshall'] }, name('Paw Patrol My First Laptop', {}, 'Chase, Marshall')));
+  });
+});
+
+// Review of 1769c46 and 21b4a04: the reviewer's pairs.
+describe('checkName: review fixes', () => {
+  const ok = (r: ReturnType<typeof checkName>) => expect(r).toEqual({ ok: true });
+  const bad = (r: ReturnType<typeof checkName>) => expect(r.ok).toBe(false);
+
+  it('C1: a lost model word is not kept by a longer word that merely starts or ends with it', () => {
+    bad(checkName({ title: 'Apple iPhone 15 Pro Screen Protector', brand: 'Apple' }, name('Apple iPhone 15 Screen Protector')));
+    bad(checkName({ title: 'Apple iPhone SE 2022 Silicone Case', brand: 'Apple' }, name('Apple iPhone 2022 Silicone Case')));
+    bad(checkName({ title: 'Galaxy S23 FE Safe Charger', brand: null }, name('Galaxy S23 Safe Charger')));
+    bad(checkName({ title: 'MacBook Air 13 with AirTag cover', brand: null }, name('MacBook 13 with AirTag cover')));
+    // still fine: the title's own words written together (Air Fryer as Airfryer)
+    ok(checkName({ title: 'Severin Air Fryer 7L', brand: 'Severin' }, name('Severin Airfryer 7L')));
+  });
+
+  it('I2: plus only from a + in the title or variants, and from & or a spaced +; no new + glued to a word', () => {
+    ok(checkName({ title: 'Samsung Galaxy S24+ 256GB', brand: 'Samsung' }, name('Samsung Galaxy S24 Plus 256GB')));
+    ok(checkName({ title: 'Samsung Galaxy S24+ 256GB', brand: 'Samsung' }, name('Samsung Galaxy S24+ 256GB')));
+    bad(checkName({ title: 'Samsung Galaxy S24 Plus 256GB', brand: 'Samsung' }, name('Samsung Galaxy S24+ 256GB')));
+    ok(checkName({ title: 'Samsung Galaxy S24 Plus 256GB', brand: 'Samsung' }, name('Samsung Galaxy S24 Plus 256GB')));
+    ok(checkName({ title: 'Kids Beauty Vanity Table + Stool White', brand: null }, name('Kids Beauty Vanity Table and Stool', {}, 'White')));
+    // the mpn is no source of and or plus
+    bad(checkName({ title: 'Wired Headphones Mic', brand: null, mpn: 'HP+MIC-01' }, name('Wired Headphones Plus Mic')));
+    // SPF 50+ keeps its +
+    ok(checkName({ title: 'Childs Farm Sun Cream 50+ SPF Fragrance-Free 200ml', brand: 'Childs Farm' }, name('Childs Farm Sun Cream 50+ SPF Fragrance-Free 200ml')));
+  });
+
+  it('I2: a percent is required unless it is percent-off noise (Glenfiddich 40%)', () => {
+    const src = { title: 'Glenfiddich 12 Year Old Single Malt 40% 70cl', brand: 'Glenfiddich' };
+    ok(checkName(src, name('Glenfiddich 12 Year Old Single Malt 40% 70cl')));
+    bad(checkName(src, name('Glenfiddich 12 Year Old Single Malt 70cl')));
+    ok(checkName({ title: 'Nike Air Max 90 -30% now', brand: 'Nike' }, name('Nike Air Max 90')));
+    ok(checkName({ title: 'Nike Air Max 90 20% off', brand: 'Nike' }, name('Nike Air Max 90')));
+  });
+
+  it('I3: the first word of a brand is enough only when the title lacks the full brand', () => {
+    bad(checkName({ title: 'Black & Decker BXGR1001E Mini Grill 1000W', brand: 'Black & Decker' }, name('Black BXGR1001E Mini Grill 1000W')));
+    ok(checkName({ title: 'Black & Decker BXGR1001E Mini Grill 1000W', brand: 'Black & Decker' }, name('Black & Decker BXGR1001E Mini Grill 1000W')));
+    bad(checkName({ title: 'Red Bull Energy Drink 250ml', brand: 'Red Bull' }, name('Red Energy Drink 250ml')));
+    bad(checkName({ title: 'Fisher-Price Laugh & Learn Smart Stages Chair', brand: 'Fisher-Price' }, name('Fisher Laugh & Learn Smart Stages Chair')));
+    ok(checkName({ title: 'Train Essentials Train Cotton 3-Stripes Pacer Shorts', brand: 'Adidas Performance', brandStatus: 'reliable' }, name('Adidas Train Essentials Train Cotton 3-Stripes Pacer Shorts')));
+  });
+
+  it('I4: an unreliable brand whose name the title has must be kept (Sony Group)', () => {
+    const src = { title: 'Sony WH-1000XM5 Wireless Headphones', brand: 'Sony Group', brandStatus: 'unreliable' as const, brandNote: 'company or place name' };
+    bad(checkName(src, name('WH-1000XM5 Wireless Headphones')));
+    ok(checkName(src, name('Sony WH-1000XM5 Wireless Headphones')));
+    // a one-letter label left after the label word (T of "T - Accessories") is no maker name
+    ok(checkName({ title: 'T - Vacuum Pump Wine Stoppers with 4 Bottle Stoppers Sealer x 1 box', brand: 'T - Accessories', brandStatus: 'unreliable', brandNote: 'company or place name' }, name('Vacuum Pump Wine Stoppers with 4 Bottle Stoppers Sealer', {}, 'x 1 box')));
+    // a shop name in the title stays shop noise
+    ok(checkName({ title: 'Toysmalta 46834 Frozen 16"', brand: 'Toysmalta', brandStatus: 'unreliable', brandNote: 'shop name' }, name('46834 Frozen 16"')));
   });
 });
 

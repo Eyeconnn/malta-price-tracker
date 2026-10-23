@@ -29,3 +29,24 @@ export function parseMaxCost(raw: string | undefined): number | undefined {
 export function budgetReached(spentUsd: number, maxCostUsd: number | undefined): boolean {
   return maxCostUsd !== undefined && spentUsd >= maxCostUsd;
 }
+
+/** A login, plan or usage-limit problem: no later batch can succeed, so the run stops at once. */
+const AUTH_OR_LIMIT = /usage limit|hit your limit|rate limit|limit reached|credit balance|\/login|not logged in|invalid api key|oauth|authenticat|unauthori[sz]ed|\b401\b|\b403\b/i;
+/** Failed batches in a row after which the run stops (a broken CLI, network or prompt). */
+export const MAX_CONSECUTIVE_FAILURES = 5;
+
+/** Circuit breaker of a run: 'consecutive' after 5 failed batches in a row, 'auth' at once on a login or limit error. */
+export class FailureBreaker {
+  private failures = 0;
+  constructor(private readonly max = MAX_CONSECUTIVE_FAILURES) {}
+
+  record(ok: boolean, error?: string): 'continue' | 'consecutive' | 'auth' {
+    if (ok) {
+      this.failures = 0;
+      return 'continue';
+    }
+    if (error && AUTH_OR_LIMIT.test(error)) return 'auth';
+    this.failures++;
+    return this.failures >= this.max ? 'consecutive' : 'continue';
+  }
+}

@@ -1,6 +1,10 @@
 // pnpm normalise-names --model haiku [--effort low] [--pilot] [--limit 500] [--sample-from out/names/<run>.csv]
 //   [--category laptops ...] [--batch-size 40] [--parallel 2] [--max-batches N] [--max-cost 5] [--dry-run] [--seed pilot]
-//   [--timeout 300] [--save-raw]
+//   [--timeout 300] [--save-raw] [--retry-rejected] [--recheck-stored]
+// --retry-rejected also sends groups stored as rejected whose titles did not change. --recheck-stored makes no model
+// call: it runs today's checks over the names stored as ok and marks the failing ones rejected (only reports them with
+// --dry-run). A run stops after 5 failed batches in a row, and at once on a login or usage-limit error; the report and
+// name_runs.finished_at are written on every stop.
 // --max-cost <usd> starts no new batch once the summed cost Claude Code reports reaches it (running batches finish);
 // with --max-batches it bounds the nightly run (scripts/run-names-nightly.ps1). Batches take turns across categories.
 // Sends batches of one site category's product groups to Claude Code (claude -p, on the owner's own login) for clean
@@ -22,13 +26,14 @@ import { SITE_CATEGORIES } from '../site/categories.js';
 import { brandStatus, loadBrandContext, titleMaker } from '../names/brand.js';
 import { checkBatch } from '../names/check.js';
 import { addUsage, callClaude, killAllChildren, NO_USAGE, spawnRunner, type Usage } from '../names/claude.js';
-import { budgetReached, checkRunScope, parseEffort, parseMaxCost } from '../names/options.js';
+import { budgetReached, checkRunScope, FailureBreaker, MAX_CONSECUTIVE_FAILURES, parseEffort, parseMaxCost } from '../names/options.js';
 import { interleaveBatches, makeBatches, systemPrompt, userMessage, type Batch } from '../names/prompt.js';
 import { writeReport, type BatchStat, type ReportRow } from '../names/report.js';
 import { answerJsonSchema, loadAttributeSchemas } from '../names/schema.js';
 import { pickSample, readSampleCsv } from '../names/sample.js';
 import { changedGroups, loadGroups, pilotSample, type GroupInput } from '../names/select.js';
-import { finishRun, saveResults, startRun } from '../names/store.js';
+import { recheckStored, type StoredName } from '../names/recheck.js';
+import { finishRun, loadStoredOk, markRejected, saveResults, startRun } from '../names/store.js';
 
 const { values } = parseArgs({
   options: {
@@ -46,6 +51,8 @@ const { values } = parseArgs({
     seed: { type: 'string', default: 'pilot' },
     timeout: { type: 'string', default: '300' },
     'save-raw': { type: 'boolean', default: false },
+    'retry-rejected': { type: 'boolean', default: false },
+    'recheck-stored': { type: 'boolean', default: false },
   },
 });
 
@@ -78,7 +85,9 @@ async function main() {
   const parallel = intOption('parallel', values.parallel, 1, MAX_PARALLEL);
   const maxBatches = values['max-batches'] === undefined ? undefined : intOption('max-batches', values['max-batches'], 1, 100000);
   const maxCost = parseMaxCost(values['max-cost']);
-  checkRunScope({ dryRun, pilot, maxBatches });
+  const recheck = values['recheck-stored'];
+  // a recheck makes no model call, so it needs no cap
+  if (!recheck) checkRunScope({ dryRun, pilot, maxBatches });
   const timeoutMs = intOption('timeout', values.timeout, 10, 3600) * 1000;
   const slugs = SITE_CATEGORIES.map((c) => c.slug as string);
   const categories = values.category ?? [];
@@ -87,37 +96,66 @@ async function main() {
   const schemas = await loadAttributeSchemas();
   const ro = postgres(env('DASHBOARD_DATABASE_URL'), { max: 2, idle_timeout: 20, connect_timeout: 30, onnotice: () => {} });
   const sampleText = sampleFrom === undefined ? null : await readFile(sampleFrom, 'utf8');
-  let groupsAll: GroupInput[];
-  let brandCtx: Awaited<ReturnType<typeof loadBrandContext>>;
+  let groupsAll: GroupInput[] = [];
+  let brandCtx: Awaited<ReturnType<typeof loadBrandContext>> | null = null;
+  let chosen: GroupInput[] = [];
+  let candidates: GroupInput[] = [];
+  let sampleNote: string | undefined;
+  /** groups and stored names for --recheck-stored */
+  let stored: StoredName[] = [];
+  const withBrands = (list: GroupInput[]) => {
+    for (const g of list) {
+      const v = brandStatus(g.brand, g.shopId, brandCtx!);
+      g.brandStatus = v.status;
+      g.brandNote = v.why;
+      g.titleBrand = titleMaker(g.title, brandCtx!);
+    }
+  };
   try {
     groupsAll = await loadGroups(ro, { categories });
-    brandCtx = await loadBrandContext(ro);
+    const recategorised = groupsAll.filter((g) => g.storedCategory !== undefined && g.storedCategory !== g.category).length;
+    console.log(`normalise-names: ${recategorised} of ${groupsAll.length} fresh groups have another category with today's rules than the stored one`);
+    if (recheck) {
+      stored = await loadStoredOk(ro);
+      if (stored.length > 0) brandCtx = await loadBrandContext(ro);
+    } else {
+      candidates = changedGroups(groupsAll, { retryRejected: values['retry-rejected'] });
+      chosen = pickChosen();
+      // the brand statistic reads every fresh group; skip it when there is nothing to name
+      if (chosen.length > 0) brandCtx = await loadBrandContext(ro);
+    }
   } finally {
     await ro.end({ timeout: 5 });
   }
-  const recategorised = groupsAll.filter((g) => g.storedCategory !== undefined && g.storedCategory !== g.category).length;
-  console.log(`normalise-names: ${recategorised} of ${groupsAll.length} fresh groups have another category with today's rules than the stored one`);
-  const candidates = changedGroups(groupsAll);
-  let chosen: GroupInput[];
-  let sampleNote: string | undefined;
-  if (sampleText !== null) {
-    const rows = readSampleCsv(sampleText);
-    const pick = pickSample(groupsAll, rows);
-    chosen = pick.chosen;
-    const moves = new Map<string, number>();
-    for (const c of pick.changedCategory) moves.set(`${c.from} -> ${c.to}`, (moves.get(`${c.from} -> ${c.to}`) ?? 0) + 1);
-    sampleNote = `${sampleFrom}: ${pick.matched} of ${rows.length} groups matched (${pick.byIds} by shop_id and group_key, ` +
-      `${pick.matched - pick.byIds} by shop and title); ${pick.changedCategory.length} changed category against the CSV`;
-    console.log(`normalise-names: sample ${sampleNote}`);
-    if (moves.size > 0) console.log(`  category changes: ${[...moves].sort((a, b) => b[1] - a[1]).map(([k, n]) => `${k} ${n}`).join(', ')}`);
-    if (pick.missing.length > 0) console.log(`  not found: ${pick.missing.slice(0, 10).map((m) => `${m.shop} "${m.sourceTitle}"`).join('; ')}${pick.missing.length > 10 ? ' ...' : ''}`);
-  } else chosen = values.pilot ? pilotSample(candidates, limit, values.seed) : candidates;
-  for (const g of chosen) {
-    const v = brandStatus(g.brand, g.shopId, brandCtx);
-    g.brandStatus = v.status;
-    g.brandNote = v.why;
-    g.titleBrand = titleMaker(g.title, brandCtx);
+
+  if (recheck) {
+    const keys = new Set(stored.map((r) => `${r.shopId}|${r.groupKey}`));
+    const storedGroups = groupsAll.filter((g) => keys.has(`${g.shopId}|${g.groupKey}`));
+    if (brandCtx) withBrands(storedGroups);
+    const r = recheckStored(storedGroups, stored, schemas);
+    console.log(`normalise-names: recheck of ${stored.length} stored ok names: ${r.checked} still fresh, ${r.failing.length} fail today's checks`);
+    for (const f of r.failing.slice(0, 20)) console.log(`  ${f.shopId} ${f.groupKey}: ${f.reason}`);
+    if (!dryRun && r.failing.length > 0) console.log(`normalise-names: ${await markRejected(db(), r.failing)} marked rejected`);
+    else if (dryRun) console.log('normalise-names: dry run, nothing marked');
+    return;
   }
+
+  function pickChosen(): GroupInput[] {
+    if (sampleText !== null) {
+      const rows = readSampleCsv(sampleText);
+      const pick = pickSample(groupsAll, rows);
+      const moves = new Map<string, number>();
+      for (const c of pick.changedCategory) moves.set(`${c.from} -> ${c.to}`, (moves.get(`${c.from} -> ${c.to}`) ?? 0) + 1);
+      sampleNote = `${sampleFrom}: ${pick.matched} of ${rows.length} groups matched (${pick.byIds} by shop_id and group_key, ` +
+        `${pick.matched - pick.byIds} by shop and title); ${pick.changedCategory.length} changed category against the CSV`;
+      console.log(`normalise-names: sample ${sampleNote}`);
+      if (moves.size > 0) console.log(`  category changes: ${[...moves].sort((a, b) => b[1] - a[1]).map(([k, n]) => `${k} ${n}`).join(', ')}`);
+      if (pick.missing.length > 0) console.log(`  not found: ${pick.missing.slice(0, 10).map((m) => `${m.shop} "${m.sourceTitle}"`).join('; ')}${pick.missing.length > 10 ? ' ...' : ''}`);
+      return pick.chosen;
+  }
+  return values.pilot ? pilotSample(candidates, limit, values.seed) : candidates;
+  }
+  if (brandCtx) withBrands(chosen);
   const batches = interleaveBatches(makeBatches(chosen, batchSize)).slice(0, maxBatches ?? Infinity);
   const runCats = [...new Set(batches.map((b) => b.category))];
   const groupCount = batches.reduce((n, b) => n + b.items.length, 0);
@@ -168,6 +206,19 @@ async function main() {
   let done = 0;
   let next = 0;
   let budgetStop = false;
+  const breaker = new FailureBreaker();
+  let breakerStop: 'consecutive' | 'auth' | null = null;
+  const trip = (ok: boolean, error?: string) => {
+    const v = breaker.record(ok, error);
+    if (v === 'continue' || breakerStop) return;
+    breakerStop = v;
+    stopping = true;
+    console.log(
+      v === 'auth'
+        ? `normalise-names: stopping, a login or usage-limit error (${(error ?? '').slice(0, 200)})`
+        : `normalise-names: stopping after ${MAX_CONSECUTIVE_FAILURES} failed batches in a row`,
+    );
+  };
   const batchStats: BatchStat[] = [];
 
   async function runBatch(index: number, batch: Batch) {
@@ -185,6 +236,7 @@ async function main() {
     const tag = `[batch ${index + 1}/${batches.length}] ${batch.category} ${batch.items.length} groups`;
     const cost = `${call.usage.inputTokens + call.usage.cacheReadTokens + call.usage.cacheWriteTokens} in, ${call.usage.outputTokens} out, $${call.costUsd.toFixed(4)}, ${((Date.now() - t0) / 1000).toFixed(1)}s`;
     done++;
+    trip(call.ok, call.error);
     if (!call.ok) {
       failedBatches++;
       for (const { group } of batch.items) {
@@ -232,38 +284,43 @@ async function main() {
       } catch (e) {
         failedBatches++;
         console.log(`[batch ${i + 1}/${batches.length}] error: ${(e as Error).message}`);
+        trip(false, (e as Error).message);
       }
     }
   }
   try {
     await Promise.all(Array.from({ length: Math.min(parallel, batches.length) }, worker));
   } finally {
-    await rm(work, { recursive: true, force: true });
+    await rm(work, { recursive: true, force: true }).catch(() => {});
+    // the report and name_runs.finished_at are written on every stop: done, Ctrl+C, cost cap, breaker or error
+    await finalize();
   }
+  if (breakerStop || (done > 0 && failedBatches === done)) process.exitCode = 1;
 
-  const wallSeconds = (Date.now() - started) / 1000;
-  const items = accepted + rejected;
-  rows.sort((a, b) => a.category.localeCompare(b.category) || a.shop.localeCompare(b.shop) || a.sourceTitle.localeCompare(b.sourceTitle));
-  const summary = {
-    runId, model, effort: effort ?? null, categories: runCats, pilot, dryRun, batches: done, groups: items, accepted, rejected, failedBatches,
-    ...usage, costUsd, wallSeconds, batchStats: [...batchStats].sort((a, b) => a.index - b.index), sample: sampleNote,
-  };
-  const files = await writeReport(OUT_DIR, summary, rows);
-  if (rw) {
-    await finishRun(rw, Number(runId), {
-      batches: done, items, accepted, rejected, failedBatches, ...usage, costUsd, reportPath: path.relative(process.cwd(), files.html),
-    });
+  async function finalize() {
+    const wallSeconds = (Date.now() - started) / 1000;
+    const items = accepted + rejected;
+    rows.sort((a, b) => a.category.localeCompare(b.category) || a.shop.localeCompare(b.shop) || a.sourceTitle.localeCompare(b.sourceTitle));
+    const summary = {
+      runId, model: model!, effort: effort ?? null, categories: runCats, pilot, dryRun, batches: done, groups: items, accepted, rejected, failedBatches,
+      ...usage, costUsd, wallSeconds, batchStats: [...batchStats].sort((a, b) => a.index - b.index), sample: sampleNote,
+    };
+    const files = await writeReport(OUT_DIR, summary, rows);
+    if (rw) {
+      await finishRun(rw, Number(runId), {
+        batches: done, items, accepted, rejected, failedBatches, ...usage, costUsd, reportPath: path.relative(process.cwd(), files.html),
+      });
+    }
+    const per100 = items > 0 ? (costUsd / items) * 100 : 0;
+    console.log(
+      `normalise-names: run ${runId} ${breakerStop ? `stopped by the breaker (${breakerStop})` : stopping ? 'stopped' : budgetStop ? 'stopped at --max-cost' : 'done'}: ${items} groups, ${accepted} accepted, ${rejected} rejected, ` +
+        `${failedBatches} failed batches; tokens ${usage.inputTokens} in, ${usage.cacheReadTokens} cache read, ` +
+        `${usage.cacheWriteTokens} cache write, ${usage.outputTokens} out; reported cost $${costUsd.toFixed(4)} ` +
+        `($${per100.toFixed(4)} per 100 groups); ${wallSeconds.toFixed(1)}s`,
+    );
+    console.log(`report: ${files.html}`);
+    console.log(`csv:    ${files.csv}`);
   }
-  const per100 = items > 0 ? (costUsd / items) * 100 : 0;
-  console.log(
-    `normalise-names: run ${runId} ${stopping ? 'stopped' : budgetStop ? 'stopped at --max-cost' : 'done'}: ${items} groups, ${accepted} accepted, ${rejected} rejected, ` +
-      `${failedBatches} failed batches; tokens ${usage.inputTokens} in, ${usage.cacheReadTokens} cache read, ` +
-      `${usage.cacheWriteTokens} cache write, ${usage.outputTokens} out; reported cost $${costUsd.toFixed(4)} ` +
-      `($${per100.toFixed(4)} per 100 groups); ${wallSeconds.toFixed(1)}s`,
-  );
-  console.log(`report: ${files.html}`);
-  console.log(`csv:    ${files.csv}`);
-  if (done > 0 && failedBatches === done) process.exitCode = 1;
 }
 
 main()

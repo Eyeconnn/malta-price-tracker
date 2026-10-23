@@ -5,7 +5,7 @@ import postgres from 'postgres';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { brandStatus, loadBrandContext } from '../../src/names/brand.js';
 import { changedGroups, loadGroups, titleHash } from '../../src/names/select.js';
-import { finishRun, saveResults, startRun } from '../../src/names/store.js';
+import { finishRun, loadStoredOk, markRejected, saveResults, startRun } from '../../src/names/store.js';
 
 const PORT = 55461;
 
@@ -116,5 +116,24 @@ describe.skipIf(!process.env.SITE_BUILD_TEST_DB)('name normaliser on PGlite', ()
     ]);
     const rows = await sql`select status, reject_reason, model, display_name from product_names`;
     expect(rows).toEqual([{ status: 'rejected', reject_reason: 'lost tokens: 5', model: 'sonnet', display_name: null }]);
+  });
+
+  it('loads the stored status, re-queues rejected groups on request, and lets --recheck-stored retire ok names', async () => {
+    const runId = await startRun(sql, { model: 'haiku', categories: ['laptops'], pilot: true });
+    const g = (await loadGroups(sql, { categories: ['laptops'] }))[0];
+    expect(g.storedStatus).toBe('rejected');
+    expect(changedGroups([g])).toEqual([]);
+    expect(changedGroups([g], { retryRejected: true }).map((x) => x.groupKey)).toEqual(['P1']);
+
+    await saveResults(sql, runId, 'haiku', [
+      { group: g, category: 'laptops', status: 'ok', displayName: 'Lenovo IdeaPad Slim 5', variantLabel: '8GB', attrs: { ram_gb: [8] }, reason: null },
+    ]);
+    expect(await loadStoredOk(sql)).toEqual([
+      { shopId: shopA, groupKey: 'P1', category: 'laptops', displayName: 'Lenovo IdeaPad Slim 5', variantLabel: '8GB', attrs: { ram_gb: [8] } },
+    ]);
+    expect(await markRejected(sql, [{ shopId: shopA, groupKey: 'P1', reason: 'lost tokens: 5' }])).toBe(1);
+    const [row] = await sql`select status, reject_reason, display_name from product_names where group_key = 'P1'`;
+    expect(row).toEqual({ status: 'rejected', reject_reason: 'recheck: lost tokens: 5', display_name: null });
+    expect(await loadStoredOk(sql)).toEqual([]);
   });
 });

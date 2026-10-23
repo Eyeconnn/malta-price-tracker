@@ -1,5 +1,6 @@
 // Writes of the name normaliser: only name_runs and product_names, with the owner connection (never in --dry-run).
 import type postgres from 'postgres';
+import type { StoredName } from './recheck.js';
 import { titleHash, type GroupInput } from './select.js';
 
 export type StoredResult = {
@@ -66,4 +67,24 @@ export async function saveResults(sql: postgres.Sql, runId: number, model: strin
       display_name = excluded.display_name, variant_label = excluded.variant_label, attrs = excluded.attrs,
       status = excluded.status, reject_reason = excluded.reject_reason, model = excluded.model, run_id = excluded.run_id,
       normalised_at = excluded.normalised_at`;
+}
+
+/** The names stored as ok (for --recheck-stored). */
+export async function loadStoredOk(sql: postgres.Sql): Promise<StoredName[]> {
+  const rows = await sql<{ shop_id: number; group_key: string; category: string | null; display_name: string; variant_label: string | null; attrs: Record<string, unknown> }[]>`
+    select shop_id, group_key, category, display_name, variant_label, attrs
+    from product_names where status = 'ok' and display_name is not null`;
+  return rows.map((r) => ({ shopId: r.shop_id, groupKey: r.group_key, category: r.category, displayName: r.display_name, variantLabel: r.variant_label, attrs: r.attrs ?? {} }));
+}
+
+/** Marks stored names rejected that the current checks fail (--recheck-stored); the site then keeps the shop title. */
+export async function markRejected(sql: postgres.Sql, rows: { shopId: number; groupKey: string; reason: string }[]): Promise<number> {
+  if (rows.length === 0) return 0;
+  const res = await sql`
+    update product_names pn set status = 'rejected', reject_reason = 'recheck: ' || t.reason, display_name = null,
+      variant_label = null, attrs = '{}'::jsonb, normalised_at = now()
+    from unnest(${rows.map((r) => r.shopId)}::int[], ${rows.map((r) => r.groupKey)}::text[], ${rows.map((r) => r.reason)}::text[])
+      as t(shop_id, group_key, reason)
+    where pn.shop_id = t.shop_id and pn.group_key = t.group_key and pn.status = 'ok'`;
+  return res.count;
 }

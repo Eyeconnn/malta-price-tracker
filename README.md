@@ -235,7 +235,10 @@ what the run would have cost at API prices). Reads use `DASHBOARD_DATABASE_URL`;
 to `product_names` and `name_runs` (migration 007) through `DATABASE_URL`. A group is only sent again when its title
 or variant titles change. Ctrl+C stops after the running batches. `--max-cost <usd>` starts no new batch once the
 summed reported cost reaches it (running batches finish). Batches take turns across categories, so a capped run covers
-every category.
+every category. A run stops after 5 failed batches in a row, and at once on a login or usage-limit error; the report and
+`name_runs.finished_at` are written on every stop. `--retry-rejected` also resends groups stored as rejected;
+`--recheck-stored` makes no model call and marks stored names rejected that today's checks would reject (with
+`--dry-run` it only lists them).
 
 ### Nightly run
 

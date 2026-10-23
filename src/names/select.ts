@@ -24,6 +24,8 @@ export type GroupInput = {
   variantTitles: string[];
   /** product_names.title_hash of the last normalisation, null when never done */
   storedHash: string | null;
+  /** product_names.status of the last normalisation, null when never done */
+  storedStatus?: 'ok' | 'rejected' | null;
   /** whether brand names the maker (src/names/brand.ts); set by the CLI, judged from the brand text alone when missing */
   brandStatus?: BrandStatus;
   /** why the brand is unreliable or none */
@@ -46,8 +48,8 @@ export function titleHash(title: string, variantTitles: string[]): string {
 }
 
 /** Groups never normalised or whose title or variant titles changed since. */
-export function changedGroups(groups: GroupInput[]): GroupInput[] {
-  return groups.filter((g) => g.storedHash !== titleHash(g.title, g.variantTitles));
+export function changedGroups(groups: GroupInput[], opts: { retryRejected?: boolean } = {}): GroupInput[] {
+  return groups.filter((g) => g.storedHash !== titleHash(g.title, g.variantTitles) || (opts.retryRejected === true && g.storedStatus === 'rejected'));
 }
 
 type GroupRow = {
@@ -63,6 +65,7 @@ type GroupRow = {
   gtin: string | null;
   mpn: string | null;
   stored_hash: string | null;
+  stored_status: 'ok' | 'rejected' | null;
 };
 
 /**
@@ -77,7 +80,7 @@ export async function loadGroups(sql: postgres.Sql, opts: { categories?: string[
   const settings = await loadSettings(sql);
   const rows = await sql<GroupRow[]>`
     select sp.shop_id, s.slug as shop_slug, sp.group_key, sp.title, sp.brand, coalesce(sp.category, 'other') as category,
-      p.category_path, p.tags, s.category as shop_category, sp.gtin, sp.mpn, pn.title_hash as stored_hash
+      p.category_path, p.tags, s.category as shop_category, sp.gtin, sp.mpn, pn.title_hash as stored_hash, pn.status as stored_status
     from site_products sp
     join shops s on s.id = sp.shop_id
     left join products p on p.id = sp.rep_product_id
@@ -104,6 +107,7 @@ export async function loadGroups(sql: postgres.Sql, opts: { categories?: string[
       mpn: r.mpn,
       variantTitles: [],
       storedHash: r.stored_hash,
+      storedStatus: r.stored_status,
     }));
 
   // variant titles, one query per shop (uses the (shop_id, external_id) index prefix)

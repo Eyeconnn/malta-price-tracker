@@ -24,35 +24,46 @@ export type CategoryRule = {
   slug: CategorySlug;
   pattern: RegExp;
   on: CategorySource[];
-  /** tried on the title before the category path (a kids' version of a device is a toy, whatever the path says) */
+  /** tried on the title before the category path (a toy maker's device is a toy, whatever the path says) */
   first?: boolean;
+  /** applies only for a shop without a specialist category or a title with laptop specs (LAPTOP_SPECS) */
+  laptopPathOnly?: boolean;
 };
 
-/** After a device word: something to carry or stand the device in (a laptop bag, a tablet stand), so the device word decides nothing. */
-const CARRY = String.raw`(?!\s*(?:&\s*\w+\s+)?(?:bags?|backpacks?|sleeves?|cases?|briefcases?|totes?|stands?|organi[sz]ers?|crossbody|pouch(?:es)?)\b)`;
+/** After a device word: something to carry or stand the device in (a laptop bag, a tablet stand), or its peripherals, so the device word decides nothing. */
+const CARRY = String.raw`(?!\s*(?:&\s*\w+\s+)?(?:bags?|backpacks?|sleeves?|cases?|covers?|briefcases?|totes?|stands?|organi[sz]ers?|crossbody|pouch(?:es)?|peripherals)\b)`;
 /** As CARRY, but phone and tablet cases stay with phones. */
 const PHONE_CARRY = String.raw`(?!\s*(?:&\s*\w+\s+)?(?:bags?|backpacks?|sleeves?|stands?|organi[sz]ers?|crossbody|pouch(?:es)?)\b)`;
+/** After a kids' device word: a bag, case or stand for it is no device. */
+const DEVICE_CARRY = String.raw`(?!\s*(?:bags?|cases?|backpacks?|sleeves?|covers?|stands?)\b)`;
+/** Words before "bag" or "belt" that make it no fashion item (a tea bag, a tool belt). */
+const NOT_FASHION_BAG = String.raw`(?<!\b(?:gig|cooler|dry|sleeping|bean|gift|freezer|vacuum|tea|coffee|bin|rubbish|refuse|dust|cleaner|storage|sandwich|camera|tool|seat|laundry)\s?)`;
+/** Toy makers whose devices are toys (a VTech or Lexibook camera), and "my first". Real tablets for kids are not. */
+const TOY_DEVICE_MAKERS = String.raw`vtech|leap ?frog|lexibook|clementoni|kidi\w*|winfun|fisher[- ]?price|playskool|chicco|smoby|my first`;
+/** Laptop specs in a title: a CPU, RAM or SSD size, or a laptop screen size. */
+export const LAPTOP_SPECS = /\b(i[3579]|ryzen|celeron|pentium|core ultra|\d+\s?gb|ssd|1[1-7](?:\.\d)?\s*(?:"|''|\u2033|inch|in\b))|\b1[1-7]\.\d\b/i;
 const ci = (source: string) => new RegExp(source, 'i');
 
 /**
  * Ordered: within a source, the first matching rule wins. Sources are tried category, tags, title; the title only for
  * shops without a specialist category (see TITLE_SHOP_CATEGORIES). Rules marked first are tried on the title before
- * everything else.
+ * everything else. A rule with laptopPathOnly applies only for a generalist shop or a title with laptop specs.
  */
 export const CATEGORY_RULES: CategoryRule[] = [
-  { slug: 'toys', pattern: /\b(kids?|children'?s?|my first)\b.{0,40}?\b(cameras?|laptops?|tablets?|smart ?watch(es)?|walkie[ -]talkies?|karaoke|microphones?)\b/i, on: ['title'], first: true },
-  { slug: 'other', pattern: /\b(stationery|stationary|notepads?|note books?|journals?|diar(y|ies)|(computer|pc|laptop) peripherals|keycaps?|printers?|toners?|ink cartridges?)\b/i, on: ['category', 'tags'] },
+  { slug: 'toys', pattern: ci(String.raw`\b(${TOY_DEVICE_MAKERS})\b.{0,40}?\b(cameras?|laptops?|tablets?|smart ?watch(es)?|walkie[ -]talkies?|karaoke|microphones?|phones?)\b${DEVICE_CARRY}`), on: ['title'], first: true },
   { slug: 'phones', pattern: /\b(smart ?watch(es)?|smart ?bands?|fitness trackers?|wearables?)\b/i, on: ['category', 'tags', 'title'] },
   { slug: 'laptops', pattern: ci(String.raw`\b(laptops?|macbooks?|chromebooks?|ultrabooks?)\b${CARRY}`), on: ['category', 'tags'] },
+  { slug: 'laptops', pattern: ci(String.raw`\bnotebooks?\b(?!\s*(?:&|,)\s*(?:notepads?|journals?|diar))${CARRY}`), on: ['category', 'tags'], laptopPathOnly: true },
   { slug: 'laptops', pattern: ci(String.raw`(?<!\bmy\s(?:first\s)?)\b(laptops?|notebooks?|macbooks?|chromebooks?|ultrabooks?)\b${CARRY}`), on: ['title'] },
-  { slug: 'phones', pattern: ci(String.raw`\b(smart ?phones?|mobile phones?|phones?|iphones?|tablets?|ipads?|galaxy (s|a|z)\d+)\b${PHONE_CARRY}`), on: ['category', 'tags', 'title'] },
+  { slug: 'phones', pattern: ci(String.raw`\b(smart ?phones?|mobile phones?|phones?|iphones?|tablets?|ipads?|galaxy (s|a|z)\d+|galaxy tab|matepad|fire hd|redmi pad|xiaomi pad|lenovo tab)\b${PHONE_CARRY}`), on: ['category', 'tags', 'title'] },
+  { slug: 'other', pattern: /\b(stationery|stationary|notepads?|note books?|notebooks?|journals?|diar(y|ies)|(computer|pc|laptop) peripherals|keycaps?|printers?|toners?|ink cartridges?)\b/i, on: ['category', 'tags'] },
   { slug: 'tv-audio', pattern: /\b(televisions?|tvs?(?!\s*(?:stands?|cabinets?|units?|tables?|benches?)\b)|soundbars?|headphones?|earbuds?|speakers?|audio|hi-?fi|home cinema|projectors?)\b/i, on: ['category', 'tags', 'title'] },
   { slug: 'gaming', pattern: /\b(gaming|consoles?|video games?|playstation|ps[45]|xbox|nintendo)\b/i, on: ['category', 'tags', 'title'] },
   { slug: 'appliances', pattern: /\b(appliances?|fridges?|refrigerators?|freezers?|washing machines?|washers?|(?<!hair\s)dryers?|dishwashers?|ovens?|microwaves?|cookers?|hobs?|vacuums?|air fryers?|coffee machines?|espresso machines?|kettles?|toasters?|air conditioners?|heaters?|heating|dehumidifiers?|wine coolers?)\b/i, on: ['category', 'tags', 'title'] },
   { slug: 'toys', pattern: /\b(toys?|lego|playsets?|dolls?|puzzles?|board games?|barbie|playmobil|hot wheels|plush(ies)?|soft toys?|action figures?|boardgames?|card games?|playing cards)\b/i, on: ['category', 'tags', 'title'] },
   { slug: 'baby', pattern: /\b(baby|babies|newborns?|infants?|toddlers?|prams?|strollers?|nappies|car seats?)\b/i, on: ['category', 'tags', 'title'] },
   { slug: 'fashion', pattern: /\b(fashion|clothing|clothes(?!\s*airers?\b)|apparel|(?<!\b(?:cold|hot)\s)shoes?|trainers|sneakers?|dress(es)?|jackets?|jeans|handbags?|jewell?ery|watches)\b/i, on: ['category', 'tags', 'title'] },
-  { slug: 'fashion', pattern: /\b((?<!\b(?:gig|cooler|dry|sleeping|bean|gift|freezer|vacuum)\s?)bags?(?!\s+for\b)|backpacks?|briefcases?|luggage|suitcases?|wallets?|belts?|sunglasses|eyewear|socks|underwear|lingerie|bras?|swimwear|swimsuits?|bikinis?|footwear|flats|loafers|sandals|boots)\b/i, on: ['category', 'tags'] },
+  { slug: 'fashion', pattern: ci(String.raw`\b(${NOT_FASHION_BAG}bags?(?!\s+for\b)|backpacks?|briefcases?|luggage|suitcases?|wallets?|${NOT_FASHION_BAG}belts?|sunglasses|eyewear|socks|underwear|lingerie|bras?|swimwear|swimsuits?|bikinis?|footwear|flats|loafers|sandals|boots)\b`), on: ['category', 'tags'] },
   { slug: 'beauty-health', pattern: /\b(beauty|make-?up|perfumes?|fragrances?|skin ?care|cosmetics|shavers?|epilators?|trimmers?|groom(ers?|ing)|hair ?dryers?|hair straighteners?|vitamins?|supplements?|personal care|health)\b/i, on: ['category', 'tags', 'title'] },
   { slug: 'home-kitchen', pattern: /\b(home|kitchen|furniture|garden|bedding|mattress(es)?|cookware|lighting|decor|drinkware|tableware|glassware|airers?|laundry|ironing)\b/i, on: ['category', 'tags'] },
   { slug: 'sports', pattern: /\b(sports?(?!\s+drinks?\b)|fitness|gym|bikes?|bicycles?|cycling|running|football|camping|outdoors?|treadmills?|yoga)\b/i, on: ['category', 'tags'] },
@@ -127,7 +138,9 @@ export function categorize(
   for (const [source, text] of texts) {
     if (text === '') continue;
     for (const rule of CATEGORY_RULES) {
-      if (!rule.first && rule.on.includes(source) && rule.pattern.test(text)) return rule.slug;
+      if (rule.first || !rule.on.includes(source)) continue;
+      if (rule.laptopPathOnly && !titleDecides && !LAPTOP_SPECS.test(title)) continue;
+      if (rule.pattern.test(text)) return rule.slug;
     }
   }
 

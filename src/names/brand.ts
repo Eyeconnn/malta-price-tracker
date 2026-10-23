@@ -71,6 +71,8 @@ const MAKER_WORD_MIN = 3;
 const MAKER_WORD_LEAD = 0.8;
 /** Share of a shop's branded groups whose brand is the shop's own name for the shop to sell one house brand. */
 const MIN_HOUSE_SHARE = 0.8;
+/** ... and fewer than this share of those groups' titles may start with another catalogue maker (review I1). */
+const MAX_HOUSE_OTHER_MAKERS = 0.3;
 
 /** Words of a brand, letters and digits only: "Carnival S.R.L." gives carnival, srl; "Marks & Spencer" gives marks, spencer. */
 export function brandWords(brand: string): string[] {
@@ -95,6 +97,23 @@ export function brandForms(brand: string): string[] {
   }
   return [...forms];
 }
+
+/** Whether the tokens contain the brand's full form (its words, together or apart). */
+export function fullBrandIn(list: string[], brand: string): boolean {
+  const full = brandForms(brand)[0];
+  return full !== undefined && inRun(list, full);
+}
+
+/**
+ * Whether a name keeps the brand: its full form when the title has the full brand (Black & Decker, Red Bull,
+ * Fisher-Price), else any form (Adidas for Adidas Performance, M&S for Marks & Spencer).
+ */
+export function keepsBrand(nameToks: string[], brand: string, titleToks: string[]): boolean {
+  return fullBrandIn(titleToks, brand) ? fullBrandIn(nameToks, brand) : hasBrand(nameToks, brand);
+}
+
+/** Whether a brand value looks like a web address (GameStore.mt). */
+export const isWebBrand = (brand: string) => WEB_TLD.test(brand);
 
 /** Whether the tokens contain the brand in one of its forms. */
 export function hasBrand(list: string[], brand: string): boolean {
@@ -174,28 +193,45 @@ export function brandStats(rows: BrandRow[], shops: ShopIdentity[]): { distribut
     if (!WEB_TLD.test(r.brand!) && isOwnShopName(compact(r.brand!), byId.get(r.shopId))) e.own++;
     branded.set(r.shopId, e);
   }
-  const houseShops = new Set([...branded].filter(([, e]) => e.own >= MIN_HOUSE_SHARE * e.all).map(([id]) => id));
   const makers = new Set<string>();
   for (const r of rows) {
     if (basicVerdict(r.brand).status !== 'reliable') continue;
     const key = compact(r.brand!);
     if (key.length >= 3 && !NOT_A_MAKER.has(key) && !makers.has(key) && hasBrand(tokens(prep(r.title)), r.brand!)) makers.add(key);
   }
+  // a shop whose own-name groups mostly start with other makers (LEGO, Barbie at a toy shop) is a retailer using its
+  // name as a fallback, not a one-brand shop
+  const otherMakerLead = new Map<number, number>();
+  for (const r of rows) {
+    if (basicVerdict(r.brand).status === 'none' || WEB_TLD.test(r.brand!) || !isOwnShopName(compact(r.brand!), byId.get(r.shopId))) continue;
+    const t = tokens(prep(r.title)).filter((x) => /\p{L}/u.test(x));
+    const own = compact(r.brand!);
+    const lead = [t[0] ?? '', (t[0] ?? '') + (t[1] ?? '')].filter((k) => k !== '' && k !== own);
+    if (lead.some((k) => makers.has(k))) otherMakerLead.set(r.shopId, (otherMakerLead.get(r.shopId) ?? 0) + 1);
+  }
+  const houseShops = new Set(
+    [...branded]
+      .filter(([id, e]) => e.own >= MIN_HOUSE_SHARE * e.all && (otherMakerLead.get(id) ?? 0) < MAX_HOUSE_OTHER_MAKERS * e.own)
+      .map(([id]) => id),
+  );
   return { distributors: distributorBrands(rows, shops), houseShops, makers };
 }
 
 /**
- * The maker a title starts with (its first word, or first two words written together), when that is a brand of the
+ * A maker among the first three words of a title (one word, or two written together), when that is a brand of the
  * catalogue that its own titles carry (Therabody in "Therabody TheraCup"). The clean name must keep it, so a model
  * cannot swap it for the brand field's value (Theragun). Returns the words as the title writes them, or null.
  */
 export function titleMaker(title: string, ctx: BrandContext): string | null {
   if (!ctx.makers || ctx.makers.size === 0) return null;
   const words = title.trim().split(/\s+/).filter((w) => /\p{L}/u.test(w));
-  for (const n of [2, 1]) {
-    if (words.length < n) continue;
-    const key = compact(words.slice(0, n).join(' '));
-    if (key.length >= 3 && ctx.makers.has(key)) return words.slice(0, n).join(' ').replace(/[^\p{L}\p{N}'&.\s-]+$/u, '');
+  // the maker may follow a product word or two ("Natural Response Avent Bottle"): the first three words are scanned
+  for (let start = 0; start < Math.min(3, words.length); start++) {
+    for (const n of [2, 1]) {
+      if (start + n > words.length) continue;
+      const key = compact(words.slice(start, start + n).join(' '));
+      if (key.length >= 3 && ctx.makers.has(key)) return words.slice(start, start + n).join(' ').replace(/[^\p{L}\p{N}'&.\s-]+$/u, '');
+    }
   }
   return null;
 }

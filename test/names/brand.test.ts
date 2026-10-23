@@ -189,6 +189,7 @@ describe('titleMaker: a maker the title starts with, which the name must keep', 
     { shopId: 1, brand: 'Theragun', title: 'Theragun Prime G5 Muscle Stimulator' },
     { shopId: 1, brand: 'Paw Patrol', title: 'Paw Patrol Lookout Tower' },
     { shopId: 1, brand: 'Kids', title: 'Kids Beauty Vanity Table' },
+    { shopId: 1, brand: 'Avent', title: 'Avent Natural Response Bottle 260ml' },
   ];
   const ctx: BrandContext = { shops: SHOPS, ...brandStats(data, SHOPS) };
 
@@ -197,5 +198,25 @@ describe('titleMaker: a maker the title starts with, which the name must keep', 
     expect(titleMaker('Paw Patrol My First Laptop', ctx)).toBe('Paw Patrol');
     expect(titleMaker('Kids Beauty Vanity Table + Stool White', ctx)).toBeNull();
     expect(titleMaker('Angelcare Dress Up Nappy Bin', ctx)).toBeNull();
+    // review I4: the first three words are scanned (a maker after a product word)
+    expect(titleMaker('Natural Response Avent Bottle 260ml', ctx)).toBe('Avent');
+    expect(titleMaker('Anti-Colic Bottle Set Avent 260ml', ctx)).toBeNull();
+  });
+});
+
+describe('house brand: review I1', () => {
+  it('is no house brand when the shop titles start with other catalogue makers (synthetic Toyland)', () => {
+    const shops: ShopIdentity[] = [...SHOPS, { id: 50, slug: 'toyland', name: 'Toyland', baseUrl: 'https://toyland.test' }];
+    const data: BrandRow[] = [
+      ...rows(50, 'Toyland', ['LEGO City Police Station 60316', 'Barbie Dreamhouse', 'Hot Wheels Track Set', 'LEGO Friends Heartlake Cafe 41747', 'Barbie Fashionista Doll']),
+      ...rows(shop('juniors'), 'LEGO', ['LEGO City Fire Station 60320', 'LEGO Technic Bugatti 42083']),
+      ...rows(shop('juniors'), 'Barbie', ['Barbie Dream Camper']),
+      ...rows(shop('juniors'), 'Hot Wheels', ['Hot Wheels Monster Trucks']),
+      // a real one-brand shop whose titles name products only
+      ...rows(shop('calzedonia'), 'Calzedonia Malta', ['15 Denier Matt Sheer Hold-Ups', 'First Class Soft Touch Top', 'Newborn Eco Cotton Tights']),
+    ];
+    const ctx: BrandContext = { shops, ...brandStats(data, shops) };
+    expect(brandStatus('Toyland', 50, ctx).status).toBe('unreliable');
+    expect(brandStatus('Calzedonia Malta', shop('calzedonia'), ctx).status).toBe('house');
   });
 });

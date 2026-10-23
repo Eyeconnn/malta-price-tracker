@@ -156,3 +156,42 @@ describe('categorize: misfiles found in the name normaliser pilot', () => {
     expect(categorize(input({ title: 'Bobble Striped Bath Mat', categoryPath: 'Bathroom', tags: ['Home', 'HW_BEAUTY_PROMO_OCT2024'], shopCategory: 'fashion' }))).toBe('home-kitchen');
   });
 });
+
+// Review of 1769c46 and 21b4a04: the reviewer's pairs.
+describe('categorize: review fixes', () => {
+  it('C2a: a Notebooks path is a laptop path for generalist shops or when the title has laptop specs', () => {
+    expect(categorize(input({ title: 'Lenovo IdeaPad Slim 3 15IAH8 i5 16GB 512GB', categoryPath: 'Computers > Notebooks', shopCategory: 'electronics' }))).toBe('laptops');
+    expect(categorize(input({ title: 'HP 255 G9 15.6 Ryzen 5', categoryPath: 'Notebooks', shopCategory: 'electronics' }))).toBe('laptops');
+    expect(categorize(input({ title: 'Lenovo IdeaPad Slim 3 15IAH8 i5 16GB 512GB', categoryPath: 'Notebooks', shopCategory: 'gaming' }))).toBe('laptops');
+    // paper notebooks at specialist shops stay out of laptops
+    expect(categorize(input({ title: 'Notebook - Planes', categoryPath: 'notebook', shopCategory: 'baby' }))).not.toBe('laptops');
+    expect(categorize(input({ title: 'Notebook - Mouse Fairies', categoryPath: 'Notebooks & Notepads', shopCategory: 'fashion' }))).toBe('other');
+  });
+
+  it('C2b: stationery and printer words decide only as the last path segment', () => {
+    expect(categorize(input({ title: 'Dell XPS 13 9340 Core Ultra 7 16GB 512GB', categoryPath: 'Computers & Printers > Laptops', shopCategory: 'electronics' }))).toBe('laptops');
+    expect(categorize(input({ title: 'Apple iPad 11 A16 128GB Wi-Fi', categoryPath: 'Tablets & Printers', shopCategory: 'electronics' }))).toBe('phones');
+    expect(categorize(input({ title: 'BROTHER YELLOW TONER TN248CLY', categoryPath: 'Printer Toners > Printers, Shredders & Supplies', shopCategory: 'electronics' }))).toBe('other');
+    expect(categorize(input({ title: 'GIRLS FAUX FUR OWL LOCKABLE JOURNAL', categoryPath: 'Angels | Notebooks, journals & diaries | Stationery', shopCategory: 'fashion' }))).toBe('other');
+  });
+
+  it('C2c: tea, coffee, bin, rubbish, refuse, dust, cleaner, vacuum, storage, sandwich, freezer, camera, tool, seat and laundry bags and belts are not fashion', () => {
+    for (const w of ['Tea', 'Coffee', 'Bin', 'Rubbish', 'Refuse', 'Dust', 'Cleaner', 'Vacuum', 'Storage', 'Sandwich', 'Freezer', 'Camera', 'Tool', 'Seat', 'Laundry']) {
+      expect(categorize(input({ title: `${w} bags 20 pack`, categoryPath: `${w} Bags`, shopCategory: 'home' }))).not.toBe('fashion');
+      expect(categorize(input({ title: `${w} belt`, categoryPath: `${w} Belts`, shopCategory: 'home' }))).not.toBe('fashion');
+    }
+    expect(categorize(input({ title: 'Leather Belt', categoryPath: 'Belts', shopCategory: 'home' }))).toBe('fashion');
+  });
+
+  it('I5: only toy-maker devices are toys; kids editions of real tablets stay with phones and tablets; a bag or case for a device is no device', () => {
+    expect(categorize(input({ title: 'Amazon Fire HD 8 Kids Tablet 32GB Blue', shopCategory: 'electronics' }))).toBe('phones');
+    expect(categorize(input({ title: 'Samsung Galaxy Tab A9 Kids Edition 64GB', shopCategory: 'electronics' }))).toBe('phones');
+    expect(categorize(input({ title: 'Huawei MatePad T10 Kids Edition 32GB', shopCategory: 'electronics' }))).toBe('phones');
+    expect(categorize(input({ title: 'VTech KidiZoom Duo DX Camera', shopCategory: 'electronics' }))).toBe('toys');
+    expect(categorize(input({ title: 'LeapFrog LeapPad Academy Kids Tablet', shopCategory: 'electronics' }))).toBe('toys');
+    expect(categorize(input({ title: 'Clementoni Kids Camera Unicorn', categoryPath: 'Cameras', shopCategory: 'electronics' }))).toBe('toys');
+    expect(categorize(input({ title: 'Lexibook Unicorn Kids Camera With Protection', categoryPath: 'Headphones', shopCategory: 'toys' }))).toBe('toys');
+    expect(categorize(input({ title: 'Lexibook Kids Camera Bag Blue', shopCategory: 'electronics' }))).not.toBe('toys');
+    expect(categorize(input({ title: 'VTech Kids Tablet Case', categoryPath: 'Tablet Accessories', shopCategory: 'electronics' }))).toBe('phones');
+  });
+});

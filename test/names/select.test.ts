@@ -72,3 +72,12 @@ describe('pilotSample', () => {
     expect(s.length).toBe(groups.length);
   });
 });
+
+describe('changedGroups with --retry-rejected', () => {
+  it('re-queues stored rejected groups even when their title is unchanged', () => {
+    const okSame = group({ groupKey: 'ok', title: 'A', storedHash: titleHash('A', []), storedStatus: 'ok' });
+    const rejSame = group({ groupKey: 'rej', title: 'B', storedHash: titleHash('B', []), storedStatus: 'rejected' });
+    expect(changedGroups([okSame, rejSame]).map((g) => g.groupKey)).toEqual([]);
+    expect(changedGroups([okSame, rejSame], { retryRejected: true }).map((g) => g.groupKey)).toEqual(['rej']);
+  });
+});

@@ -34,7 +34,7 @@
 // Attributes: keys outside the category schema, enum values outside the allowed list, numbers that are not finite
 // or out of the schema bounds, and text with HTML or a web address are dropped one by one (recorded); the rest is kept.
 import { MODEL } from '../site/matching.js';
-import { basicBrandStatus, brandName, hasBrand, type BrandStatus } from './brand.js';
+import { basicBrandStatus, brandName, fullBrandIn, hasBrand, isWebBrand, keepsBrand, type BrandStatus } from './brand.js';
 import type { Batch, BatchItem } from './prompt.js';
 import type { AttrSpec, CategorySchema } from './schema.js';
 import { compact, inRun, prep, QUANTITY, tokens, UNIT } from './text.js';
@@ -82,10 +82,13 @@ const SPEC_PATTERNS = [
 const OS_PATTERN = /\bw(?:in(?:dows)?)?\s*(?:7|8|10|11)(?:\s*(?:home|pro|h|p|s))?\b/g;
 const VENDOR_WORDS = /\b(?:intel|core|amd|nvidia|geforce|radeon|apple|qualcomm|mediatek|samsung)\b/g;
 
+/** Percent off ("-30%", "20% off", "15% discount") as shop noise; other percents (40% of a whisky) stay. */
+const stripPercentOff = (t: string) =>
+  t.replace(/(?:^|\s)-\s*\d+(?:\.\d+)?\s*%/g, ' ').replace(/\d+(?:\.\d+)?\s*%\s*(?:off|discount|sale)\b/g, ' ');
+
 /** Percent off and prices with a currency: shop noise, never required. */
 function stripNoise(t: string): string {
-  return t
-    .replace(/[-+]?\d+(?:\.\d+)?\s*%/g, ' ')
+  return stripPercentOff(t)
     .replace(/(?:\u20ac|\u00a3|\$|\beuros?\b|\beur\b)\s*\d+(?:\.\d+)?/g, ' ')
     .replace(/\d+(?:\.\d+)?\s*(?:\u20ac|\u00a3|\$|\beuros?\b|\beur\b)/g, ' ');
 }
@@ -128,6 +131,8 @@ export type NameSource = {
   brandStatus?: BrandStatus;
   /** the maker the title starts with (brand.ts titleMaker), which the name must keep */
   titleBrand?: string | null;
+  /** why the brand is unreliable (brand.ts BrandVerdict.why) */
+  brandNote?: string | null;
   variantTitles?: string[];
   mpn?: string | null;
 };
@@ -171,7 +176,6 @@ function requiredText(title: string, attrs: Record<string, unknown>): string {
   return t;
 }
 
-const stripPercent = (t: string) => t.replace(/[-+]?\d+(?:\.\d+)?\s*%/g, ' ');
 const percents = (t: string) => [...t.matchAll(PERCENT)].map((m) => Number(m[1]));
 
 /** The safety rule for one clean name (see the top of this file). attrs must already be checked. */
@@ -184,8 +188,8 @@ export function checkName(source: NameSource, a: NameAnswer): NameCheck {
   if (problem) return { ok: false, reason: problem };
   if (!/[\p{L}\p{N}]/u.test(name)) return { ok: false, reason: 'name has no letters or digits' };
 
-  const nameToks = tokens(stripPercent(prep(name)));
-  const labelToks = tokens(stripPercent(prep(label)));
+  const nameToks = tokens(stripPercentOff(prep(name)));
+  const labelToks = tokens(stripPercentOff(prep(label)));
   if (label) {
     const ls = new Set(labelToks);
     if (compact(name) === compact(label) || nameToks.every((t) => ls.has(t))) return { ok: false, reason: 'name is only the variant label' };
@@ -195,12 +199,19 @@ export function checkName(source: NameSource, a: NameAnswer): NameCheck {
   const status = source.brandStatus ?? basicBrandStatus(source.brand);
   const titleToks = tokens(title);
   const titleBrand = source.titleBrand ?? null;
-  if (titleBrand && hasBrand(titleToks, titleBrand) && !hasBrand([...nameToks, ...labelToks], titleBrand)) {
+  if (titleBrand && hasBrand(titleToks, titleBrand) && !keepsBrand([...nameToks, ...labelToks], titleBrand, titleToks)) {
     return { ok: false, reason: `title brand ${titleBrand} dropped` };
   }
   // when the title starts with another maker, that maker is the brand of the name (Therabody, not Theragun)
   const otherTitleMaker = !!titleBrand && !!source.brand && compact(titleBrand) !== compact(source.brand) && !hasBrand(titleToks, source.brand);
-  if (source.brand && status === 'reliable' && !otherTitleMaker && !hasBrand(nameToks, source.brand)) return { ok: false, reason: `brand ${source.brand} missing` };
+  if (source.brand && status === 'reliable' && !otherTitleMaker && !keepsBrand(nameToks, source.brand, titleToks)) return { ok: false, reason: `brand ${source.brand} missing` };
+  // an unreliable brand value whose maker name the title has (Sony of "Sony Group") is kept like a reliable one;
+  // a web address or a shop name in the title stays shop noise
+  const note = source.brandNote ?? (source.brand && isWebBrand(source.brand) ? 'web address' : null);
+  if (source.brand && status === 'unreliable' && note !== 'web address' && note !== 'shop name' && compact(brandName(source.brand)).length >= 3 && fullBrandIn(titleToks, source.brand) &&
+    !keepsBrand(nameToks, source.brand, titleToks)) {
+    return { ok: false, reason: `brand ${source.brand} missing (the title names it)` };
+  }
   if (source.brand && status === 'unreliable' && !hasBrand(titleToks, source.brand) && (hasBrand(nameToks, source.brand) || hasBrand(labelToks, source.brand))) {
     return { ok: false, reason: `unreliable brand ${source.brand} added (shop name, distributor or company, not in the title)` };
   }
@@ -218,12 +229,11 @@ export function checkName(source: NameSource, a: NameAnswer): NameCheck {
     }
   }
   const rawData = dataTexts.join(' ');
-  // & and + read as "and" or "plus"
-  if (/[&+]/.test(rawData)) {
-    vocab.add('and');
-    vocab.add('plus');
-  }
-  if (/\bw\//i.test(rawData)) vocab.add('with');
+  // "plus" only from a + of the title or variants, "and" from & or a spaced +, "with" from w/ (never from the mpn)
+  const wordData = [source.title, ...(source.variantTitles ?? [])].join(' ');
+  if (wordData.includes('+')) vocab.add('plus');
+  if (/&|(?:^|\s)\+(?:\s|$)/.test(wordData)) vocab.add('and');
+  if (/\bw\//i.test(wordData)) vocab.add('with');
 
   /** Indexes of tokens that are shop data written apart (WiFi for Wi-Fi) or together (Hotpoint Ariston for HOTPOINTARISTON). */
   const joined = (list: string[]): Set<number> => {
@@ -256,13 +266,29 @@ export function checkName(source: NameSource, a: NameAnswer): NameCheck {
 
   const required = tokens(requiredText(title, a.attrs));
   const lost: string[] = [];
-  // a model word also survives inside the title's words written together (Air of "Air Fryer" in Airfryer)
-  const inJoined = (t: string) => keptAll.some((k) => k !== t && (k.startsWith(t) || k.endsWith(t)) && dataLists.some((l) => inRun(l, k)));
+  // a model word also survives inside the title's words written together (Air of "Air Fryer" in Airfryer): the kept
+  // word must join two or more adjacent title tokens that include it, and is never one title word (Protector, Case)
+  const joinOf = (k: string, t: string) =>
+    !dataLists.some((l) => l.includes(k)) &&
+    dataLists.some((l) => {
+      for (let i = 0; i < l.length; i++) {
+        let s = l[i];
+        for (let j = i + 1; j < l.length && s.length < k.length; j++) {
+          s += l[j];
+          if (s === k && l.slice(i, j + 1).includes(t)) return true;
+        }
+      }
+      return false;
+    });
+  const inJoined = (t: string) => keptAll.some((k) => k !== t && joinOf(k, t));
   for (const t of new Set(required)) {
     if (MODEL.has(t) && !keptSet.has(t) && !inJoined(t)) lost.push(t);
     else if (isCode(t) && !BARCODE.test(t) && !kept.some((l) => inRun(l, t))) lost.push(t);
   }
   const newTokens: string[] = [];
+  // a + glued to a word (S24+) only when the title or variants have one
+  const gluedPlus = /[\p{L}\p{N}]\+/u;
+  if (gluedPlus.test(`${name} ${label}`) && !gluedPlus.test(wordData)) newTokens.push('+');
   for (const t of new Set(keptAll)) {
     if (isCode(t) && !dataLists.some((l) => inRun(l, t))) newTokens.push(t);
   }
@@ -386,7 +412,7 @@ export function checkBatch(batch: Batch, output: unknown, schema: CategorySchema
       delete attrs.brand;
       dropped.push('brand (unreliable brand, not the maker)');
     }
-    const check = checkName({ title: g.title, brand: g.brand, brandStatus, titleBrand: g.titleBrand, variantTitles: g.variantTitles, mpn: g.mpn }, { display_name: name, variant_label: label, attrs });
+    const check = checkName({ title: g.title, brand: g.brand, brandStatus, brandNote: g.brandNote, titleBrand: g.titleBrand, variantTitles: g.variantTitles, mpn: g.mpn }, { display_name: name, variant_label: label, attrs });
     if (!check.ok) return reject(check.reason, name, dropped, label);
     return { item, status: 'ok', reason: null, displayName: name, variantLabel: label, attrs, dropped, proposedName: name, proposedLabel: label };
   });
