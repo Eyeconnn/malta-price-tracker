@@ -34,7 +34,7 @@ export const ADDRESS_PROBLEM_TEXT: Record<AddressProblem, string> = {
   malformed: 'That does not look like a web address. Try something like https://shop.com.mt.',
   scheme: 'Use an address that starts with https:// or http://.',
   credentials: 'Leave out any user name or password.',
-  port: 'Use an address without a port number (only 80 and 443 are allowed).',
+  port: 'Use an address without a port number.',
   ip: "Use the shop's name, not an IP address.",
   host: 'Use a public web address, such as shop.com.mt.',
 };
@@ -47,6 +47,10 @@ const LABEL = /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/;
 const TLD = /^(?:[a-z]{2,63}|xn--[a-z0-9-]{1,59})$/;
 // a last label that is all digits or a hex number makes the whole name an IPv4 address (WHATWG URL rules)
 const NUMERIC_LABEL = /^(?:0x[0-9a-f]*|\d+)$/i;
+// second-level labels that, with a country code, form a public suffix (com.mt, gov.mt, co.uk, ...)
+const SUFFIX_SECOND_LEVEL = new Set(['com', 'org', 'net', 'edu', 'gov', 'co', 'ac', 'mil', 'int', 'biz', 'info', 'nom', 'ltd', 'plc', 'me']);
+// bidi embeddings and overrides, isolates, marks, and zero-width characters: invisible, can disguise a name
+const INVISIBLE = /[\u061c\u200b-\u200f\u202a-\u202e\u2060-\u2064\u2066-\u2069\ufeff]/g;
 
 /** Lowercased host name without a trailing dot or a leading "www.": how shops and requests are compared. */
 export function hostKey(urlOrHost: string): string {
@@ -82,8 +86,6 @@ export function parseShopAddress(raw: string): ParsedAddress {
   }
   if (u.protocol !== 'https:' && u.protocol !== 'http:') return { ok: false, problem: 'scheme' };
   if (u.username || u.password) return { ok: false, problem: 'credentials' };
-  if (u.port !== '' && u.port !== '80' && u.port !== '443') return { ok: false, problem: 'port' };
-
   const host = u.hostname.toLowerCase().replace(/\.$/, '');
   if (!host) return { ok: false, problem: 'malformed' };
   if (host.startsWith('[') || host.includes(':')) return { ok: false, problem: 'ip' };
@@ -92,15 +94,20 @@ export function parseShopAddress(raw: string): ParsedAddress {
   if (host.length > 253 || labels.length < 2 || !labels.every((l) => LABEL.test(l))) return { ok: false, problem: 'host' };
   const tld = labels[labels.length - 1]!;
   if (!TLD.test(tld) || RESERVED_TLDS.has(tld)) return { ok: false, problem: 'host' };
+  // a public suffix on its own (mt, com.mt, co.uk, also behind www.) is not a shop
+  const key = hostKey(host).split('.');
+  if (key.length < 2 || (key.length === 2 && SUFFIX_SECOND_LEVEL.has(key[0]!))) return { ok: false, problem: 'host' };
+  // the parser drops a scheme's own default port, so any port left (8080, or 443 on http, 80 on https) is refused
+  if (u.port !== '') return { ok: false, problem: 'port' };
 
-  const origin = `${u.protocol}//${host}${u.port ? `:${u.port}` : ''}`;
-  return { ok: true, origin, host: hostKey(host) };
+  return { ok: true, origin: `${u.protocol}//${host}`, host: hostKey(host) };
 }
 
-/** A display name as stored: control characters removed, spaces collapsed, trimmed; null when blank. */
+/** A display name as stored: control, bidi and zero-width characters removed, spaces collapsed, trimmed; null when blank. */
 export function cleanDisplayName(raw: string | null | undefined): string | null {
   if (raw === null || raw === undefined) return null;
   const s = raw
+    .replace(INVISIBLE, '')
     .replace(/[\u0000-\u0008\u000b-\u001f\u007f]/g, '')
     .replace(/\s+/g, ' ')
     .trim();

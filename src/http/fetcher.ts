@@ -95,6 +95,8 @@ function compilePatterns(list: unknown, log: (m: string) => void): RegExp[] {
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 const RETRYABLE = new Set([408, 425, 429, 500, 502, 503, 504, 520, 521, 522, 523, 524]);
+/** Statuses the fetcher retries with backoff (timeouts, 429, server errors, Cloudflare 52x). */
+export const isRetryableStatus = (status: number): boolean => RETRYABLE.has(status);
 
 /**
  * Polite HTTP client for one shop: one request at a time, a random 2 to 5 s gap

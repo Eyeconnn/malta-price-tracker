@@ -1,7 +1,7 @@
 // A stand-in for ShopFetcher that answers from recorded responses (test/fixtures/shop-requests) and behaves
 // like the real one: robots.txt is obeyed, 200/404/410 are returned, other statuses throw HttpError.
 import { readFileSync } from 'node:fs';
-import { DisallowedError, type FetchResult, HttpError, OutOfScopeError, parseJsonLenient, scopeHost } from '../../src/http/fetcher.js';
+import { DisallowedError, type FetchResult, HttpError, OutOfScopeError, parseJsonLenient, parseRetryAfter, scopeHost } from '../../src/http/fetcher.js';
 import { parseRobots, type RobotsRules } from '../../src/http/robots.js';
 
 export const UA = 'MTPIndex/1.0 (price index crawler)';
@@ -10,8 +10,11 @@ export const fixture = (name: string) => readFileSync(new URL(`../fixtures/shop-
 
 export type Recorded = { status?: number; body?: string; headers?: Record<string, string>; redirectTo?: string } | Error;
 
+/** robots.txt that failed: its last status and Retry-After, as ShopFetcher reports an unreachable robots.txt */
+export type RobotsFailure = { status: number; retryAfterMs?: number | null };
+
 /** routes keyed by full URL (origin + path + query); robots by origin ('' or missing: no robots.txt) */
-export function fakeFetcher(origin: string, routes: Record<string, Recorded>, robots: Record<string, string | null> = {}) {
+export function fakeFetcher(origin: string, routes: Record<string, Recorded>, robots: Record<string, string | null | RobotsFailure> = {}) {
   const requests: string[] = [];
   const scope = scopeHost(origin);
   const cache = new Map<string, RobotsRules>();
@@ -21,7 +24,8 @@ export function fakeFetcher(origin: string, routes: Record<string, Recorded>, ro
     if (!r) {
       requests.push(`${o}/robots.txt`);
       const text = robots[o];
-      r = text === undefined || text === null ? parseRobots(o, '', UA, 'none') : parseRobots(o, text, UA, 'ok');
+      if (typeof text === 'object' && text !== null) r = { ...parseRobots(o, '', UA, 'unreachable'), httpStatus: text.status, retryAfterMs: text.retryAfterMs ?? null };
+      else r = text === undefined || text === null ? parseRobots(o, '', UA, 'none') : parseRobots(o, text, UA, 'ok');
       cache.set(o, r);
     }
     return r;
@@ -40,7 +44,7 @@ export function fakeFetcher(origin: string, routes: Record<string, Recorded>, ro
         continue;
       }
       const status = rec.status ?? 200;
-      if (![200, 203, 204, 206, 404, 410].includes(status)) throw new HttpError(url, status);
+      if (![200, 203, 204, 206, 404, 410].includes(status)) throw new HttpError(url, status, parseRetryAfter(new Headers(rec.headers ?? {}).get('retry-after')));
       const body = Buffer.from(rec.body ?? '', 'utf8');
       return {
         url,

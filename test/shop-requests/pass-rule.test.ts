@@ -72,3 +72,19 @@ describe('judgeTestScrape', () => {
     expect(Number.isInteger(j.sample[0]!.priceCents)).toBe(true);
   });
 });
+
+describe('judgeTestScrape counts products, not variants', () => {
+  it('50 variants of 5 parent products are 5 products and fail', () => {
+    const sample = Array.from({ length: 50 }, (_, i) => rec(i, { parent_external_id: `P${i % 5}`, title: `Shirt ${i % 5}` }));
+    const j = judgeTestScrape(totals({ products_seen: 50 }), sample);
+    expect(j).toMatchObject({ pass: false, productsFound: 5, good: 5 });
+    expect(j.reason).toMatch(/Only 5 products/);
+    // the sample shows one row per product
+    expect(j.sample.map((s) => s.title)).toEqual(['Shirt 0', 'Shirt 1', 'Shirt 2', 'Shirt 3', 'Shirt 4']);
+  });
+
+  it('a product counts as good when any of its variants has a title and a price', () => {
+    const sample = Array.from({ length: 12 }, (_, i) => [rec(i * 2, { parent_external_id: `G${i}`, price_cents: 0 }), rec(i * 2 + 1, { parent_external_id: `G${i}` })]).flat();
+    expect(judgeTestScrape(totals({ products_seen: 24 }), sample)).toMatchObject({ pass: true, productsFound: 12, good: 12 });
+  });
+});

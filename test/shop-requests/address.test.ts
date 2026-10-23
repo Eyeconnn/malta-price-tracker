@@ -26,11 +26,11 @@ describe('parseShopAddress', () => {
     expect(ok('//example.com.mt').origin).toBe('https://example.com.mt');
   });
 
-  it('allows ports 80 and 443 only', () => {
+  it('allows only the default port of the scheme, so an origin never carries a port', () => {
     expect(ok('https://example.com.mt:443/').origin).toBe('https://example.com.mt');
     expect(ok('http://example.com.mt:80/').origin).toBe('http://example.com.mt');
-    expect(ok('http://example.com.mt:443/').origin).toBe('http://example.com.mt:443');
-    expect(ok('https://example.com.mt:80/').origin).toBe('https://example.com.mt:80');
+    expect(problem('http://example.com.mt:443/')).toBe('port');
+    expect(problem('https://example.com.mt:80/')).toBe('port');
     expect(problem('https://example.com.mt:8080/')).toBe('port');
     expect(problem('http://example.com.mt:22')).toBe('port');
   });
@@ -88,6 +88,11 @@ describe('parseShopAddress', () => {
       expect(problem(raw), raw).not.toBeNull();
     }
     expect(problem('http://localhost/')).toBe('host');
+    // a public suffix alone is not a shop
+    for (const raw of ['https://com.mt', 'https://www.com.mt', 'http://co.uk', 'https://gov.mt', 'https://org.mt', 'https://edu.mt', 'https://net.mt', 'https://www.mt']) {
+      expect(problem(raw), raw).toBe('host');
+    }
+    expect(ok('https://shop.com.mt').host).toBe('shop.com.mt');
     expect(problem('https://printer.local/')).toBe('host');
   });
 
@@ -117,6 +122,13 @@ describe('hostKey', () => {
 });
 
 describe('cleanDisplayName', () => {
+  it('strips bidi overrides and zero-width characters', () => {
+    const c = (...codes: number[]) => String.fromCharCode(...codes);
+    expect(cleanDisplayName(['Shop', c(0x202e), 'evil', c(0x202c)].join(''))).toBe('Shopevil');
+    expect(cleanDisplayName([c(0x2066), 'A', c(0x2069), ' B', c(0x200b), 'C', c(0xfeff), c(0x200f), c(0x2060)].join(''))).toBe('A BC');
+    expect(cleanDisplayName(c(0x200b, 0x200c, 0x200d))).toBeNull();
+  });
+
   it('trims, collapses spaces and strips control characters; null when blank', () => {
     expect(cleanDisplayName('  Klikk   Malta ')).toBe('Klikk Malta');
     expect(cleanDisplayName('A\u0000B\tC')).toBe('AB C');

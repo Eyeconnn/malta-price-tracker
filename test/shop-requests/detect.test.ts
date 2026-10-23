@@ -8,6 +8,7 @@ import {
   looksLikeShopifyProducts,
   looksLikeWooProducts,
   magentoGraphqlRoot,
+  magentoProductsPath,
   probeShop,
 } from '../../src/shop-requests/detect.js';
 import { type Recorded, fakeFetcher, fixture } from './fake-fetcher.js';
@@ -64,16 +65,21 @@ describe('probeShop', () => {
   });
 
   it('Magento GraphQL: graphql with the root category', async () => {
-    const f = fakeFetcher(O, { [`${O}/`]: page(fixture('magento-home.html')), [`${O}${PROBE_PATHS.magento}`]: page(fixture('magento-graphql.json')) });
-    const d = await probeShop(f, O);
-    expect(d).toMatchObject({ kind: 'supported', platform: 'magento-graphql', adapter: 'magento', config: { graphql: true, graphql_root: 2 }, siteName: 'Electro Hub' });
-    expect(f.requests).toHaveLength(3);
-  });
-
-  it('Magento HTML: GraphQL errors but Magento markers on the page', async () => {
     const f = fakeFetcher(O, {
       [`${O}/`]: page(fixture('magento-home.html')),
-      [`${O}${PROBE_PATHS.magento}`]: { status: 500, body: fixture('magento-graphql-error.json') },
+      [`${O}${PROBE_PATHS.magento}`]: page(fixture('magento-graphql.json')),
+      [`${O}${magentoProductsPath(2)}`]: page(fixture('magento-products.json')),
+    });
+    const d = await probeShop(f, O);
+    expect(d).toMatchObject({ kind: 'supported', platform: 'magento-graphql', adapter: 'magento', config: { graphql: true, graphql_root: 2 }, siteName: 'Electro Hub' });
+    // storeConfig, then the adapter's own products query with pageSize 1
+    expect(f.requests).toEqual([`${O}/robots.txt`, `${O}/`, `${O}${PROBE_PATHS.magento}`, `${O}${magentoProductsPath(2)}`]);
+  });
+
+  it('Magento HTML: GraphQL answers with errors but Magento markers are on the page', async () => {
+    const f = fakeFetcher(O, {
+      [`${O}/`]: page(fixture('magento-home.html')),
+      [`${O}${PROBE_PATHS.magento}`]: page(fixture('magento-graphql-error.json')),
     });
     const d = await probeShop(f, O);
     expect(d).toMatchObject({ kind: 'supported', platform: 'magento-html', adapter: 'magento', config: {} });
@@ -135,8 +141,8 @@ describe('probeShop', () => {
     expect(await probeShop(f403, O)).toMatchObject({ kind: 'unreachable', reason: expect.stringMatching(/HTTP 403/) });
     const away = fakeFetcher(O, { [`${O}/`]: { redirectTo: 'https://elsewhere.example.com/' } });
     expect(await probeShop(away, O)).toMatchObject({ kind: 'unreachable', reason: expect.stringMatching(/another site/) });
-    const down = fakeFetcher(O, { [`${O}/`]: new HttpError(`${O}/`, 503) });
-    expect(await probeShop(down, O)).toMatchObject({ kind: 'unreachable' });
+    const away403 = fakeFetcher(O, { [`${O}/`]: { status: 202, body: '<html>checking your browser</html>' } });
+    expect(await probeShop(away403, O)).toMatchObject({ kind: 'unreachable', reason: expect.stringMatching(/HTTP 202.*not worked around/) });
   });
 
   it('robots.txt unreachable: blocked, nothing else fetched', async () => {
@@ -146,5 +152,71 @@ describe('probeShop', () => {
     const d = await probeShop(f, O);
     expect(d).toMatchObject({ kind: 'blocked', reason: expect.stringMatching(/robots.txt could not be read/) });
     expect(f.requests).toEqual([]);
+  });
+});
+
+describe('probeShop: rate limits, bot checks, slow shops and Magento product lists', () => {
+  it('a 429 on the home page stops at once with its Retry-After; nothing else is fetched', async () => {
+    const f = fakeFetcher(O, { [`${O}/`]: { status: 429, body: 'slow down', headers: { 'retry-after': '7200' } } });
+    const d = await probeShop(f, O);
+    expect(d).toMatchObject({ kind: 'rate_limited', retryAfterMs: 7_200_000, reason: expect.stringMatching(/home page answered HTTP 429/) });
+    expect(f.requests).toEqual([`${O}/robots.txt`, `${O}/`]);
+  });
+
+  it('a 503 on a feed probe stops at once: no other path is tried', async () => {
+    const f = fakeFetcher(O, { [`${O}/`]: page(fixture('shopify-home.html')), [`${O}${PROBE_PATHS.shopify}`]: { status: 503, body: 'busy' } });
+    const d = await probeShop(f, O);
+    expect(d).toMatchObject({ kind: 'rate_limited', retryAfterMs: null });
+    expect(f.requests).toEqual([`${O}/robots.txt`, `${O}/`, `${O}${PROBE_PATHS.shopify}`]);
+  });
+
+  it('robots.txt answering 429 is rate limiting, not a block', async () => {
+    const f = fakeFetcher(O, {}, { [O]: { status: 429, retryAfterMs: 60_000 } });
+    expect(await probeShop(f, O)).toMatchObject({ kind: 'rate_limited', retryAfterMs: 60_000, reason: expect.stringMatching(/robots\.txt answered HTTP 429/) });
+    expect(f.requests).toEqual([`${O}/robots.txt`]);
+  });
+
+  it('a 403 from a probe is a bot check: failed, nothing more fetched', async () => {
+    const f = fakeFetcher(O, { [`${O}/`]: page(fixture('unknown-home.html')), [`${O}${PROBE_PATHS.shopify}`]: { status: 403, body: 'denied' } });
+    const d = await probeShop(f, O);
+    expect(d).toMatchObject({ kind: 'unreachable', reason: expect.stringMatching(/HTTP 403.*not worked around/) });
+    expect(f.requests).toHaveLength(3);
+  });
+
+  it('a 429 on a product page of an unknown shop stops too', async () => {
+    const f = fakeFetcher(O, {
+      [`${O}/`]: page(fixture('unknown-home.html')),
+      [`${O}/en/men/1-hummingbird-printed-t-shirt.html`]: { status: 429, body: '' },
+    });
+    expect(await probeShop(f, O)).toMatchObject({ kind: 'rate_limited' });
+    expect(f.requests).toHaveLength(6);
+  });
+
+  it('a Crawl-delay above 30 s needs setup, before the home page is read', async () => {
+    const f = fakeFetcher(O, { [`${O}/`]: page(fixture('shopify-home.html')) }, { [O]: 'User-agent: *\nCrawl-delay: 45\n' });
+    const d = await probeShop(f, O);
+    expect(d).toMatchObject({ kind: 'unsupported', platform: null, reason: expect.stringMatching(/crawl delay too long for the check/i) });
+    expect(d.robots).toMatchObject({ crawlDelaySeconds: 45 });
+    expect(f.requests).toEqual([`${O}/robots.txt`]);
+  });
+
+  it('Magento: storeConfig works but the product list errors; Magento markers: falls back to pages', async () => {
+    const f = fakeFetcher(O, {
+      [`${O}/`]: page(fixture('magento-home.html')),
+      [`${O}${PROBE_PATHS.magento}`]: page(fixture('magento-graphql.json')),
+      [`${O}${magentoProductsPath(2)}`]: page(fixture('magento-products-error.json')),
+    });
+    expect(await probeShop(f, O)).toMatchObject({ kind: 'supported', platform: 'magento-html', adapter: 'magento', config: {} });
+  });
+
+  it('Magento: product list errors and no page markers: needs setup with the GraphQL error', async () => {
+    const f = fakeFetcher(O, {
+      [`${O}/`]: page(fixture('unknown-home.html')),
+      [`${O}${PROBE_PATHS.magento}`]: page(fixture('magento-graphql.json')),
+      [`${O}${magentoProductsPath(2)}`]: page(fixture('magento-products-error.json')),
+    });
+    const d = await probeShop(f, O);
+    expect(d).toMatchObject({ kind: 'unsupported', platform: 'magento-graphql', reason: expect.stringMatching(/product list.*Internal server error/) });
+    if (d.kind === 'unsupported') expect(d.details.graphqlError).toBe('Internal server error');
   });
 });
