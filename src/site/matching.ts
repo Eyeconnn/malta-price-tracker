@@ -2,16 +2,25 @@
 // specs (design Part 3, "name + specs"), else similar titles. The title rule is ported from dashboard/src/page.ts
 // (tokens and sameProduct).
 import { hasBrand } from '../names/brand.js';
-import { compact } from '../names/text.js';
+import { compact, conditions, moneyValues } from '../names/text.js';
 import { cleanGtin } from '../util/normalise.js';
-import { identityValues, nameKey, nameTokens, sameIdentity } from './identity.js';
+import { identityValues, nameKey, nameTokens, sameIdentity, specParts } from './identity.js';
 
 /**
  * A row's accepted clean name (product_names, status ok) as the name rule reads it. brand: the row's reliable
  * brand in compact form (src/names/brand.ts: reliable or house), null when it has none; brandInName: the clean
  * name contains that brand.
  */
-export type NameMatch = { key: string; brand: string | null; brandInName: boolean; identity: Record<string, string> };
+export type NameMatch = {
+  key: string;
+  /** the category the clean name was made for: names are compared within one category */
+  category: string;
+  brand: string | null;
+  brandInName: boolean;
+  /** the listing has several variants (site_products.variant_count > 1) */
+  multi: boolean;
+  identity: Record<string, string>;
+};
 
 /**
  * brand: the shop's brand field when it has one; two rows with different brands are never title-matched.
@@ -134,12 +143,19 @@ function brandKey(it: MatchInput): string | null {
 /**
  * Whether the name rule keeps `it` apart from a member of a title group: both have the same clean name but their
  * brands or identity specs disagree (a pack of 6 and a pack of 12), so the title rule must not call them possibly
- * the same either.
+ * the same either. Nor are two named listings whose condition or currency values differ.
  */
 function nameConflict(members: MatchInput[], it: MatchInput): boolean {
   const n = it.name;
   if (!n) return false;
-  return members.some((m) => m.name && m.name.key === n.key && !sameNamedProduct(m as Named, it as Named));
+  return members.some(
+    (m) =>
+      m.name &&
+      ((m.name.key === n.key && !sameNamedProduct(m as Named, it as Named)) ||
+        // a used or refurbished item is not possibly the same as a new one, nor a €20 card a €50 one (review C1)
+        m.name.identity.condition !== n.identity.condition ||
+        m.name.identity.money !== n.identity.money),
+  );
 }
 
 /** A numeric token present in more than this share of items (and at least TITLE_MIN_COMMON items) is too common to probe with. */
@@ -213,16 +229,63 @@ function matchByTitle(items: MatchInput[], out: Map<number, Match>): void {
   }
 }
 
+/** Words that name the kind of spec in a variant label ("1TB SSD", "12GB RAM"). */
+const SPEC_WORDS = new Set(['ssd', 'hdd', 'emmc', 'ram', 'rom', 'storage', 'memory']);
+
 /**
- * The name rule's view of a clean name: its nameKey, the category's identity specs from its attributes, and the
- * row's reliable brand (null when the brand field is missing, unreliable or a placeholder; judged by the caller).
+ * Numbers with a unit in a clean variant label ("256GB" of "256GB, Black") that the attributes do not give: a
+ * listing whose storage is only in its label is still told apart from another storage (review C2b). Colour and
+ * size words and bare numbers (sizes) are not counted, nor sizes the attributes list.
+ */
+function labelSpecs(variantLabel: string | null, category: string | null, attrs: Record<string, unknown> | null): string {
+  if (!variantLabel) return '';
+  const covered = new Set(specParts(category, attrs).flatMap((p) => nameTokens(p.text)));
+  const sizes = attrs && Array.isArray(attrs.sizes) ? attrs.sizes : [];
+  for (const s of sizes) if (typeof s === 'string') for (const t of nameTokens(s)) covered.add(t);
+  const own = nameTokens(variantLabel).filter((t) => /^\d+(?:\.\d+)?\p{L}+$/u.test(t) && !SPEC_WORDS.has(t) && !covered.has(t));
+  return [...new Set(own)].sort().join(',');
+}
+
+export type NameExtra = {
+  /** the shop's title: its condition and values with a currency count even when an older clean name lost them */
+  title?: string;
+  /** the clean variant label */
+  variantLabel?: string | null;
+  /** how many variants the listing has (site_products.variant_count) */
+  variantCount?: number;
+};
+
+/**
+ * The name rule's view of a clean name: its category and nameKey, the row's reliable brand (null when the brand
+ * field is missing, unreliable or a placeholder; judged by the caller) and its identity: the category's key specs
+ * from the attributes, plus three that every listing has (review C1, C2b): the condition (new when none is named),
+ * the values with a currency (none when none) and the numbers with a unit its variant label alone gives.
  * Null when the name has no letters or digits.
  */
-export function nameMatch(displayName: string, category: string | null, attrs: Record<string, unknown> | null, reliableBrand: string | null): NameMatch | null {
+export function nameMatch(
+  displayName: string,
+  category: string | null,
+  attrs: Record<string, unknown> | null,
+  reliableBrand: string | null,
+  extra: NameExtra = {},
+): NameMatch | null {
   const key = nameKey(displayName);
   if (key === '') return null;
   const brand = reliableBrand && compact(reliableBrand) !== '' ? compact(reliableBrand) : null;
-  return { key, brand, brandInName: reliableBrand !== null && brand !== null && hasBrand(nameTokens(displayName), reliableBrand), identity: identityValues(category, attrs) };
+  const texts = [displayName, extra.variantLabel ?? '', extra.title ?? ''].join(' \n ');
+  return {
+    key,
+    category: category ?? '',
+    brand,
+    brandInName: reliableBrand !== null && brand !== null && hasBrand(nameTokens(displayName), reliableBrand),
+    multi: (extra.variantCount ?? 1) > 1,
+    identity: {
+      ...identityValues(category, attrs),
+      condition: conditions(texts).join(',') || 'new',
+      money: moneyValues(texts).join(',') || 'none',
+      label_specs: labelSpecs(extra.variantLabel ?? null, category, attrs),
+    },
+  };
 }
 
 /** A clean name shared by more listings than this is too generic to match by ("Gift Card"): left alone. */
@@ -243,22 +306,89 @@ function groupable(members: MatchInput[]): boolean {
   return named.length >= 2 && named.every((m) => sameValues(m.name.identity, named[0].name.identity));
 }
 
+const keysOf = (m: Named) => Object.keys(m.name.identity);
+const hasAllKeys = (a: Named, b: Named) => keysOf(b).every((k) => Object.hasOwn(a.name.identity, k));
+
 /**
- * Same brand (or both none, or one none when the shared name carries the other's brand) and every identity spec
- * both have equal. The names are already equal (same bucket).
+ * Same brand (or both none, or one none when the shared name carries the other's brand), every identity spec both
+ * have equal, and a listing with several variants has every identity spec the other has (review C2a: a 256GB and
+ * 512GB group is not the 512GB-only listing). The names are already equal (same bucket).
  */
 function sameNamedProduct(a: Named, b: Named): boolean {
   const ba = a.name.brand;
   const bb = b.name.brand;
   const brandOk = ba === bb || (ba === null && b.name.brandInName) || (bb === null && a.name.brandInName);
-  return brandOk && sameIdentity(a.name.identity, b.name.identity);
+  if (!brandOk || !sameIdentity(a.name.identity, b.name.identity)) return false;
+  return (!a.name.multi || hasAllKeys(a, b)) && (!b.name.multi || hasAllKeys(b, a));
 }
 
 /**
- * Name matching (design Part 3). Listings with an accepted clean name are bucketed by nameKey (no pairwise work
- * across buckets); inside a bucket the most specific listings go first and each listing joins the one cluster it
- * agrees with (brand and identity specs with every member). A listing that agrees with two or more clusters (a
- * phone without storage next to a 256GB and a 512GB one) joins none.
+ * The clusters of one name bucket, the same whatever the order of the listings (review I1):
+ * 1. Seeds are the listings with the fullest identity: no other listing's specs are a strict superset of theirs.
+ *    Seeds with the same specs and brand form a core.
+ * 2. Cores that agree are linked. A linked set where every pair agrees is one cluster. Otherwise each core is its
+ *    own cluster, and a core that agrees with two or more of the others (ram 12GB next to a 256GB and a 512GB) is
+ *    ambiguous and dropped.
+ * 3. Every other (partial) listing joins the one cluster it agrees with, else none. After all clusters exist, a
+ *    partial listing that disagrees with a member of its cluster or agrees with another whole cluster is dropped.
+ */
+function clusterBucket(members: Named[]): Named[][] {
+  const strictSubset = (a: Named, b: Named) => keysOf(a).length < keysOf(b).length && hasAllKeys(b, a);
+  const seeds = members.filter((m) => !members.some((o) => o !== m && strictSubset(m, o)));
+  const seedSet = new Set(seeds);
+  const partials = members.filter((m) => !seedSet.has(m));
+
+  const coreMap = new Map<string, Named[]>();
+  for (const s of seeds) {
+    const sig = `${s.name.brand ?? ''}|${JSON.stringify(Object.entries(s.name.identity).sort(([x], [y]) => (x < y ? -1 : 1)))}`;
+    const core = coreMap.get(sig);
+    if (core) core.push(s);
+    else coreMap.set(sig, [s]);
+  }
+  const cores = [...coreMap.values()].sort((a, b) => Math.min(...a.map((m) => m.id)) - Math.min(...b.map((m) => m.id)));
+  const agree = (x: Named[], y: Named[]) => x.every((m) => y.every((n) => m === n || sameNamedProduct(m, n)));
+  const usable = cores.filter((c) => agree(c, c));
+
+  const clusters: Named[][] = [];
+  const seen = new Set<Named[]>();
+  for (const start of usable) {
+    if (seen.has(start)) continue;
+    const comp: Named[][] = [];
+    const stack = [start];
+    seen.add(start);
+    while (stack.length > 0) {
+      const c = stack.pop()!;
+      comp.push(c);
+      for (const d of usable) {
+        if (!seen.has(d) && agree(c, d)) {
+          seen.add(d);
+          stack.push(d);
+        }
+      }
+    }
+    if (comp.every((c) => comp.every((d) => c === d || agree(c, d)))) clusters.push(comp.flat());
+    else for (const c of comp) if (comp.filter((d) => d !== c && agree(c, d)).length < 2) clusters.push(c);
+  }
+
+  const fitsAll = (p: Named, cluster: Named[]) => cluster.every((m) => m === p || sameNamedProduct(m, p));
+  const attached = new Map<Named, number>();
+  for (const p of partials) {
+    const fits = clusters.map((c, i) => (fitsAll(p, c) ? i : -1)).filter((i) => i >= 0);
+    if (fits.length === 1) attached.set(p, fits[0]);
+  }
+  const final = clusters.map((c, i) => [...c, ...partials.filter((p) => attached.get(p) === i)]);
+  const drop = new Set<Named>();
+  for (const [p, i] of attached) {
+    if (!fitsAll(p, final[i]) || final.some((c, j) => j !== i && fitsAll(p, c))) drop.add(p);
+  }
+  return final.map((c) => c.filter((m) => !drop.has(m)));
+}
+
+/**
+ * Name matching (design Part 3). Listings with an accepted clean name are bucketed by category and nameKey (no
+ * pairwise work across buckets) and clustered by clusterBucket: each listing joins the one cluster it agrees with
+ * (brand and identity specs with every member). A listing that agrees with two or more clusters (a phone without
+ * storage next to a 256GB and a 512GB one) joins none.
  *
  * With GTIN and MPN groups (they keep priority, decided before this runs):
  * - a cluster without a code-matched member is a name group when it spans two or more shops, or when it is two or
@@ -272,7 +402,8 @@ function sameNamedProduct(a: Named, b: Named): boolean {
 function matchByName(items: MatchInput[], out: Map<number, Match>): void {
   const buckets = groupByKey(
     items.filter((it): it is Named => !!it.name && it.name.key !== ''),
-    (it) => (it as Named).name.key,
+    // one category's names only (review I2)
+    (it) => `${(it as Named).name.category}|${(it as Named).name.key}`,
   ) as Map<string, Named[]>;
   // the named members of each code group, to check that all of them agree before a listing joins it
   const namedOfCode = new Map<string, Set<number>>();
@@ -292,16 +423,8 @@ function matchByName(items: MatchInput[], out: Map<number, Match>): void {
 
   for (const members of buckets.values()) {
     if (members.length < 2 || members.length > NAME_BUCKET_MAX) continue;
-    const ordered = [...members].sort((a, b) => Object.keys(b.name.identity).length - Object.keys(a.name.identity).length || a.id - b.id);
-    const clusters: Named[][] = [];
-    for (const it of ordered) {
-      const fits = clusters.filter((c) => c.every((m) => sameNamedProduct(m, it)));
-      if (fits.length === 1) fits[0].push(it);
-      else if (fits.length === 0) clusters.push([it]);
-      // agrees with two or more clusters: ambiguous, joins none
-    }
-
-    for (const cluster of clusters) {
+    for (const cluster of clusterBucket(members)) {
+      if (cluster.length === 0) continue;
       const free = cluster.filter((m) => !out.has(m.id));
       if (free.length === 0) continue;
       const codes = new Set(cluster.filter((m) => out.has(m.id)).map((m) => out.get(m.id)!.key));
