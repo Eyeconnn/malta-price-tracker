@@ -2,8 +2,9 @@
 // verdicts history rows, canonical ids across shops and shop_ratings. One shop at a time, groups in
 // batches, so only a slice of the observations is ever in memory.
 import type postgres from 'postgres';
+import { brandStatus, loadBrandContext } from '../names/brand.js';
 import { categorize } from './categories.js';
-import { assignMatches, type MatchInput } from './matching.js';
+import { assignMatches, type MatchInput, nameMatch } from './matching.js';
 import { computeRating, JUDGED_SQL } from './rating.js';
 import type { SiteSettings } from './settings.js';
 import { computeVerdict, type Obs, type Verdict } from './verdict.js';
@@ -288,13 +289,43 @@ type CanonRow = MatchInput & { brand: string | null; canonicalId: string | null;
  * key (upserted by match_key). Rows no longer matched lose canonical_id and match_method. A confirmation
  * belongs to a (row, canonical group) pair (Ruling R50): a row whose canonical_id or match_method changes
  * (also to or from null) loses match_confirmed in the same statement; rows that keep both keep it.
+ * Rows with an accepted clean name (product_names) are also matched by name and key specs (matching.ts
+ * matchByName; method 'name', trusted like gtin and mpn on the public site).
  * Returns the number of matched rows per method.
  */
 export async function assignCanonicalIds(sql: postgres.Sql): Promise<Record<string, number>> {
-  const rows = (
-    await sql<{ id: string; shop_id: number; gtin: string | null; mpn: string | null; title: string; brand: string | null; canonical_id: string | null; match_method: string | null }[]>`
-      select id, shop_id, gtin, mpn, title, brand, canonical_id, match_method from site_products order by id`
-  ).map(
+  // the accepted clean name of each row (name matching): only one stored for the row's current shop title, so a
+  // renamed listing waits for the normaliser instead of matching under its old name
+  const raw = await sql<
+    {
+      id: string;
+      shop_id: number;
+      gtin: string | null;
+      mpn: string | null;
+      title: string;
+      brand: string | null;
+      category: string | null;
+      canonical_id: string | null;
+      match_method: string | null;
+      display_name: string | null;
+      name_category: string | null;
+      name_attrs: Record<string, unknown> | null;
+    }[]
+  >`
+    select sp.id, sp.shop_id, sp.gtin, sp.mpn, sp.title, sp.brand, sp.category, sp.canonical_id, sp.match_method,
+      pn.display_name, pn.category as name_category, pn.attrs as name_attrs
+    from site_products sp
+    left join product_names pn on pn.shop_id = sp.shop_id and pn.group_key = sp.group_key
+      and pn.status = 'ok' and pn.display_name is not null and pn.source_title = sp.title
+    order by sp.id`;
+  // the brand rule of the name normaliser (src/names/brand.ts): only a reliable (or house) brand counts
+  const brandCtx = raw.some((r) => r.display_name !== null) ? await loadBrandContext(sql) : null;
+  const reliableBrand = (brand: string | null, shopId: number): string | null => {
+    if (!brandCtx || !brand) return null;
+    const v = brandStatus(brand, shopId, brandCtx);
+    return v.status === 'reliable' ? brand : v.status === 'house' ? (v.name ?? brand) : null;
+  };
+  const rows = raw.map(
     (r): CanonRow => ({
       id: Number(r.id),
       shopId: r.shop_id,
@@ -304,6 +335,7 @@ export async function assignCanonicalIds(sql: postgres.Sql): Promise<Record<stri
       brand: r.brand,
       canonicalId: r.canonical_id,
       matchMethod: r.match_method,
+      name: r.display_name === null ? null : nameMatch(r.display_name, r.name_category ?? r.category, r.name_attrs, reliableBrand(r.brand, r.shop_id)),
     }),
   );
   const matches = assignMatches(rows);

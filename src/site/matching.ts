@@ -1,10 +1,24 @@
-// Groups "the same product" across shops: same barcode, else same part number, else similar titles.
-// The title rule is ported from dashboard/src/page.ts (tokens and sameProduct).
+// Groups "the same product" across shops: same barcode, else same part number, else the same clean name and key
+// specs (design Part 3, "name + specs"), else similar titles. The title rule is ported from dashboard/src/page.ts
+// (tokens and sameProduct).
+import { hasBrand } from '../names/brand.js';
+import { compact } from '../names/text.js';
 import { cleanGtin } from '../util/normalise.js';
+import { identityValues, nameKey, nameTokens, sameIdentity } from './identity.js';
 
-/** brand: the shop's brand field when it has one; two rows with different brands are never title-matched */
-export type MatchInput = { id: number; shopId: number; gtin: string | null; mpn: string | null; title: string; brand?: string | null };
-export type MatchMethod = 'gtin' | 'mpn' | 'title';
+/**
+ * A row's accepted clean name (product_names, status ok) as the name rule reads it. brand: the row's reliable
+ * brand in compact form (src/names/brand.ts: reliable or house), null when it has none; brandInName: the clean
+ * name contains that brand.
+ */
+export type NameMatch = { key: string; brand: string | null; brandInName: boolean; identity: Record<string, string> };
+
+/**
+ * brand: the shop's brand field when it has one; two rows with different brands are never title-matched.
+ * name: the accepted clean name, when the row has one (name matching).
+ */
+export type MatchInput = { id: number; shopId: number; gtin: string | null; mpn: string | null; title: string; brand?: string | null; name?: NameMatch | null };
+export type MatchMethod = 'gtin' | 'mpn' | 'name' | 'title';
 export type Match = { key: string; method: MatchMethod };
 
 // Colours and filler words are ignored when comparing titles.
@@ -117,6 +131,17 @@ function brandKey(it: MatchInput): string | null {
   return b === '' ? null : b;
 }
 
+/**
+ * Whether the name rule keeps `it` apart from a member of a title group: both have the same clean name but their
+ * brands or identity specs disagree (a pack of 6 and a pack of 12), so the title rule must not call them possibly
+ * the same either.
+ */
+function nameConflict(members: MatchInput[], it: MatchInput): boolean {
+  const n = it.name;
+  if (!n) return false;
+  return members.some((m) => m.name && m.name.key === n.key && !sameNamedProduct(m as Named, it as Named));
+}
+
 /** A numeric token present in more than this share of items (and at least TITLE_MIN_COMMON items) is too common to probe with. */
 const TITLE_COMMON_SHARE = 0.02;
 const TITLE_MIN_COMMON = 50;
@@ -161,7 +186,7 @@ function matchByTitle(items: MatchInput[], out: Map<number, Match>): void {
       for (const g of byNumber.get(n) ?? []) {
         if (seen.has(g)) continue;
         seen.add(g);
-        if ((brand === null || g.brand === null || g.brand === brand) && sameTitle(g.tokens, tokens)) {
+        if ((brand === null || g.brand === null || g.brand === brand) && sameTitle(g.tokens, tokens) && !nameConflict(g.members, it)) {
           home = g;
           break probe;
         }
@@ -189,15 +214,111 @@ function matchByTitle(items: MatchInput[], out: Map<number, Match>): void {
 }
 
 /**
+ * The name rule's view of a clean name: its nameKey, the category's identity specs from its attributes, and the
+ * row's reliable brand (null when the brand field is missing, unreliable or a placeholder; judged by the caller).
+ * Null when the name has no letters or digits.
+ */
+export function nameMatch(displayName: string, category: string | null, attrs: Record<string, unknown> | null, reliableBrand: string | null): NameMatch | null {
+  const key = nameKey(displayName);
+  if (key === '') return null;
+  const brand = reliableBrand && compact(reliableBrand) !== '' ? compact(reliableBrand) : null;
+  return { key, brand, brandInName: reliableBrand !== null && brand !== null && hasBrand(nameTokens(displayName), reliableBrand), identity: identityValues(category, attrs) };
+}
+
+/** A clean name shared by more listings than this is too generic to match by ("Gift Card"): left alone. */
+const NAME_BUCKET_MAX = 200;
+
+type Named = MatchInput & { name: NameMatch };
+
+/**
+ * Same brand (or both none, or one none when the shared name carries the other's brand) and every identity spec
+ * both have equal. The names are already equal (same bucket).
+ */
+function sameNamedProduct(a: Named, b: Named): boolean {
+  const ba = a.name.brand;
+  const bb = b.name.brand;
+  const brandOk = ba === bb || (ba === null && b.name.brandInName) || (bb === null && a.name.brandInName);
+  return brandOk && sameIdentity(a.name.identity, b.name.identity);
+}
+
+/**
+ * Name matching (design Part 3). Listings with an accepted clean name are bucketed by nameKey (no pairwise work
+ * across buckets); inside a bucket the most specific listings go first and each listing joins the one cluster it
+ * agrees with (brand and identity specs with every member). A listing that agrees with two or more clusters (a
+ * phone without storage next to a 256GB and a 512GB one) joins none.
+ *
+ * With GTIN and MPN groups (they keep priority, decided before this runs):
+ * - a cluster without a code-matched member is a name group when it spans two or more shops;
+ * - a cluster holding members of exactly one code group, where every named member of that code group is in the
+ *   cluster (their names and specs agree), adds its other listings to that code group with method 'name';
+ * - otherwise (members of two code groups, or a code group whose named listings disagree) code groups are never
+ *   merged, and only the cluster's listings without a code match may form a name group of their own.
+ */
+function matchByName(items: MatchInput[], out: Map<number, Match>): void {
+  const buckets = groupByKey(
+    items.filter((it): it is Named => !!it.name && it.name.key !== ''),
+    (it) => (it as Named).name.key,
+  ) as Map<string, Named[]>;
+  // the named members of each code group, to check that all of them agree before a listing joins it
+  const namedOfCode = new Map<string, Set<number>>();
+  for (const members of buckets.values()) {
+    for (const m of members) {
+      const code = out.get(m.id)?.key;
+      if (code === undefined) continue;
+      const set = namedOfCode.get(code) ?? new Set<number>();
+      set.add(m.id);
+      namedOfCode.set(code, set);
+    }
+  }
+
+  const assign = (members: MatchInput[], key: string) => {
+    for (const m of members) out.set(m.id, { key, method: 'name' });
+  };
+
+  for (const members of buckets.values()) {
+    if (members.length < 2 || members.length > NAME_BUCKET_MAX) continue;
+    const ordered = [...members].sort((a, b) => Object.keys(b.name.identity).length - Object.keys(a.name.identity).length || a.id - b.id);
+    const clusters: Named[][] = [];
+    for (const it of ordered) {
+      const fits = clusters.filter((c) => c.every((m) => sameNamedProduct(m, it)));
+      if (fits.length === 1) fits[0].push(it);
+      else if (fits.length === 0) clusters.push([it]);
+      // agrees with two or more clusters: ambiguous, joins none
+    }
+
+    for (const cluster of clusters) {
+      const free = cluster.filter((m) => !out.has(m.id));
+      if (free.length === 0) continue;
+      const codes = new Set(cluster.filter((m) => out.has(m.id)).map((m) => out.get(m.id)!.key));
+      if (codes.size === 0) {
+        if (distinctShops(cluster)) assign(free, `name:${Math.min(...cluster.map((m) => m.id))}`);
+        continue;
+      }
+      if (codes.size === 1) {
+        const code = [...codes][0];
+        const ids = new Set(cluster.map((m) => m.id));
+        if ([...namedOfCode.get(code)!].every((id) => ids.has(id))) {
+          assign(free, code);
+          continue;
+        }
+      }
+      if (distinctShops(free)) assign(free, `name:${Math.min(...free.map((m) => m.id))}`);
+    }
+  }
+}
+
+/**
  * For every item that matches an item from another shop, returns its group key and how it was matched.
- * GTIN groups first, then MPN, then title; an item grouped by a stronger method is not regrouped.
+ * GTIN groups first, then MPN, then the clean name, then title; an item grouped by a stronger method is not
+ * regrouped (the name rule may add listings to a GTIN or MPN group, see matchByName).
  */
 export function assignMatches(items: MatchInput[]): Map<number, Match> {
   const out = new Map<number, Match>();
   matchByGtin(items, out);
   let rest = items.filter((it) => !out.has(it.id));
   matchByMpn(rest, out);
-  rest = rest.filter((it) => !out.has(it.id));
+  matchByName(items, out);
+  rest = items.filter((it) => !out.has(it.id));
   matchByTitle(rest, out);
   return out;
 }

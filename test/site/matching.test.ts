@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { assignMatches, sameTitle, titleTokens, type MatchInput } from '../../src/site/matching.js';
+import { assignMatches, nameMatch, sameTitle, titleTokens, type MatchInput } from '../../src/site/matching.js';
 
 function item(id: number, shopId: number, title: string, over: Partial<MatchInput> = {}): MatchInput {
   return { id, shopId, gtin: null, mpn: null, title, ...over };
@@ -225,5 +225,159 @@ describe('assignMatches brand check (final review I2)', () => {
     const k2 = m.get(2)?.key;
     const k3 = m.get(3)?.key;
     expect(k2 === undefined || k3 === undefined || k2 !== k3).toBe(true);
+  });
+});
+
+describe('assignMatches by clean name and key specs (design Part 3, "name + specs")', () => {
+  /** A row with an accepted clean name; brand is the reliable brand (null when the row has none). */
+  const named = (
+    id: number,
+    shopId: number,
+    name: string,
+    attrs: Record<string, unknown>,
+    o: { category?: string; brand?: string | null; gtin?: string; title?: string } = {},
+  ): MatchInput => {
+    const brand = o.brand === undefined ? 'Samsung' : o.brand;
+    return item(id, shopId, o.title ?? `shop listing ${id}`, { gtin: o.gtin ?? null, brand, name: nameMatch(name, o.category ?? 'phones', attrs, brand) });
+  };
+  const S25 = 'Samsung Galaxy S25 Ultra Smartphone';
+
+  it('matches the same phone at two shops, written differently', () => {
+    const m = assignMatches([named(1, 10, S25, { storage_gb: 256, ram_gb: 12 }), named(2, 20, 'SAMSUNG Galaxy S25-Ultra smartphone', { storage_gb: 256, ram_gb: 12 })]);
+    expect(m.get(1)).toEqual({ key: 'name:1', method: 'name' });
+    expect(m.get(2)).toEqual({ key: 'name:1', method: 'name' });
+  });
+
+  it('never matches 256GB with 512GB', () => {
+    expect(assignMatches([named(1, 10, S25, { storage_gb: 256 }), named(2, 20, S25, { storage_gb: 512 })]).size).toBe(0);
+  });
+
+  it('never matches different brands, even with the same name', () => {
+    const m = assignMatches([named(1, 10, 'Galaxy Case 25', {}, { brand: 'Samsung' }), named(2, 20, 'Galaxy Case 25', {}, { brand: 'Spigen' })]);
+    expect(m.size).toBe(0);
+  });
+
+  it('a brand on one side only must be in the shared name', () => {
+    const inName = assignMatches([named(1, 10, S25, {}, { brand: 'Samsung' }), named(2, 20, S25, {}, { brand: null })]);
+    expect(inName.get(2)?.key).toBe('name:1');
+    const notInName = assignMatches([named(1, 10, 'Galaxy S25 Ultra', {}, { brand: 'Samsung' }), named(2, 20, 'Galaxy S25 Ultra', {}, { brand: null })]);
+    expect(notInName.size).toBe(0);
+    const neither = assignMatches([named(1, 10, 'Galaxy S25 Ultra', {}, { brand: null }), named(2, 20, 'Galaxy S25 Ultra', {}, { brand: null })]);
+    expect(neither.get(2)?.method).toBe('name');
+  });
+
+  it('matches when one side does not give the storage', () => {
+    const m = assignMatches([named(1, 10, S25, { storage_gb: 256, ram_gb: 12 }), named(2, 20, S25, { ram_gb: 12 })]);
+    expect(m.get(2)).toEqual({ key: 'name:1', method: 'name' });
+  });
+
+  it('a listing without storage that fits both a 256GB and a 512GB product joins neither', () => {
+    const m = assignMatches([
+      named(1, 10, S25, { storage_gb: 256 }),
+      named(2, 20, S25, { storage_gb: 256 }),
+      named(3, 10, S25, { storage_gb: 512 }),
+      named(4, 20, S25, { storage_gb: 512 }),
+      named(5, 30, S25, {}),
+    ]);
+    expect(m.get(1)?.key).toBe(m.get(2)?.key);
+    expect(m.get(3)?.key).toBe(m.get(4)?.key);
+    expect(m.get(1)?.key).not.toBe(m.get(3)?.key);
+    expect(m.has(5)).toBe(false);
+  });
+
+  it('never matches a pack of 6 with a pack of 12', () => {
+    const drink = (id: number, shop: number, pack: number) =>
+      named(id, shop, 'Heineken Lager Beer Can 330ml', { volume_ml: 330, pack_count: pack }, { category: 'drinks', brand: 'Heineken' });
+    expect(assignMatches([drink(1, 10, 6), drink(2, 20, 12)]).size).toBe(0);
+    expect(assignMatches([drink(1, 10, 6), drink(2, 20, 6)]).get(2)?.method).toBe('name');
+  });
+
+  it('colour is never part of identity: the colours of one product group together across shops', () => {
+    const m = assignMatches([
+      named(1, 10, S25, { storage_gb: 512, colour: ['grey'] }),
+      named(2, 10, S25, { storage_gb: 512, colour: ['blue'] }),
+      named(3, 20, S25, { storage_gb: 512, colour: ['black'] }),
+    ]);
+    expect(new Set([1, 2, 3].map((id) => m.get(id)?.key))).toEqual(new Set(['name:1']));
+  });
+
+  it('never matches two listings of one shop alone', () => {
+    expect(assignMatches([named(1, 10, S25, { storage_gb: 256 }), named(2, 10, S25, { storage_gb: 256 })]).size).toBe(0);
+  });
+
+  it('a listing without a GTIN joins the GTIN product whose named listings share its name and specs', () => {
+    const m = assignMatches([
+      named(1, 10, S25, { storage_gb: 256 }, { gtin: '036000291452' }),
+      named(2, 20, S25, { storage_gb: 256 }, { gtin: '036000291452' }),
+      item(3, 30, 'no clean name yet', { gtin: '036000291452' }),
+      named(4, 40, S25, { storage_gb: 256 }),
+    ]);
+    expect(m.get(1)).toEqual({ key: 'gtin:00036000291452', method: 'gtin' });
+    expect(m.get(3)?.method).toBe('gtin');
+    expect(m.get(4)).toEqual({ key: 'gtin:00036000291452', method: 'name' });
+  });
+
+  it('does not join a GTIN product whose named listings disagree', () => {
+    const m = assignMatches([
+      named(1, 10, S25, { storage_gb: 256 }, { gtin: '036000291452' }),
+      named(2, 20, 'Samsung Galaxy S25 Ultra Case', {}, { gtin: '036000291452' }),
+      named(4, 40, S25, { storage_gb: 256 }),
+    ]);
+    expect(m.get(1)?.method).toBe('gtin');
+    expect(m.has(4)).toBe(false);
+  });
+
+  it('never merges two GTIN products, and a listing that fits both joins neither', () => {
+    const m = assignMatches([
+      named(1, 10, S25, { storage_gb: 256 }, { gtin: '036000291452' }),
+      named(2, 20, S25, { storage_gb: 256 }, { gtin: '036000291452' }),
+      named(3, 10, S25, { storage_gb: 256 }, { gtin: '4006381333931' }),
+      named(4, 20, S25, { storage_gb: 256 }, { gtin: '4006381333931' }),
+      named(5, 30, S25, { storage_gb: 256 }),
+    ]);
+    expect(m.get(1)?.key).toBe('gtin:00036000291452');
+    expect(m.get(3)?.key).toBe('gtin:04006381333931');
+    expect(m.has(5)).toBe(false);
+  });
+
+  it('a name match is not title-matched again; rows without a clean name still title-match', () => {
+    const m = assignMatches([
+      named(1, 10, S25, { storage_gb: 256 }, { title: 'Samsung Galaxy S25 Ultra 256GB' }),
+      named(2, 20, S25, { storage_gb: 256 }, { title: 'SAMSUNG S25 Ultra 256GB' }),
+      item(3, 30, 'Samsung Galaxy S25 Ultra 256GB Black'),
+      item(4, 40, 'Samsung Galaxy S25 Ultra 256GB'),
+    ]);
+    expect(m.get(1)?.method).toBe('name');
+    expect(m.get(3)).toEqual({ key: 'title:3', method: 'title' });
+    expect(m.get(4)?.key).toBe('title:3');
+  });
+
+  it('the title rule never groups two listings the name rule keeps apart', () => {
+    const drink = (id: number, shop: number, pack: number, title: string) =>
+      named(id, shop, 'Heineken Lager Beer Can 330ml', { volume_ml: 330, pack_count: pack }, { category: 'drinks', brand: 'Heineken', title });
+    const m = assignMatches([drink(1, 10, 6, 'Heineken Lager 6 x 330ml'), drink(2, 20, 12, 'HEINEKEN LAGER CANS 330ML (12 PACK)')]);
+    expect(m.size).toBe(0);
+    // without clean names the same titles are a title match ("possibly the same")
+    expect(assignMatches([item(1, 10, 'Heineken Lager 6 x 330ml'), item(2, 20, 'HEINEKEN LAGER CANS 330ML (12 PACK)')]).get(2)?.method).toBe('title');
+  });
+
+  it('leaves a name shared by too many listings unmatched (bounded work)', () => {
+    const many = Array.from({ length: 300 }, (_, i) => named(i + 1, i + 1, 'Gift Card', {}, { brand: null }));
+    expect(assignMatches(many).size).toBe(0);
+  });
+
+  it('matches 100k named listings quickly', () => {
+    const items: MatchInput[] = [];
+    for (let p = 0; p < 25000; p++) {
+      for (let s = 0; s < 4; s++) {
+        items.push(named(p * 4 + s + 1, s + 1, `Brand${p % 400} Model ${p}`, s === 3 ? {} : { storage_gb: 128 }, { brand: `Brand${p % 400}` }));
+      }
+    }
+    const t0 = performance.now();
+    const m = assignMatches(items);
+    expect(performance.now() - t0).toBeLessThan(5000);
+    expect(m.get(5)?.key).toBe(m.get(8)?.key);
+    expect(m.get(1)?.key).not.toBe(m.get(5)?.key);
+    expect(m.size).toBe(items.length);
   });
 });
