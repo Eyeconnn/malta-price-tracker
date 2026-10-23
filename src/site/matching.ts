@@ -230,6 +230,19 @@ const NAME_BUCKET_MAX = 200;
 
 type Named = MatchInput & { name: NameMatch };
 
+const sameValues = (a: Record<string, string>, b: Record<string, string>) =>
+  Object.keys(a).length === Object.keys(b).length && Object.entries(a).every(([k, v]) => b[k] === v);
+
+/**
+ * Listings that may form a name group: two or more shops, or two or more listings of one shop whose identity
+ * specs are the same (not only agreeing where both have them: within one shop a missing storage is not a match).
+ */
+function groupable(members: MatchInput[]): boolean {
+  if (distinctShops(members)) return true;
+  const named = members as Named[];
+  return named.length >= 2 && named.every((m) => sameValues(m.name.identity, named[0].name.identity));
+}
+
 /**
  * Same brand (or both none, or one none when the shared name carries the other's brand) and every identity spec
  * both have equal. The names are already equal (same bucket).
@@ -248,7 +261,9 @@ function sameNamedProduct(a: Named, b: Named): boolean {
  * phone without storage next to a 256GB and a 512GB one) joins none.
  *
  * With GTIN and MPN groups (they keep priority, decided before this runs):
- * - a cluster without a code-matched member is a name group when it spans two or more shops;
+ * - a cluster without a code-matched member is a name group when it spans two or more shops, or when it is two or
+ *   more listings of one shop with exactly the same identity specs (a shop that lists each colour or size as its own
+ *   product: colour and size are variant options, so they become one product with those options);
  * - a cluster holding members of exactly one code group, where every named member of that code group is in the
  *   cluster (their names and specs agree), adds its other listings to that code group with method 'name';
  * - otherwise (members of two code groups, or a code group whose named listings disagree) code groups are never
@@ -291,7 +306,7 @@ function matchByName(items: MatchInput[], out: Map<number, Match>): void {
       if (free.length === 0) continue;
       const codes = new Set(cluster.filter((m) => out.has(m.id)).map((m) => out.get(m.id)!.key));
       if (codes.size === 0) {
-        if (distinctShops(cluster)) assign(free, `name:${Math.min(...cluster.map((m) => m.id))}`);
+        if (groupable(cluster)) assign(free, `name:${Math.min(...cluster.map((m) => m.id))}`);
         continue;
       }
       if (codes.size === 1) {
@@ -302,7 +317,7 @@ function matchByName(items: MatchInput[], out: Map<number, Match>): void {
           continue;
         }
       }
-      if (distinctShops(free)) assign(free, `name:${Math.min(...free.map((m) => m.id))}`);
+      if (groupable(free)) assign(free, `name:${Math.min(...free.map((m) => m.id))}`);
     }
   }
 }

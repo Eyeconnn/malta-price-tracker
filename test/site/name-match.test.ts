@@ -48,6 +48,12 @@ const LISTINGS: Listing[] = [
   { key: 'BUDS-A', shop: 'alpha', title: 'JBL Tune Buds 2 Black', brand: 'JBL', gtin: '036000291452', category: 'tv-audio', name: 'JBL Tune Buds 2 In-Ear Wireless Earphones', attrs: { colour: ['black'] } },
   { key: 'BUDS-B', shop: 'beta', title: 'JBL TUNE BUDS 2 TWS', brand: 'JBL', gtin: '036000291452', category: 'tv-audio' },
   { key: 'BUDS-G', shop: 'gamma', title: 'JBL Tune Buds 2 earbuds', brand: 'JBL', category: 'tv-audio', name: 'JBL Tune Buds 2 In-Ear Wireless Earphones', attrs: {} },
+  // one shop that lists each colour as its own product: one product with two colour options
+  { key: 'JBL-BLUE', shop: 'alpha', title: 'JBL Tune 525BT On-Ear Wireless Headphones, Blue', brand: 'JBL', category: 'tv-audio', name: 'JBL Tune 525BT On-Ear Wireless Headphones', attrs: { colour: ['blue'], wireless: 'yes' } },
+  { key: 'JBL-BLACK', shop: 'alpha', title: 'JBL Tune 525BT On-Ear Wireless Headphones, Black', brand: 'JBL', category: 'tv-audio', name: 'JBL Tune 525BT On-Ear Wireless Headphones', attrs: { colour: ['black'], wireless: 'yes' } },
+  // 256GB and 512GB at one shop: two products
+  { key: 'RN-256', shop: 'gamma', title: 'XIAOMI Redmi Note 14 Pro+ 256GB-Storage 8GB Smartphone, Black', brand: 'XIAOMI', name: 'Xiaomi Redmi Note 14 Pro+ Smartphone', attrs: { storage_gb: 256, ram_gb: 8 } },
+  { key: 'RN-512', shop: 'gamma', title: 'XIAOMI Redmi Note 14 Pro+ 512GB-Storage 12GB Smartphone, Black', brand: 'XIAOMI', name: 'Xiaomi Redmi Note 14 Pro+ Smartphone', attrs: { storage_gb: 512, ram_gb: 12 } },
 ];
 
 describe.skipIf(!process.env.SITE_BUILD_TEST_DB)('site-build name matching on PGlite', () => {
@@ -149,6 +155,19 @@ describe.skipIf(!process.env.SITE_BUILD_TEST_DB)('site-build name matching on PG
     expect(r.get('BUDS-B')!.match_method).toBe('gtin');
     expect(r.get('BUDS-G')!.match_method).toBe('name');
     expect(r.get('BUDS-G')!.canonical_id).toBe(r.get('BUDS-A')!.canonical_id);
+  });
+
+  it('makes one product of the colours one shop lists on their own', async () => {
+    const r = await rows();
+    expect(r.get('JBL-BLUE')!.match_method).toBe('name');
+    expect(r.get('JBL-BLUE')!.canonical_id).not.toBeNull();
+    expect(r.get('JBL-BLUE')!.canonical_id).toBe(r.get('JBL-BLACK')!.canonical_id);
+  });
+
+  it('keeps 256GB and 512GB of one shop apart', async () => {
+    const r = await rows();
+    expect(r.get('RN-256')!.match_method).not.toBe('name');
+    expect(r.get('RN-256')!.canonical_id === null || r.get('RN-256')!.canonical_id !== r.get('RN-512')!.canonical_id).toBe(true);
   });
 
   it('keeps the grouping on a rebuild', async () => {

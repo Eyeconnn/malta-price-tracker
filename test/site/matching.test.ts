@@ -301,8 +301,21 @@ describe('assignMatches by clean name and key specs (design Part 3, "name + spec
     expect(new Set([1, 2, 3].map((id) => m.get(id)?.key))).toEqual(new Set(['name:1']));
   });
 
-  it('never matches two listings of one shop alone', () => {
-    expect(assignMatches([named(1, 10, S25, { storage_gb: 256 }), named(2, 10, S25, { storage_gb: 256 })]).size).toBe(0);
+  it('groups the colours of one shop that lists each colour on its own (same name, brand and specs)', () => {
+    const jbl = (id: number, colour: string) =>
+      named(id, 10, 'JBL Tune 525BT On-Ear Wireless Headphones', { colour: [colour], wireless: 'yes' }, { category: 'tv-audio', brand: 'JBL' });
+    const m = assignMatches([jbl(1, 'blue'), jbl(2, 'black')]);
+    expect(m.get(1)).toEqual({ key: 'name:1', method: 'name' });
+    expect(m.get(2)).toEqual({ key: 'name:1', method: 'name' });
+    expect(assignMatches([named(1, 10, S25, { storage_gb: 256 }), named(2, 10, S25, { storage_gb: 256 })]).get(2)?.method).toBe('name');
+  });
+
+  it('keeps 256GB and 512GB of one shop apart, and a listing of that shop without the storage too', () => {
+    expect(assignMatches([named(1, 10, S25, { storage_gb: 256 }), named(2, 10, S25, { storage_gb: 512 })]).size).toBe(0);
+    // within one shop the specs must be the same, not only agree where both have them
+    expect(assignMatches([named(1, 10, S25, { storage_gb: 256 }), named(2, 10, S25, {})]).size).toBe(0);
+    // and a different brand at the same shop stays apart
+    expect(assignMatches([named(1, 10, 'Galaxy Case 25', {}, { brand: 'Samsung' }), named(2, 10, 'Galaxy Case 25', {}, { brand: 'Spigen' })]).size).toBe(0);
   });
 
   it('a listing without a GTIN joins the GTIN product whose named listings share its name and specs', () => {
