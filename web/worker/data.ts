@@ -5,6 +5,7 @@ import { neon } from '@neondatabase/serverless';
 import { type Grade, JUDGED_SQL } from '../../src/site/rating.js';
 import { type SiteSettings, settingsFromRows } from '../../src/site/settings.js';
 import type { Obs, VerdictFacts } from '../../src/site/verdict.js';
+import { photoUrl } from './photo.js';
 
 export type Label = 'good' | 'avoid' | 'none' | 'insufficient';
 
@@ -51,6 +52,7 @@ export type SearchHit = Card & {
   /** the category the clean name and attributes were made for */
   nameCategory: string | null;
   attrs: Record<string, unknown> | null;
+  /** our stored photo, /img/<sha256>.webp, null when none (never a shop address) */
   imageUrl: string | null;
   /**
    * The whole product in the search (every visible member, also past the rows listed): how many shops sell it,
@@ -90,6 +92,7 @@ export type ProductInfo = {
   title: string;
   brand: string | null;
   url: string | null;
+  /** our stored photo, /img/<sha256>.webp, null when none (never a shop address) */
   imageUrl: string | null;
   category: string | null;
   shopId: number;
@@ -137,6 +140,7 @@ export type Seller = {
   title: string;
   brand: string | null;
   url: string | null;
+  /** our stored photo, /img/<sha256>.webp, null when none (never a shop address) */
   imageUrl: string | null;
   category: string | null;
   priceCents: number | null;
@@ -364,7 +368,7 @@ export function createData(db: SqlRunner, opts: DataOptions = {}): Data {
       // Only trusted members are sellers of one product (R30): a title-only match never joins.
       const sellerRows = await db.query(
         `select sp.id, sp.rep_product_id, sp.group_key, sp.shop_id, s.name as shop, s.slug as shop_slug, sp.title, sp.brand, sp.url,
-          sp.image_url, sp.category, sp.price_cents, sp.was_price_cents, sp.in_stock, sp.bf_status, sp.match_method, sp.verdict,
+          sp.image_key, sp.category, sp.price_cents, sp.was_price_cents, sp.in_stock, sp.bf_status, sp.match_method, sp.verdict,
           sp.reason, sp.facts, pn.display_name, pn.variant_label, pn.category as name_category, pn.attrs
         from site_products sp join shops s on s.id = sp.shop_id
         ${NAME_JOIN}
@@ -396,7 +400,7 @@ export function createData(db: SqlRunner, opts: DataOptions = {}): Data {
         title: String(r.title),
         brand: strOrNull(r.brand),
         url: strOrNull(r.url),
-        imageUrl: strOrNull(r.image_url),
+        imageUrl: photoUrl(strOrNull(r.image_key)),
         category: strOrNull(r.category),
         priceCents: priceOrNull(r.price_cents),
         wasCents: priceOrNull(r.was_price_cents),
@@ -556,7 +560,7 @@ export function createData(db: SqlRunner, opts: DataOptions = {}): Data {
             select t.group_key, t.hit_rank, t.group_title, t.hit_id from top t where not t.trusted
           ), ranked as (
             select m.group_key, m.hit_rank, m.group_title, ${CARD_COLUMNS}, sp.in_stock, sp.canonical_id, sp.match_method,
-              sp.match_confirmed, sp.image_url, pn.display_name, pn.variant_label, pn.category as name_category, pn.attrs,
+              sp.match_confirmed, sp.image_key, pn.display_name, pn.variant_label, pn.category as name_category, pn.attrs,
               -- a stored 0 is no price (serialised null): it sorts with the nulls, last
               row_number() over (partition by m.group_key order by nullif(sp.price_cents, 0) asc nulls last, sp.id) as rn
             from members m join site_products sp on sp.id = m.id join shops s on s.id = sp.shop_id
@@ -595,7 +599,7 @@ export function createData(db: SqlRunner, opts: DataOptions = {}): Data {
           variantLabel: strOrNull(r.variant_label),
           nameCategory: strOrNull(r.name_category),
           attrs: objOrNull(r.attrs),
-          imageUrl: strOrNull(r.image_url),
+          imageUrl: photoUrl(strOrNull(r.image_key)),
           groupShops: num(r.group_shops),
           groupBf: r.group_bf === true,
           groupGood: num(r.group_good),
@@ -690,7 +694,7 @@ export function createData(db: SqlRunner, opts: DataOptions = {}): Data {
 
     async product(id) {
       const rows = await db.query(
-        `select sp.id, sp.rep_product_id, sp.shop_id, sp.group_key, sp.title, sp.brand, sp.url, sp.image_url, sp.category,
+        `select sp.id, sp.rep_product_id, sp.shop_id, sp.group_key, sp.title, sp.brand, sp.url, sp.image_key, sp.category,
           sp.variant_count, sp.price_cents, sp.was_price_cents, sp.in_stock, sp.bf_status, sp.verdict, sp.reason, sp.facts,
           sp.canonical_id, sp.match_method, sp.match_confirmed, s.name as shop, s.slug as shop_slug
         from site_products sp join shops s on s.id = sp.shop_id
@@ -706,7 +710,7 @@ export function createData(db: SqlRunner, opts: DataOptions = {}): Data {
         title: String(r.title),
         brand: strOrNull(r.brand),
         url: strOrNull(r.url),
-        imageUrl: strOrNull(r.image_url),
+        imageUrl: photoUrl(strOrNull(r.image_key)),
         category: strOrNull(r.category),
         shopId: num(r.shop_id),
         shop: String(r.shop),

@@ -16,7 +16,8 @@ export async function afterRun(r: RunResult, opts: { images: boolean }): Promise
   }
   if (opts.images) {
     try {
-      await downloadImagesForShop(r.shop);
+      // the run's own fetcher: no image request right after the scrape's last one
+      await downloadImagesForShop(r.shop, r.fetcher ? { shopFetcher: r.fetcher } : {});
     } catch (e) {
       console.error(`[${r.shop.slug}] images failed: ${(e as Error).message}`);
     }

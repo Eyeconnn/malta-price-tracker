@@ -129,3 +129,94 @@ describe('worker fetch handler', () => {
     err.mockRestore();
   });
 });
+
+describe('GET /img/<sha256>.webp (our photo copies in R2)', () => {
+  const SHA = '0123456789abcdef'.repeat(4);
+  const WEBP = new Uint8Array([0x52, 0x49, 0x46, 0x46, 1, 2, 3, 4, 0x57, 0x45, 0x42, 0x50]);
+
+  function photoSetup(pub: boolean) {
+    const object = () => ({ size: WEBP.length, httpEtag: '"etag-1"', body: new Response(WEBP).body });
+    const bucket = {
+      get: vi.fn(async (key: string) => (key === `img/${SHA}.webp` ? object() : null)),
+      head: vi.fn(async (key: string) => (key === `img/${SHA}.webp` ? { size: WEBP.length, httpEtag: '"etag-1"' } : null)),
+    };
+    const assets = vi.fn(async () => new Response(PAGE, { headers: { 'content-type': 'text/html; charset=utf-8' } }));
+    const env = { SITE_PASSWORD: 'site-secret', ADMIN_PASSWORD: 'admin-secret', ASSETS: { fetch: assets }, BUCKET: bucket } as unknown as Bindings;
+    const handler = createHandler({ loadSettings: async () => ({ public: pub }) });
+    const fetch = (path: string, init: { password?: string; method?: string } = {}) => {
+      const req = get(path, init.password);
+      return handler.fetch(init.method ? new Request(req, { method: init.method }) : req, env);
+    };
+    return { bucket, assets, fetch };
+  }
+
+  it('streams the stored copy as image/webp, cached for a year, nosniff', async () => {
+    const w = photoSetup(true);
+    const res = await w.fetch(`/img/${SHA}.webp`);
+    expect(res.status).toBe(200);
+    expect(res.headers.get('content-type')).toBe('image/webp');
+    expect(res.headers.get('cache-control')).toBe('public, max-age=31536000, immutable');
+    expect(res.headers.get('x-content-type-options')).toBe('nosniff');
+    expect(res.headers.get('etag')).toBe('"etag-1"');
+    expect(res.headers.get('content-security-policy')).toContain("img-src 'self' data:");
+    expect(new Uint8Array(await res.arrayBuffer())).toEqual(WEBP);
+    expect(w.bucket.get).toHaveBeenCalledWith(`img/${SHA}.webp`);
+    expect(w.assets).not.toHaveBeenCalled();
+  });
+
+  it('answers HEAD without a body', async () => {
+    const w = photoSetup(true);
+    const res = await w.fetch(`/img/${SHA}.webp`, { method: 'HEAD' });
+    expect(res.status).toBe(200);
+    expect(res.headers.get('content-length')).toBe(String(WEBP.length));
+    expect(await res.text()).toBe('');
+    expect(w.bucket.get).not.toHaveBeenCalled();
+  });
+
+  it('gives 404 for anything that is not exactly 64 lowercase hex + .webp, without touching the bucket', async () => {
+    const w = photoSetup(true);
+    for (const path of [
+      '/img', '/img/', `/img/${SHA.toUpperCase()}.webp`, `/img/${SHA.slice(1)}.webp`, `/img/${SHA}0.webp`, `/img/${SHA}.png`,
+      `/img/${SHA}.webp/`, `/img/${SHA}.WEBP`, `/IMG/${SHA}.webp`, `/%69mg/${SHA}.webp`,
+      `/img//${SHA}.webp`, `/img/${SHA}%2ewebp`, `/img/sub/${SHA}.webp`,
+    ]) {
+      const res = await w.fetch(path);
+      expect(res.status, path).toBe(404);
+    }
+    expect(w.bucket.get).not.toHaveBeenCalled();
+    expect(w.assets).not.toHaveBeenCalled();
+  });
+
+  it('gives 404 for a key that is not stored', async () => {
+    const w = photoSetup(true);
+    const res = await w.fetch(`/img/${'f'.repeat(64)}.webp`);
+    expect(res.status).toBe(404);
+    expect(res.headers.get('cache-control')).toBe('no-store');
+  });
+
+  it('refuses other methods', async () => {
+    const w = photoSetup(true);
+    const res = await w.fetch(`/img/${SHA}.webp`, { method: 'POST' });
+    expect(res.status).toBe(405);
+    expect(w.bucket.get).not.toHaveBeenCalled();
+  });
+
+  it('while private: 401 before the bucket is touched, then served for the browser only', async () => {
+    const w = photoSetup(false);
+    const denied = await settle(w.fetch(`/img/${SHA}.webp`));
+    expect(denied.status).toBe(401);
+    expect((await settle(w.fetch(`/img/${SHA}.webp`, { password: 'wrong' }))).status).toBe(401);
+    expect(w.bucket.get).not.toHaveBeenCalled();
+    expect(w.bucket.head).not.toHaveBeenCalled();
+    const ok = await w.fetch(`/img/${SHA}.webp`, { password: 'site-secret' });
+    expect(ok.status).toBe(200);
+    expect(ok.headers.get('cache-control')).toBe('private, max-age=31536000, immutable');
+    expect(ok.headers.get('x-robots-tag')).toBe('noindex, nofollow');
+  });
+
+  it('gives 404 when the bucket is not bound', async () => {
+    const handler = createHandler({ loadSettings: async () => ({ public: true }) });
+    const env = { ASSETS: { fetch: vi.fn() } } as unknown as Bindings;
+    expect((await handler.fetch(get(`/img/${SHA}.webp`), env)).status).toBe(404);
+  });
+});

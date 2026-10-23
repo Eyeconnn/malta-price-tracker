@@ -431,11 +431,11 @@ describe('data.ts products by clean name (design Part 3)', () => {
         (810, now() - interval '1 day', 119900, null, true, true),
         (820, now() - interval '1 day', 1500, null, true, null);
       insert into site_products (id, shop_id, group_key, title, brand, category, rep_product_id, price_cents, was_price_cents, in_stock,
-          bf_status, verdict, reason, facts, canonical_id, match_method, match_confirmed, image_url, url, updated_at) values
+          bf_status, verdict, reason, facts, canonical_id, match_method, match_confirmed, image_key, url, updated_at) values
         (80, 1, 'N80', 'SAMSUNG Galaxy S25 Ultra 256GB', 'SAMSUNG', 'phones', 800, 125000, 140000, true, null, 'none', 'r80', null, 800, 'name', false,
-          'https://alpha.example/s25.jpg', 'https://alpha.example/s25', now()),
+          'img/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.webp', 'https://alpha.example/s25', now()),
         (81, 2, 'N81', 'SM-S938B 256GB Titanium Black', 'Samsung', 'phones', 810, 119900, null, true, 'marked', 'insufficient', 'r81', null, 800, 'name', false,
-          null, 'javascript:alert(1)', now()),
+          'images/"+K+".jpg', 'javascript:alert(1)', now()),
         (82, 5, 'N82', 'S25 Ultra case', null, 'phones', 820, 1500, null, true, null, 'none', null, null, 800, 'title', false, null, null, now());
       insert into product_names (shop_id, group_key, source_title, title_hash, category, display_name, variant_label, attrs, status, model, run_id) values
         (1, 'N80', 'SAMSUNG Galaxy S25 Ultra 256GB', 'h', 'phones', 'Samsung Galaxy S25 Ultra Smartphone', '256GB, 12GB', '{"storage_gb": 256, "ram_gb": 12}', 'ok', 'test', 1),
@@ -450,7 +450,9 @@ describe('data.ts products by clean name (design Part 3)', () => {
     // 81 has no such words in its shop title: found through its clean name
     expect(g.map((h) => h.id)).toEqual([81, 80]);
     expect(g[0]).toMatchObject({ displayName: 'Samsung Galaxy S25 Ultra Smartphone', variantLabel: '256GB, Titanium Black', nameCategory: 'phones', attrs: { storage_gb: 256, colour: ['black'] }, possible: false });
-    expect(g[1].imageUrl).toBe('https://alpha.example/s25.jpg');
+    // our stored copy as its site URL; a key that is not a small copy (an old full-size original) is no photo
+    expect(g[1].imageUrl).toBe('/img/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.webp');
+    expect(g[0].imageUrl).toBeNull();
     expect(g[0].groupTitle).toBe('Samsung Galaxy S25 Ultra Smartphone');
     // the title-only member is never pulled in
     expect(hits.map((h) => h.id)).not.toContain(82);
