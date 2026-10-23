@@ -28,6 +28,8 @@
   --ink: #1b1d22;
   --muted: #6a6e77;
   --glass: rgba(255, 255, 255, 0.72);
+  /* dimmed backdrop behind the search overlay; the panel itself is the solid --surface */
+  --scrim: rgba(20, 22, 28, 0.45);
   /* sticky top bar: nearly opaque so text scrolling under it does not show through (AA over ink, contrast test) */
   --bar: rgba(251, 250, 247, 0.97);
   --line: rgba(20, 22, 28, 0.1);
@@ -71,6 +73,7 @@
     --ink: #eef0f4;
     --muted: #9097a3;
     --glass: rgba(255, 255, 255, 0.065);
+    --scrim: rgba(0, 0, 0, 0.6);
     --bar: rgba(14, 16, 21, 0.9);
     --line: rgba(255, 255, 255, 0.11);
     --tex: rgba(255, 255, 255, 0.1);
@@ -134,6 +137,7 @@
   --color-bar: var(--bar);
   --color-ink: var(--ink);
   --color-glass: var(--glass);
+  --color-scrim: var(--scrim);
   --color-line: var(--line);
   --color-tag-gold: var(--tag-gold);
   --color-tag-gold-edge: var(--tag-gold-edge);
@@ -222,6 +226,21 @@
   }
 }
 
+/* Search overlay (components/site/SearchOverlay.tsx): the backdrop fades, the panel also slides and scales a little */
+@keyframes search-in {
+  from {
+    opacity: 0;
+    transform: var(--search-shift, none);
+  }
+}
+
+@keyframes search-out {
+  to {
+    opacity: 0;
+    transform: var(--search-shift, none);
+  }
+}
+
 @keyframes caret-blink {
   50% {
     opacity: 0;
@@ -238,6 +257,16 @@
     margin-left: 2px;
     background: var(--accent);
     animation: caret-blink 1.06s steps(1, end) infinite;
+  }
+
+  .search-overlay-panel {
+    --search-shift: translateY(-0.75rem) scale(0.98);
+  }
+  .search-overlay-animated[data-state="open"] {
+    animation: search-in 200ms cubic-bezier(0.2, 0.8, 0.2, 1) both;
+  }
+  .search-overlay-animated[data-state="closed"] {
+    animation: search-out 160ms ease-in both;
   }
 
   /* Hanging price tag (components/site/PriceTag.tsx), approved mockup "deal tags" version A */
@@ -475,7 +504,9 @@
   .price-tag-sparkle,
   .headline-flip,
   .headline-em::after,
-  .search-caret {
+  .search-caret,
+  .search-overlay-animated[data-state="open"],
+  .search-overlay-animated[data-state="closed"] {
     animation: none !important;
   }
 }

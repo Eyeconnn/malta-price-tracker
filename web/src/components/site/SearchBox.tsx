@@ -5,6 +5,7 @@ import { alarmText, avoidSummary, BlackFridayMark, NO_PRICE } from '@/components
 import { Button } from '@/components/ui/button';
 import { ApiError, type ApiState, api, type GroupResult, type SearchResponse, useApi, useDebounced } from '@/lib/api';
 import { formatEuro } from '@/lib/format';
+import { staticExample } from '@/lib/searchExamples';
 import { cn } from '@/lib/utils';
 import { useTypingPlaceholder } from '@/lib/useTypingPlaceholder';
 
@@ -79,7 +80,8 @@ export type SearchBoxProps = {
   placeholder?: string;
   /**
    * Types example products over the empty field instead of a static placeholder (main search only).
-   * The label stays "Search a product"; the overlay is aria-hidden, so nothing is announced.
+   * The label stays "Search a product"; the overlay is aria-hidden, so nothing is announced. While the
+   * field has focus the typing stops and one still example stays as the (muted) placeholder.
    */
   animated?: boolean;
   className?: string;
@@ -90,6 +92,8 @@ export function SearchBox({ value, onChange, onSubmit, placeholder = 'Search a p
   const id = useId();
   const [focused, setFocused] = useState(false);
   const showExample = animated && !focused && value === '';
+  // while the empty field has focus (the overlay focuses it at once) a still example stays as the placeholder
+  const [still] = useState(() => staticExample());
   const { text, caret } = useTypingPlaceholder(showExample);
   return (
     <form
@@ -112,7 +116,7 @@ export function SearchBox({ value, onChange, onSubmit, placeholder = 'Search a p
           maxLength={SEARCH_MAX}
           autoComplete="off"
           enterKeyHint="search"
-          placeholder={animated ? undefined : placeholder}
+          placeholder={animated ? (focused ? still : undefined) : placeholder}
           onChange={(e) => onChange(e.target.value)}
           onFocus={() => setFocused(true)}
           onBlur={() => setFocused(false)}
@@ -151,40 +155,72 @@ function cheapest(items: GroupResult['items']) {
   return items.find((i) => i.priceCents !== null) ?? items[0]!;
 }
 
-function LiveRow({ group }: { group: GroupResult }) {
+/** What a result row says about its verdict, for the description of its link (empty when there is nothing to say). */
+function verdictText(best: GroupResult['items'][number]): string {
+  if (best.verdict === 'avoid') return best.bf ? alarmText(best) : avoidSummary(best);
+  if (best.verdict === 'good') return 'Real deal';
+  return best.bf ? 'Black Friday' : '';
+}
+
+/**
+ * One live result: a single link over the whole row. Its name is "<title> at <shop>, <price>" (or
+ * "<title>, from <price> at <N> shops") written in a screen reader only span, while the visible text is
+ * aria-hidden so the words are not read twice; the visible words are all in the name. The verdict is the
+ * link's description.
+ */
+function LiveRow({ group, replace }: { group: GroupResult; replace: boolean }) {
+  const descId = useId();
   const items = exactItems(group);
   if (items.length === 0) return null;
   const best = cheapest(items);
   const shops = new Set(items.map((i) => i.shopSlug)).size;
+  const price = best.priceCents === null ? NO_PRICE : formatEuro(best.priceCents);
+  const name =
+    shops > 1
+      ? best.priceCents === null
+        ? `${group.title}, ${NO_PRICE} at ${shops} shops`
+        : `${group.title}, from ${price} at ${shops} shops`
+      : `${group.title} at ${best.shop}, ${price}`;
+  const verdict = verdictText(best);
   return (
-    <li>
+    <li className="relative">
       <Link
         to={`/p/${best.id}`}
-        className="flex min-h-11 items-center gap-3 rounded-xl px-3 py-2 outline-none hover:bg-secondary focus-visible:ring-[3px] focus-visible:ring-ring/50"
+        replace={replace}
+        aria-describedby={verdict ? descId : undefined}
+        className="flex min-h-11 items-center gap-3 rounded-xl px-3 py-2 outline-none hover:bg-secondary focus-visible:ring-[3px] focus-visible:ring-ring"
       >
-        <span className="min-w-0 flex-1">
-          <span className="block truncate font-medium">{group.title}</span>
-          <span className="block truncate text-xs text-muted-foreground">
-            {shops > 1 ? `${shops} shops` : best.shop}
-            {best.verdict === 'avoid' && (
-              <>
-                {' · '}
-                <span className="font-semibold text-bad">{best.bf ? alarmText(best) : avoidSummary(best)}</span>
-              </>
-            )}
-            {best.verdict === 'good' && (
-              <>
-                {' · '}
-                <span className="font-semibold text-good">Real deal</span>
-              </>
-            )}
-            {best.bf && best.verdict !== 'avoid' && <BlackFridayMark className="ml-1.5 py-0 align-middle text-[11px]" />}
+        <span className="sr-only">{name}</span>
+        <span aria-hidden="true" className="flex min-w-0 flex-1 items-center gap-3">
+          <span className="min-w-0 flex-1">
+            <span className="block truncate font-medium">{group.title}</span>
+            <span className="block truncate text-xs text-muted-foreground">
+              {shops > 1 ? `${shops} shops` : best.shop}
+              {best.verdict === 'avoid' && (
+                <>
+                  {' · '}
+                  <span className="font-semibold text-bad">{verdict}</span>
+                </>
+              )}
+              {best.verdict === 'good' && (
+                <>
+                  {' · '}
+                  <span className="font-semibold text-good">{verdict}</span>
+                </>
+              )}
+              {best.bf && best.verdict !== 'avoid' && <BlackFridayMark className="ml-1.5 py-0 align-middle text-[11px]" />}
+            </span>
+          </span>
+          <span className="max-w-28 flex-none text-right text-sm font-bold tabular-nums">
+            {best.priceCents === null ? <span className="text-xs font-medium text-muted-foreground">{NO_PRICE}</span> : price}
           </span>
         </span>
-        <span className="max-w-28 flex-none text-right text-sm font-bold tabular-nums">
-          {best.priceCents === null ? <span className="text-xs font-medium text-muted-foreground">{NO_PRICE}</span> : formatEuro(best.priceCents)}
-        </span>
       </Link>
+      {verdict && (
+        <span id={descId} className="sr-only">
+          {verdict}
+        </span>
+      )}
     </li>
   );
 }
@@ -198,20 +234,30 @@ export function LiveSearch({
   placeholder,
   animated = false,
   className,
+  value: controlled,
+  onValueChange,
+  replace = false,
 }: {
   shop?: string | null;
   placeholder?: string;
   animated?: boolean;
   className?: string;
+  /** keeps the typed text outside (the search overlay keeps it between openings); uncontrolled when left out */
+  value?: string;
+  onValueChange?: (value: string) => void;
+  /** navigates by replacing the current history entry (the search overlay's own entry) instead of adding one */
+  replace?: boolean;
 }) {
-  const [value, setValue] = useState('');
+  const [own, setOwn] = useState('');
+  const value = controlled ?? own;
+  const setValue = onValueChange ?? setOwn;
   const navigate = useNavigate();
   const { term, state } = useSearch(value, shop);
   const headingId = useId();
 
   return (
     <div className={cn('relative mx-auto w-full max-w-xl', className)}>
-      <SearchBox value={value} onChange={setValue} onSubmit={(q) => q && navigate(searchPath(q, shop))} placeholder={placeholder} animated={animated} />
+      <SearchBox value={value} onChange={setValue} onSubmit={(q) => q && navigate(searchPath(q, shop), { replace })} placeholder={placeholder} animated={animated} />
       <SearchStatus state={state} term={term} />
       {state.status !== 'idle' && (
         <section aria-labelledby={headingId} className="glass mt-2 p-2 text-left">
@@ -232,11 +278,12 @@ export function LiveSearch({
             <>
               <ul className="m-0 list-none p-0">
                 {state.data.results.slice(0, LIVE_MAX).map((g) => (
-                  <LiveRow key={g.canonicalId === null ? `s${g.items[0]!.id}` : `c${g.canonicalId}`} group={g} />
+                  <LiveRow key={g.canonicalId === null ? `s${g.items[0]!.id}` : `c${g.canonicalId}`} group={g} replace={replace} />
                 ))}
               </ul>
               <Link
                 to={searchPath(term ?? '', shop)}
+                replace={replace}
                 className="flex min-h-11 items-center rounded-xl px-3 text-sm font-semibold text-brand outline-none hover:underline focus-visible:ring-[3px] focus-visible:ring-ring/50"
               >
                 See all results

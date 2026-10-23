@@ -1,6 +1,7 @@
 import { Outlet } from 'react-router';
 import { Background } from '@/components/site/Background';
 import { BottomNav } from '@/components/site/BottomNav';
+import { SearchOverlayProvider } from '@/components/site/SearchOverlay';
 import { SiteLogo } from '@/components/site/SiteLogo';
 import { TopNav } from '@/components/site/TopNav';
 import { DESKTOP_QUERY } from '@/components/site/nav';
@@ -14,7 +15,7 @@ import { useMediaQuery } from '@/lib/useMediaQuery';
 export function Layout() {
   const desktop = useMediaQuery(DESKTOP_QUERY, true);
   return (
-    <>
+    <SearchOverlayProvider>
       <Background />
       <a
         href="#main"
@@ -42,6 +43,6 @@ export function Layout() {
         <Outlet />
       </main>
       {!desktop && <BottomNav />}
-    </>
+    </SearchOverlayProvider>
   );
 }

@@ -61,6 +61,20 @@ describe.each([
     expect(ratio(color(name), glass)).toBeGreaterThanOrEqual(4.5);
   });
 
+  // The search overlay panel is the solid --surface; its text sits on it and on glass boxes over it.
+  // The scrim behind it only dims the page and carries no text.
+  it.each(['--ink', '--muted', '--good', '--bad', '--accent'])('%s text is at least 4.5:1 on the search overlay panel and on glass over it', (name) => {
+    const surface = color('--surface');
+    expect(ratio(color(name), surface)).toBeGreaterThanOrEqual(4.5);
+    expect(ratio(color(name), over(parse(tokens.get('--glass')!), surface))).toBeGreaterThanOrEqual(4.5);
+  });
+
+  it('the scrim darkens the page (alpha between 0.3 and 0.8)', () => {
+    const { alpha } = parse(tokens.get('--scrim')!);
+    expect(alpha).toBeGreaterThanOrEqual(0.3);
+    expect(alpha).toBeLessThanOrEqual(0.8);
+  });
+
   it('text on accent is at least 4.5:1', () => {
     expect(ratio(color('--accent-ink'), color('--accent'))).toBeGreaterThanOrEqual(4.5);
   });
