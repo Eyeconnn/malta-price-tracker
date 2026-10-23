@@ -73,3 +73,43 @@ export function inRun(list: string[], target: string): boolean {
   }
   return false;
 }
+
+/** Condition words: a used, refurbished or open-box item is another product than a new one (review C1). */
+const CONDITIONS: [string, RegExp][] = [
+  ['used', /\b(?:pre[\s-]?owned|used|second[\s-]?hand)\b/],
+  ['refurbished', /\b(?:refurbished|refurb|renewed|reconditioned)\b/],
+  ['open box', /\bopen[\s-]?box(?:ed)?\b/],
+  ['ex-display', /\bex[\s-]?display\b/],
+  ['b-stock', /\bb[\s-]?stock\b/],
+  ['demo', /\bdemo\b/],
+];
+
+/** The conditions a text names, in one spelling each ("Pre-owned" and "preowned" are used; "Grade A" is grade a). */
+export function conditions(text: string): string[] {
+  const t = prep(text);
+  const out = new Set<string>();
+  for (const [key, re] of CONDITIONS) if (re.test(t)) out.add(key);
+  for (const m of t.matchAll(/\bgrade[\s-]?([abc])\b/g)) out.add(`grade ${m[1]}`);
+  return [...out].sort();
+}
+
+const CURRENCY: Record<string, string> = { '\u20ac': 'eur', eur: 'eur', euro: 'eur', euros: 'eur', '\u00a3': 'gbp', gbp: 'gbp', $: 'usd', usd: 'usd' };
+const MONEY = [
+  /(\u20ac|\u00a3|\$)\s*(\d+(?:\.\d+)?)/g,
+  /(\d+(?:\.\d+)?)\s*(\u20ac|\u00a3|\$)/g,
+  /\b(eur|euros?|gbp|usd)\s*(\d+(?:\.\d+)?)/g,
+  /(\d+(?:\.\d+)?)\s*(eur|euros?|gbp|usd)\b/g,
+];
+
+/** Values with a currency a text names ("€20", "20 EUR" and "EUR 20" are all eur20), in one spelling each. */
+export function moneyValues(text: string): string[] {
+  const t = prep(text);
+  const out = new Set<string>();
+  for (const re of MONEY) {
+    for (const m of t.matchAll(re)) {
+      const [cur, amount] = /\d/.test(m[1]) ? [m[2], m[1]] : [m[1], m[2]];
+      out.add(`${CURRENCY[cur]}${Number.parseFloat(amount)}`);
+    }
+  }
+  return [...out].sort();
+}
