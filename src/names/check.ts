@@ -28,7 +28,9 @@
 //   Celeron, N100, RTX 4060, GTX, RX 7600, Arc) may leave the name, when the cpu or gpu attribute holds them, and
 //   Windows codes (W11P, Win 11, Windows 11 Pro) when the os attribute is set;
 // - letter-only codes such as IRL may go, and so may numeric shop noise: barcodes (8+ digits), percent off
-//   ("-30%", "20% OFF") and prices with a currency ("EUR 99", "99.99 euro"). A percent may stay in the name (40%
+//   ("-30%", "20% OFF"). A value with a currency ("€20", "20 EUR") is never noise: it must stay in the name, as
+//   must the condition (pre-owned, used, refurbished, renewed, open box, ex-display, grade A/B/C, b-stock, demo;
+//   review C1), in the name itself and not only in the variant label. A percent may stay in the name (40%
 //   of a whisky) only when the title has the same one.
 //
 // Attributes: keys outside the category schema, enum values outside the allowed list, numbers that are not finite
@@ -37,7 +39,7 @@ import { MODEL } from '../site/matching.js';
 import { basicBrandStatus, brandName, fullBrandIn, hasBrand, isWebBrand, keepsBrand, type BrandStatus } from './brand.js';
 import type { Batch, BatchItem } from './prompt.js';
 import type { AttrSpec, CategorySchema } from './schema.js';
-import { compact, inRun, prep, QUANTITY, tokens, UNIT } from './text.js';
+import { compact, conditions, inRun, moneyValues, prep, QUANTITY, tokens, UNIT } from './text.js';
 
 export { prep, tokens };
 
@@ -86,11 +88,9 @@ const VENDOR_WORDS = /\b(?:intel|core|amd|nvidia|geforce|radeon|apple|qualcomm|m
 const stripPercentOff = (t: string) =>
   t.replace(/(?:^|\s)-\s*\d+(?:\.\d+)?\s*%/g, ' ').replace(/\d+(?:\.\d+)?\s*%\s*(?:off|discount|sale)\b/g, ' ');
 
-/** Percent off and prices with a currency: shop noise, never required. */
+/** Percent off: shop noise, never required. A value with a currency stays (a gift card, a voucher: review C1). */
 function stripNoise(t: string): string {
-  return stripPercentOff(t)
-    .replace(/(?:\u20ac|\u00a3|\$|\beuros?\b|\beur\b)\s*\d+(?:\.\d+)?/g, ' ')
-    .replace(/\d+(?:\.\d+)?\s*(?:\u20ac|\u00a3|\$|\beuros?\b|\beur\b)/g, ' ');
+  return stripPercentOff(t);
 }
 
 const hasDigit = (t: string) => /[0-9]/.test(t);
@@ -308,7 +308,16 @@ export function checkName(source: NameSource, a: NameAnswer): NameCheck {
   for (const [k, v] of need) if ((have.get(k)?.n ?? 0) < v.n) lost.push(v.text);
   for (const [k, v] of have) if (v.n > (allowed.get(k)?.n ?? 0)) newTokens.push(v.text);
 
+  // the condition (used, refurbished, open box, grade) and values with a currency are part of the product: they
+  // stay in the clean name itself, never only in the variant label (review C1)
+  const nameConditions = new Set(conditions(name));
+  const lostConditions = conditions(source.title).filter((c) => !nameConditions.has(c));
+  const nameMoney = new Set(moneyValues(name));
+  const lostMoney = moneyValues(source.title).filter((m) => !nameMoney.has(m));
+
   const parts: string[] = [];
+  if (lostConditions.length > 0) parts.push(`condition lost: ${lostConditions.join(', ')}`);
+  if (lostMoney.length > 0) parts.push(`currency value lost: ${lostMoney.join(', ')}`);
   if (lost.length > 0) parts.push(`lost tokens: ${[...new Set(lost)].join(', ')}`);
   if (newTokens.length > 0) parts.push(`new tokens: ${[...new Set(newTokens)].join(', ')}`);
   if (invented.length > 0) parts.push(`invented words: ${invented.join(', ')}`);

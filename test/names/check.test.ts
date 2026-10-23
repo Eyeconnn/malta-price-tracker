@@ -80,9 +80,10 @@ describe('checkName: the safety rule', () => {
     expect(checkName({ title: 'Tefal Kettle 1,000W', brand: 'Tefal' }, name('Tefal Kettle 1W')).ok).toBe(false);
   });
 
-  it('lets clear numeric shop noise go: percent off and prices', () => {
+  it('lets percent off go, but keeps a value with a currency (a gift card, a voucher)', () => {
     const src = { title: 'Nike Air Max 90 -30% OFF now €99,99', brand: 'Nike' };
-    expect(checkName(src, name('Nike Air Max 90')).ok).toBe(true);
+    expect(checkName(src, name('Nike Air Max 90')).ok).toBe(false);
+    expect(checkName(src, name('Nike Air Max 90 €99.99')).ok).toBe(true);
     expect(checkName({ title: 'Nike Air Max 90 20% OFF', brand: 'Nike' }, name('Nike Air Max 90')).ok).toBe(true);
   });
 
@@ -169,7 +170,7 @@ describe('checkName: unreliable brands (shop names, domains, distributors, compa
   const ok = (r: ReturnType<typeof checkName>) => expect(r).toEqual({ ok: true });
 
   it('does not require a shop name, domain or company as the brand', () => {
-    ok(checkName({ title: 'Far Cry Instincts (Xbox) (Pre-owned)', brand: 'GameStore.mt', brandStatus: 'unreliable' }, name('Far Cry Instincts (Xbox)')));
+    ok(checkName({ title: 'Far Cry Instincts (Xbox) (Pre-owned)', brand: 'GameStore.mt', brandStatus: 'unreliable' }, name('Far Cry Instincts (Xbox) (Pre-owned)')));
     ok(checkName({ title: 'LAURA BIAGIOTTI WOMEN LOAFERS', brand: 'OKFASHION.COM.MT', brandStatus: 'unreliable' }, name('Laura Biagiotti Women Loafers')));
     ok(checkName({ title: '15 Denier Matt Sheer Hold-Ups', brand: 'Calzedonia Malta', brandStatus: 'unreliable' }, name('15 Denier Matt Sheer Hold-Ups')));
     ok(checkName({ title: '46834 Frozen 16"', brand: 'Toysmalta', brandStatus: 'unreliable' }, name('46834 Frozen 16"')));
@@ -470,5 +471,37 @@ describe('checkBatch', () => {
     const b: Batch = { category: 'beauty-health', items: [{ key: '1', group: group({ category: 'beauty-health', title: 'Therabody TheraCup (Single)', brand: 'Theragun', brandStatus: 'reliable', titleBrand: 'Therabody' }) }] };
     const r = checkBatch(b, { items: [{ key: '1', display_name: 'Theragun TheraCup', variant_label: 'Single', attrs: {} }] }, schemas['beauty-health']);
     expect(r.results[0].reason).toBe('title brand Therabody dropped');
+  });
+});
+
+describe('checkName: condition and currency values stay in the clean name (review C1)', () => {
+  const bad = (r: ReturnType<typeof checkName>, what: RegExp) => {
+    expect(r.ok).toBe(false);
+    expect(r.ok ? '' : r.reason).toMatch(what);
+  };
+
+  it('rejects a name that drops the condition of a used, refurbished or open-box item', () => {
+    bad(checkName({ title: 'Far Cry Instincts (Xbox) (Pre-owned)', brand: null }, name('Far Cry Instincts (Xbox)')), /condition lost: used/);
+    bad(checkName({ title: 'Apple iPhone 13 128GB Refurbished Grade A', brand: 'Apple' }, name('Apple iPhone 13 Refurbished', {}, '128GB')), /condition lost: grade a/);
+    bad(checkName({ title: 'Sony WH-1000XM5 Open Box', brand: 'Sony' }, name('Sony WH-1000XM5')), /condition lost: open box/);
+    bad(checkName({ title: 'Fender Strat B-Stock', brand: 'Fender' }, name('Fender Strat')), /condition lost: b-stock/);
+    bad(checkName({ title: 'Dyson V15 ex-display', brand: 'Dyson' }, name('Dyson V15')), /condition lost: ex-display/);
+    bad(checkName({ title: 'Kindle Paperwhite (Renewed)', brand: 'Amazon' }, name('Amazon Kindle Paperwhite')), /condition lost: refurbished/);
+    bad(checkName({ title: 'PS5 Demo Unit', brand: null }, name('PS5 Unit')), /condition lost: demo/);
+    // in the variant label is not enough: the condition is part of the product, not an option
+    bad(checkName({ title: 'Far Cry Instincts (Xbox) (Pre-owned)', brand: null }, name('Far Cry Instincts (Xbox)', {}, 'Pre-owned')), /condition lost/);
+  });
+
+  it('accepts the condition in any spelling', () => {
+    expect(checkName({ title: 'Far Cry Instincts (Xbox) (Pre-owned)', brand: null }, name('Far Cry Instincts (Xbox) Preowned')).ok).toBe(true);
+    expect(checkName({ title: 'Apple iPhone 13 128GB Refurb Grade A', brand: 'Apple' }, name('Apple iPhone 13 128GB Refurb Grade A')).ok).toBe(true);
+  });
+
+  it('rejects a name that drops or changes a value with a currency', () => {
+    bad(checkName({ title: 'Steam Gift Card €20', brand: 'Steam' }, name('Steam Gift Card')), /currency value lost: eur20/);
+    bad(checkName({ title: 'Steam Gift Card 20 EUR', brand: 'Steam' }, name('Steam Gift Card $20')), /currency value lost: eur20/);
+    bad(checkName({ title: 'Amazon voucher £50', brand: 'Amazon' }, name('Amazon Voucher')), /currency value lost: gbp50/);
+    expect(checkName({ title: 'Steam Gift Card 20 EUR', brand: 'Steam' }, name('Steam Gift Card €20')).ok).toBe(true);
+    expect(checkName({ title: 'PSN Card $10', brand: null }, name('PSN Card $10')).ok).toBe(true);
   });
 });

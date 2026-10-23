@@ -99,6 +99,12 @@ describe('systemPrompt', () => {
     expect(p).toContain('Therabody');
   });
 
+  it('says to keep the condition and any value with a currency in display_name (review C1)', () => {
+    const p = systemPrompt('gaming', schemas.gaming);
+    expect(p).toMatch(/condition[^.]*Pre-owned[^.]*Refurbished[^.]*Open Box[^.]*Grade A[^.]*display_name/);
+    expect(p).toMatch(/currency[^.]*€20[^.]*20 EUR[^.]*display_name/);
+  });
+
   it('says to keep the not_the_brand value when the title contains it', () => {
     expect(systemPrompt('toys', schemas.toys)).toMatch(/not_the_brand[^.]*\. When the title contains it, keep it/);
   });
