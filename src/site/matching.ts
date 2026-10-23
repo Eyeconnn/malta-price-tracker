@@ -156,9 +156,10 @@ const TITLE_MAX_INDEX_KEYS = 8;
  * generation numbers) are not used to find candidates; an item is probed only through its rarest numeric tokens,
  * so the cost stays near linear. Items with only common numeric tokens are not title-matched. An item with a brand
  * never joins a group that already holds a different brand (an Acer and a Lenovo with the same specs differ).
+ * Returns every group of two or more items, also those at one shop (the judge's candidates read them too).
  */
-function matchByTitle(items: MatchInput[], out: Map<number, Match>): void {
-  type Group = { first: MatchInput; tokens: string[]; members: MatchInput[]; brand: string | null };
+export function titleGroups<T extends MatchInput>(items: T[]): T[][] {
+  type Group = { first: T; tokens: string[]; members: T[]; brand: string | null };
 
   const tokenised = items.map((it) => titleTokens(it.title));
   const freq = new Map<string, number>();
@@ -206,9 +207,14 @@ function matchByTitle(items: MatchInput[], out: Map<number, Match>): void {
     }
   });
 
-  for (const g of groups) {
-    if (!distinctShops(g.members)) continue;
-    for (const m of g.members) out.set(m.id, { key: `title:${g.first.id}`, method: 'title' });
+  return groups.filter((g) => g.members.length >= 2).map((g) => g.members);
+}
+
+/** Title groups with listings of two or more shops: possibly the same product (method title, never trusted). */
+function matchByTitle(items: MatchInput[], out: Map<number, Match>): void {
+  for (const members of titleGroups(items)) {
+    if (!distinctShops(members)) continue;
+    for (const m of members) out.set(m.id, { key: `title:${members[0].id}`, method: 'title' });
   }
 }
 
