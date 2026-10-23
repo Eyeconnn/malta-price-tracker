@@ -189,7 +189,7 @@ describe('GET /api/search', () => {
   });
 
   it('gives one result per product in data order (max 40): clean name, specs, lowest in-stock price, shops, BF, image', async () => {
-    const c5 = { groupKey: 'c5', groupTitle: 'SAMSUNG S25 ULTRA 256GB', canonicalId: 5, possible: false, nameCategory: 'phones', imageUrl: null, variantLabel: null };
+    const c5 = { groupKey: 'c5', groupTitle: 'SAMSUNG S25 ULTRA 256GB', canonicalId: 5, possible: false, nameCategory: 'phones', imageUrl: null, variantLabel: null, groupShops: 3, groupBf: true, groupGood: 1, groupAvoid: 1, groupLowInStock: 80000, groupLow: 70000 };
     const named = { displayName: 'Samsung Galaxy S25 Ultra Smartphone', attrs: { storage_gb: 256 } };
     const hits = [
       { ...card(1, { shop: 'Alpha', shopSlug: 'alpha', priceCents: 90000, bf: false, verdict: 'none' }), ...c5, ...named, inStock: true, imageUrl: 'javascript:alert(1)' },
@@ -207,6 +207,7 @@ describe('GET /api/search', () => {
         nameCategory: null,
         attrs: null,
         imageUrl: null,
+        groupShops: 1, groupBf: false, groupGood: 0, groupAvoid: 0, groupLowInStock: null, groupLow: null,
       })),
     ];
     const w = setup(fakeData({ search: vi.fn(async () => hits) }));
@@ -233,7 +234,7 @@ describe('GET /api/search', () => {
   });
 
   it('names the option (the colour) of a product sold as one listing, so its colours stay apart', async () => {
-    const base = { ...card(1), groupTitle: 'x', canonicalId: null, possible: false, inStock: true, displayName: 'Samsung Galaxy S25 Ultra Smartphone', nameCategory: 'phones', imageUrl: null };
+    const base = { ...card(1), groupTitle: 'x', canonicalId: null, possible: false, inStock: true, displayName: 'Samsung Galaxy S25 Ultra Smartphone', nameCategory: 'phones', imageUrl: null, groupShops: 1, groupBf: false, groupGood: 1, groupAvoid: 0, groupLowInStock: 10000, groupLow: 10000 };
     const hits = [
       { ...base, groupKey: 's1', variantLabel: '512GB, 12GB, Grey', attrs: { storage_gb: 512, ram_gb: 12 } },
       { ...base, id: 2, groupKey: 's2', variantLabel: null, attrs: {} },
@@ -251,6 +252,13 @@ describe('GET /api/search', () => {
     expect(body.results[0]!.specs).toBe('512GB, 12GB RAM');
   });
 
+  it('counts every shop, Black Friday, verdict and lowest price of the product, also past the rows listed (review)', async () => {
+    const hit = { ...card(1, { priceCents: 90000, bf: false, verdict: 'none' }), groupKey: 'c7', groupTitle: 'x', canonicalId: 7, possible: false, inStock: true, displayName: null, variantLabel: null, nameCategory: null, attrs: null, imageUrl: null, groupShops: 25, groupBf: true, groupGood: 2, groupAvoid: 3, groupLowInStock: 85000, groupLow: 60000 };
+    const w = setup(fakeData({ search: vi.fn(async () => [hit]) }));
+    const body = (await (await w.fetch('/api/search?q=xx')).json()) as { results: Record<string, unknown>[] };
+    expect(body.results[0]).toMatchObject({ shops: 25, shop: null, bf: true, good: 2, avoid: 3, priceCents: 85000, inStock: true });
+  });
+
   it('takes the lowest price when every seller is out of stock, and never reads the thresholds', async () => {
     const hit = (id: number, priceCents: number | null) => ({
       ...card(id, { shopSlug: `s${id}`, priceCents }),
@@ -261,6 +269,7 @@ describe('GET /api/search', () => {
       inStock: false,
       displayName: null,
       variantLabel: null,
+      groupShops: 3, groupBf: false, groupGood: 0, groupAvoid: 0, groupLowInStock: null, groupLow: 4000,
       nameCategory: null,
       attrs: null,
       imageUrl: null,
@@ -590,17 +599,17 @@ describe('GET /api/product/:key', () => {
   it('labels variants by the shop variant title, else the clean variant label without the identity specs', async () => {
     const sellers = [seller(1, { variantLabel: '256GB, 12GB, Grey', attrs: { storage_gb: 256, ram_gb: 12 } }), seller(2)];
     const variants = [
-      { id: 10, sellerId: 1, title: 'S25 Ultra', variantTitle: null, priceCents: 100000, inStock: true },
-      { id: 20, sellerId: 2, title: 'S25 Ultra', variantTitle: 'Black', priceCents: 0, inStock: true },
-      { id: 21, sellerId: 2, title: 'S25 Ultra', variantTitle: '  ', priceCents: 99000, inStock: false },
+      { id: 10, sellerId: 1, title: 'S25 Ultra', variantTitle: null, priceCents: 100000, inStock: true, seenAt: '2026-10-22T08:00:00.000Z' },
+      { id: 20, sellerId: 2, title: 'S25 Ultra', variantTitle: 'Black', priceCents: 0, inStock: true, seenAt: null },
+      { id: 21, sellerId: 2, title: 'S25 Ultra', variantTitle: '  ', priceCents: 99000, inStock: false, seenAt: '2026-08-01T08:00:00.000Z' },
     ];
     const history = [{ sellerId: 1, productId: 10, at: '2026-10-22T08:00:00.000Z', price: 100000, was: null, inStock: true, bf: false }];
     const w = setup(fakeData({ productGroup: vi.fn(async () => group(sellers, { variants, history })) }));
     const body = (await (await w.fetch('/api/product/c5')).json()) as { variants: unknown[]; history: unknown[] };
     expect(body.variants).toEqual([
-      { id: 10, sellerId: 1, label: 'Grey', priceCents: 100000, inStock: true },
-      { id: 20, sellerId: 2, label: 'Black', priceCents: null, inStock: true },
-      { id: 21, sellerId: 2, label: null, priceCents: 99000, inStock: false },
+      { id: 10, sellerId: 1, label: 'Grey', priceCents: 100000, inStock: true, seenAt: '2026-10-22T08:00:00.000Z' },
+      { id: 20, sellerId: 2, label: 'Black', priceCents: null, inStock: true, seenAt: null },
+      { id: 21, sellerId: 2, label: null, priceCents: 99000, inStock: false, seenAt: '2026-08-01T08:00:00.000Z' },
     ]);
     expect(body.history).toEqual(history);
   });
@@ -609,8 +618,8 @@ describe('GET /api/product/:key', () => {
     const atoz = { shop: 'AtoZ', shopSlug: 'atoz', nameCategory: 'tv-audio', displayName: 'JBL Tune 525BT On-Ear Wireless Headphones' };
     const sellers = [seller(1, { ...atoz, variantLabel: 'Blue', priceCents: 5000, attrs: { colour: ['blue'] } }), seller(2, { ...atoz, variantLabel: 'Black', priceCents: 4000, attrs: { colour: ['black'] } })];
     const variants = [
-      { id: 10, sellerId: 1, title: 't', variantTitle: null, priceCents: 5000, inStock: true },
-      { id: 20, sellerId: 2, title: 't', variantTitle: null, priceCents: 4000, inStock: true },
+      { id: 10, sellerId: 1, title: 't', variantTitle: null, priceCents: 5000, inStock: true, seenAt: null },
+      { id: 20, sellerId: 2, title: 't', variantTitle: null, priceCents: 4000, inStock: true, seenAt: null },
     ];
     const w = setup(fakeData({ productGroup: vi.fn(async () => group(sellers, { variants })) }));
     const body = (await (await w.fetch('/api/product/c5')).json()) as { variants: { label: string }[]; sellers: { id: number; cheaper: unknown }[]; product: { attributes: { key: string; value: string }[] } };

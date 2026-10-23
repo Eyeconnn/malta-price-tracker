@@ -52,6 +52,17 @@ export type SearchHit = Card & {
   nameCategory: string | null;
   attrs: Record<string, unknown> | null;
   imageUrl: string | null;
+  /**
+   * The whole product in the search (every visible member, also past the rows listed): how many shops sell it,
+   * whether one marks it Black Friday, how many sellers have each verdict, its lowest price not known out of stock
+   * and its lowest price (cents, null when none).
+   */
+  groupShops: number;
+  groupBf: boolean;
+  groupGood: number;
+  groupAvoid: number;
+  groupLowInStock: number | null;
+  groupLow: number | null;
 };
 
 export type ShopSummary = { slug: string; name: string; grade: Grade | null; products: number };
@@ -142,7 +153,16 @@ export type Seller = {
   attrs: Record<string, unknown> | null;
 };
 /** One variant (products row) of a seller's group, with its latest unflagged reading. */
-export type SellerVariant = { id: number; sellerId: number; title: string | null; variantTitle: string | null; priceCents: number | null; inStock: boolean | null };
+/** seenAt: the time of its newest unflagged reading (ISO), null when it has none (review I3) */
+export type SellerVariant = {
+  id: number;
+  sellerId: number;
+  title: string | null;
+  variantTitle: string | null;
+  priceCents: number | null;
+  inStock: boolean | null;
+  seenAt: string | null;
+};
 export type SellerHistoryObs = HistoryObs & { sellerId: number };
 /**
  * A product page: key 'c<canonical id>' (trusted members: GTIN, MPN, name, or confirmed) or 's<site_products id>'
@@ -224,6 +244,11 @@ const OTHERS_MAX = 30;
 /** Sellers on one product page. */
 const SELLERS_MAX = 30;
 const VARIANTS_MAX = 200;
+/**
+ * A product page keeps every reading of each seller's verdict variant within this many days: the whole history
+ * window, so no cap ever cuts the stored raise window (at most 60 days) or the lowest 30 days.
+ */
+const KEEP_DAYS = HISTORY_DAYS;
 const HISTORY_MAX = 5000;
 const SEARCH_HITS = 200;
 const SEARCH_GROUPS = 40;
@@ -305,10 +330,158 @@ const DEAL_RANK = `case when sp.verdict = 'good' then -(sp.facts ->> 'realPct'):
 export type DataOptions = {
   /** most history points per product page (default 5000); the newest are kept */
   historyMax?: number;
+  /** most variants per product page (default 200), shared out per seller; each seller keeps its verdict variant */
+  variantsMax?: number;
+  /** most rows listed per search group (default 20); the group's counts cover every member */
+  searchMembers?: number;
 };
 
 export function createData(db: SqlRunner, opts: DataOptions = {}): Data {
   const historyMax = opts.historyMax ?? HISTORY_MAX;
+  const variantsMax = opts.variantsMax ?? VARIANTS_MAX;
+  const searchMembers = opts.searchMembers ?? GROUP_MEMBERS;
+  async function loadGroup(key: string, follow: boolean): Promise<ProductGroup | null> {
+      const m = /^([cs])(\d{1,15})$/.exec(key);
+      if (!m) return null;
+      let canonicalId: number | null = m[1] === 'c' ? Number(m[2]) : null;
+      let rowId: number | null = m[1] === 's' ? Number(m[2]) : null;
+      if (rowId !== null) {
+        // a listing that belongs to a product (trusted match) shows that product
+        const [row] = await db.query(
+          `select sp.canonical_id, ${TRUSTED} as trusted from site_products sp join shops s on s.id = sp.shop_id where sp.id = $1 and ${VISIBLE}`,
+          [rowId],
+        );
+        if (!row) return null;
+        if (row.trusted === true) {
+          canonicalId = num(row.canonical_id);
+          rowId = null;
+        }
+      }
+      // Only trusted members are sellers of one product (R30): a title-only match never joins.
+      const sellerRows = await db.query(
+        `select sp.id, sp.rep_product_id, sp.group_key, sp.shop_id, s.name as shop, s.slug as shop_slug, sp.title, sp.brand, sp.url,
+          sp.image_url, sp.category, sp.price_cents, sp.was_price_cents, sp.in_stock, sp.bf_status, sp.match_method, sp.verdict,
+          sp.reason, sp.facts, pn.display_name, pn.variant_label, pn.category as name_category, pn.attrs
+        from site_products sp join shops s on s.id = sp.shop_id
+        ${NAME_JOIN}
+        where ${VISIBLE}
+          and (($1::bigint is not null and sp.canonical_id = $1 and ${TRUSTED}) or ($1::bigint is null and sp.id = $2::bigint))
+        order by nullif(sp.price_cents, 0) asc nulls last, sp.id
+        limit ${SELLERS_MAX}`,
+        [canonicalId, rowId],
+      );
+      if (sellerRows.length === 0) {
+        // a removed product: follow where its listings went (review I4, migration 011), once
+        if (!follow || canonicalId === null) return null;
+        let to: number | null = null;
+        try {
+          const [r] = await db.query('select new_id from canonical_redirects where old_id = $1', [canonicalId]);
+          to = r ? num(r.new_id) : null;
+        } catch {
+          // no redirects table yet: no redirects
+        }
+        return to !== null && to !== canonicalId ? loadGroup(`c${to}`, false) : null;
+      }
+      const sellers: Seller[] = sellerRows.map((r) => ({
+        id: num(r.id),
+        productId: numOrNull(r.rep_product_id),
+        groupKey: String(r.group_key),
+        shopId: num(r.shop_id),
+        shop: String(r.shop),
+        shopSlug: String(r.shop_slug),
+        title: String(r.title),
+        brand: strOrNull(r.brand),
+        url: strOrNull(r.url),
+        imageUrl: strOrNull(r.image_url),
+        category: strOrNull(r.category),
+        priceCents: priceOrNull(r.price_cents),
+        wasCents: priceOrNull(r.was_price_cents),
+        inStock: boolOrNull(r.in_stock),
+        bf: r.bf_status === 'marked',
+        matchMethod: strOrNull(r.match_method),
+        verdict: r.verdict as Label,
+        reason: strOrNull(r.reason),
+        facts: (r.facts ?? null) as VerdictFacts | null,
+        displayName: strOrNull(r.display_name),
+        variantLabel: strOrNull(r.variant_label),
+        nameCategory: strOrNull(r.name_category),
+        attrs: objOrNull(r.attrs),
+      }));
+
+      // per seller the same index range scans as the single-shop product page (shop_id, group key)
+      const groups = [sellers.map((s) => s.id), sellers.map((s) => s.shopId), sellers.map((s) => s.groupKey), sellers.map((s) => s.productId)];
+      const perSeller = Math.max(1, Math.ceil(historyMax / sellers.length));
+      // every seller gets its share of the variants, its verdict variant first
+      const variantsPer = Math.max(1, Math.floor(variantsMax / sellers.length));
+      const [variantRows, historyRows] = await Promise.all([
+        db.query(
+          `select g.seller_id, p.id, p.title, p.variant_title, lo.price_cents, lo.in_stock, lo.observed_at
+          from unnest($1::bigint[], $2::int[], $3::text[], $4::bigint[]) as g(seller_id, shop_id, group_key, rep_id)
+          cross join lateral (
+            select p.id, p.title, p.variant_title from products p
+            where p.shop_id = g.shop_id and coalesce(p.parent_external_id, p.external_id) = g.group_key
+            order by (p.id = g.rep_id) desc nulls last, p.id limit $5
+          ) p
+          left join lateral (
+            select po.price_cents, po.in_stock, po.observed_at from price_observations po
+            where po.product_id = p.id and (po.review_flag is null or po.review_flag <> 'jump_70pct')
+            order by po.observed_at desc limit 1
+          ) lo on true
+          order by g.seller_id, p.id`,
+          [...groups, variantsPer],
+        ),
+        // each seller keeps its newest points within its share of the cap, and every reading of its verdict variant
+        // in the history window (the raise window and the lowest 30 days are never cut), returned oldest first
+        db.query(
+          `select g.seller_id, h.* from unnest($1::bigint[], $2::int[], $3::text[], $4::bigint[]) as g(seller_id, shop_id, group_key, rep_id)
+          cross join lateral (
+            (select po.product_id, po.observed_at, po.price_cents, po.was_price_cents, po.in_stock,
+              coalesce(po.bf_marked, coalesce(p.bf_status = 'marked', false)) as bf
+            from products p join price_observations po on po.product_id = p.id
+            where p.shop_id = g.shop_id and coalesce(p.parent_external_id, p.external_id) = g.group_key
+              and po.observed_at > now() - interval '${HISTORY_DAYS} days'
+              -- unchecked 70% jumps are left out, as the verdicts leave them out (Ruling R55)
+              and (po.review_flag is null or po.review_flag <> 'jump_70pct')
+            order by po.observed_at desc, po.product_id desc
+            limit $5)
+            union
+            (select po.product_id, po.observed_at, po.price_cents, po.was_price_cents, po.in_stock,
+              coalesce(po.bf_marked, coalesce(p.bf_status = 'marked', false)) as bf
+            from products p join price_observations po on po.product_id = p.id
+            where p.id = g.rep_id and p.shop_id = g.shop_id
+              and po.observed_at > now() - interval '${KEEP_DAYS} days'
+              and (po.review_flag is null or po.review_flag <> 'jump_70pct'))
+          ) h
+          order by h.observed_at, g.seller_id, h.product_id`,
+          [...groups, perSeller],
+        ),
+      ]);
+
+      return {
+        key: canonicalId !== null ? `c${canonicalId}` : `s${rowId}`,
+        canonicalId,
+        sellers,
+        variants: variantRows.map((v) => ({
+          id: num(v.id),
+          sellerId: num(v.seller_id),
+          title: strOrNull(v.title),
+          variantTitle: strOrNull(v.variant_title),
+          priceCents: priceOrNull(v.price_cents),
+          inStock: boolOrNull(v.in_stock),
+          seenAt: v.observed_at === null || v.observed_at === undefined ? null : iso(v.observed_at),
+        })),
+        history: historyRows.map((h) => ({
+          sellerId: num(h.seller_id),
+          productId: num(h.product_id),
+          at: iso(h.observed_at),
+          price: priceOrNull(h.price_cents),
+          was: priceOrNull(h.was_price_cents),
+          inStock: boolOrNull(h.in_stock),
+          bf: boolOrNull(h.bf),
+        })),
+      };
+  }
+
   return {
     async settings() {
       const rows = await db.query('select key, value from site_settings', []);
@@ -385,8 +558,19 @@ export function createData(db: SqlRunner, opts: DataOptions = {}): Data {
             from members m join site_products sp on sp.id = m.id join shops s on s.id = sp.shop_id
             ${NAME_JOIN}
             where ${VISIBLE} and ($3::text is null or s.slug = $3)
+          ), agg as (
+            -- the whole product, also past the rows listed below (review: shop counts are not capped)
+            select m.group_key, count(distinct sp.shop_id)::int as group_shops, bool_or(sp.bf_status = 'marked') as group_bf,
+              count(*) filter (where sp.verdict = 'good')::int as group_good, count(*) filter (where sp.verdict = 'avoid')::int as group_avoid,
+              min(sp.price_cents) filter (where sp.price_cents > 0 and sp.in_stock is distinct from false) as group_low_in_stock,
+              min(sp.price_cents) filter (where sp.price_cents > 0) as group_low
+            from members m join site_products sp on sp.id = m.id join shops s on s.id = sp.shop_id
+            where ${VISIBLE} and ($3::text is null or s.slug = $3)
+            group by m.group_key
           )
-          select * from ranked where rn <= ${GROUP_MEMBERS}
+          select ranked.*, agg.group_shops, agg.group_bf, agg.group_good, agg.group_avoid, agg.group_low_in_stock, agg.group_low
+          from ranked join agg on agg.group_key = ranked.group_key
+          where rn <= ${searchMembers}
           order by hit_rank, rn`,
           params: [p.text, p.like, shop],
         },
@@ -408,6 +592,12 @@ export function createData(db: SqlRunner, opts: DataOptions = {}): Data {
           nameCategory: strOrNull(r.name_category),
           attrs: objOrNull(r.attrs),
           imageUrl: strOrNull(r.image_url),
+          groupShops: num(r.group_shops),
+          groupBf: r.group_bf === true,
+          groupGood: num(r.group_good),
+          groupAvoid: num(r.group_avoid),
+          groupLowInStock: priceOrNull(r.group_low_in_stock),
+          groupLow: priceOrNull(r.group_low),
         };
       });
     },
@@ -607,125 +797,7 @@ export function createData(db: SqlRunner, opts: DataOptions = {}): Data {
       };
     },
 
-    async productGroup(key) {
-      const m = /^([cs])(\d{1,15})$/.exec(key);
-      if (!m) return null;
-      let canonicalId: number | null = m[1] === 'c' ? Number(m[2]) : null;
-      let rowId: number | null = m[1] === 's' ? Number(m[2]) : null;
-      if (rowId !== null) {
-        // a listing that belongs to a product (trusted match) shows that product
-        const [row] = await db.query(
-          `select sp.canonical_id, ${TRUSTED} as trusted from site_products sp join shops s on s.id = sp.shop_id where sp.id = $1 and ${VISIBLE}`,
-          [rowId],
-        );
-        if (!row) return null;
-        if (row.trusted === true) {
-          canonicalId = num(row.canonical_id);
-          rowId = null;
-        }
-      }
-      // Only trusted members are sellers of one product (R30): a title-only match never joins.
-      const sellerRows = await db.query(
-        `select sp.id, sp.rep_product_id, sp.group_key, sp.shop_id, s.name as shop, s.slug as shop_slug, sp.title, sp.brand, sp.url,
-          sp.image_url, sp.category, sp.price_cents, sp.was_price_cents, sp.in_stock, sp.bf_status, sp.match_method, sp.verdict,
-          sp.reason, sp.facts, pn.display_name, pn.variant_label, pn.category as name_category, pn.attrs
-        from site_products sp join shops s on s.id = sp.shop_id
-        ${NAME_JOIN}
-        where ${VISIBLE}
-          and (($1::bigint is not null and sp.canonical_id = $1 and ${TRUSTED}) or ($1::bigint is null and sp.id = $2::bigint))
-        order by nullif(sp.price_cents, 0) asc nulls last, sp.id
-        limit ${SELLERS_MAX}`,
-        [canonicalId, rowId],
-      );
-      if (sellerRows.length === 0) return null;
-      const sellers: Seller[] = sellerRows.map((r) => ({
-        id: num(r.id),
-        productId: numOrNull(r.rep_product_id),
-        groupKey: String(r.group_key),
-        shopId: num(r.shop_id),
-        shop: String(r.shop),
-        shopSlug: String(r.shop_slug),
-        title: String(r.title),
-        brand: strOrNull(r.brand),
-        url: strOrNull(r.url),
-        imageUrl: strOrNull(r.image_url),
-        category: strOrNull(r.category),
-        priceCents: priceOrNull(r.price_cents),
-        wasCents: priceOrNull(r.was_price_cents),
-        inStock: boolOrNull(r.in_stock),
-        bf: r.bf_status === 'marked',
-        matchMethod: strOrNull(r.match_method),
-        verdict: r.verdict as Label,
-        reason: strOrNull(r.reason),
-        facts: (r.facts ?? null) as VerdictFacts | null,
-        displayName: strOrNull(r.display_name),
-        variantLabel: strOrNull(r.variant_label),
-        nameCategory: strOrNull(r.name_category),
-        attrs: objOrNull(r.attrs),
-      }));
-
-      // per seller the same index range scans as the single-shop product page (shop_id, group key)
-      const groups = [sellers.map((s) => s.id), sellers.map((s) => s.shopId), sellers.map((s) => s.groupKey)];
-      const perSeller = Math.max(1, Math.ceil(historyMax / sellers.length));
-      const [variantRows, historyRows] = await Promise.all([
-        db.query(
-          `select g.seller_id, p.id, p.title, p.variant_title, lo.price_cents, lo.in_stock
-          from unnest($1::bigint[], $2::int[], $3::text[]) as g(seller_id, shop_id, group_key)
-          cross join lateral (
-            select p.id, p.title, p.variant_title from products p
-            where p.shop_id = g.shop_id and coalesce(p.parent_external_id, p.external_id) = g.group_key
-            order by p.id limit ${VARIANTS_MAX}
-          ) p
-          left join lateral (
-            select po.price_cents, po.in_stock from price_observations po
-            where po.product_id = p.id and (po.review_flag is null or po.review_flag <> 'jump_70pct')
-            order by po.observed_at desc limit 1
-          ) lo on true
-          order by g.seller_id, p.id`,
-          groups,
-        ),
-        // each seller keeps its newest points within its share of the cap, returned oldest first
-        db.query(
-          `select g.seller_id, h.* from unnest($1::bigint[], $2::int[], $3::text[]) as g(seller_id, shop_id, group_key)
-          cross join lateral (
-            select po.product_id, po.observed_at, po.price_cents, po.was_price_cents, po.in_stock,
-              coalesce(po.bf_marked, coalesce(p.bf_status = 'marked', false)) as bf
-            from products p join price_observations po on po.product_id = p.id
-            where p.shop_id = g.shop_id and coalesce(p.parent_external_id, p.external_id) = g.group_key
-              and po.observed_at > now() - interval '${HISTORY_DAYS} days'
-              -- unchecked 70% jumps are left out, as the verdicts leave them out (Ruling R55)
-              and (po.review_flag is null or po.review_flag <> 'jump_70pct')
-            order by po.observed_at desc, po.product_id desc
-            limit $4
-          ) h
-          order by h.observed_at, g.seller_id, h.product_id`,
-          [...groups, perSeller],
-        ),
-      ]);
-
-      return {
-        key: canonicalId !== null ? `c${canonicalId}` : `s${rowId}`,
-        canonicalId,
-        sellers,
-        variants: variantRows.slice(0, VARIANTS_MAX).map((v) => ({
-          id: num(v.id),
-          sellerId: num(v.seller_id),
-          title: strOrNull(v.title),
-          variantTitle: strOrNull(v.variant_title),
-          priceCents: priceOrNull(v.price_cents),
-          inStock: boolOrNull(v.in_stock),
-        })),
-        history: historyRows.map((h) => ({
-          sellerId: num(h.seller_id),
-          productId: num(h.product_id),
-          at: iso(h.observed_at),
-          price: priceOrNull(h.price_cents),
-          was: priceOrNull(h.was_price_cents),
-          inStock: boolOrNull(h.in_stock),
-          bf: boolOrNull(h.bf),
-        })),
-      };
-    },
+    productGroup: (key) => loadGroup(key, true),
 
     async categories() {
       const rows = await db.query(

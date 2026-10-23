@@ -479,13 +479,54 @@ describe('data.ts products by clean name (design Part 3)', () => {
     for (const key of ['c999', 's999', 'x80', 'c', 'c800x', 'c200', 's4', 's6', 'c1234567890123456']) expect(await data.productGroup(key), key).toBeNull();
   });
 
-  it('caps the history per seller, keeping each seller its newest points', async () => {
+  it("caps the history per seller, keeping each seller its newest points and its verdict variant's whole 60 days", async () => {
     const g = await createData(runner(pg), { historyMax: 2 }).productGroup('c800');
-    // the newest reading of each seller (800 and 801 read at the same time: the higher id first)
+    // per seller the newest reading (800 and 801 read at the same time: the higher id first), and every reading of
+    // the variant its verdict is about within the 60 days (review: a cap never cuts the raise window)
     expect(g?.history.map((h) => [h.sellerId, h.productId, h.price])).toEqual([
+      [81, 810, 119900],
+      [80, 800, 130000],
+      [80, 800, 125000],
       [80, 801, 126000],
       [81, 810, 119900],
     ]);
+  });
+
+  it('gives each variant the time of its newest reading (review I3)', async () => {
+    const g = await data.productGroup('c800');
+    const seen = g?.variants.map((v) => [v.id, typeof v.seenAt === 'string' && /Z$/.test(v.seenAt)]);
+    expect(seen).toEqual([
+      [800, true],
+      [801, true],
+      [810, true],
+    ]);
+  });
+
+  it("caps the variants per seller, always keeping the seller's verdict variant", async () => {
+    await pg.exec('update site_products set rep_product_id = 801 where id = 80');
+    try {
+      const g = await createData(runner(pg), { variantsMax: 2 }).productGroup('c800');
+      expect(g?.variants.map((v) => [v.sellerId, v.id])).toEqual([
+        [80, 801],
+        [81, 810],
+      ]);
+    } finally {
+      await pg.exec('update site_products set rep_product_id = 800 where id = 80');
+    }
+  });
+
+  it('follows the redirect of a removed product to the one its listings went to (review I4)', async () => {
+    await pg.exec('insert into canonical_redirects (old_id, new_id) values (777, 800), (778, 999)');
+    expect((await data.productGroup('c777'))?.key).toBe('c800');
+    // a redirect to a product that is gone too is not found
+    expect(await data.productGroup('c778')).toBeNull();
+  });
+
+  it("search counts every shop, Black Friday and verdict of a product, past the rows it lists (review)", async () => {
+    const hits = await createData(runner(pg), { searchMembers: 1 }).search({ text: 'galaxy s25 ultra smartphone', like: '%galaxy s25 ultra smartphone%' }, null);
+    const g = hits.filter((h) => h.groupKey === 'c800');
+    expect(g).toHaveLength(1);
+    expect(g[0]).toMatchObject({ groupShops: 2, groupBf: true, groupGood: 0, groupAvoid: 0 });
   });
 
   it('the listing page gives the product key it belongs to', async () => {

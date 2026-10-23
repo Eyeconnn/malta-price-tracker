@@ -130,17 +130,21 @@ export function productResults(hits: SearchHit[]): ProductResult[] {
   return [...groups.entries()].map(([key, g]) => {
     const { name, category, attrs } = productName(g.rows.map(listingOf), g.title);
     const shops = new Set(g.rows.map((r) => r.shopSlug));
+    const first = g.rows[0];
     return {
       key,
       name,
       specs: specsSummary(category, attrs, name),
-      ...lowestPrice(g.rows),
-      shops: shops.size,
-      shop: shops.size === 1 ? g.rows[0].shop : null,
-      bf: g.rows.some((r) => r.bf),
+      // the whole product (every visible member), not only the rows data listed
+      ...(first.groupLowInStock !== null
+        ? { priceCents: first.groupLowInStock, inStock: true }
+        : { priceCents: first.groupLow, inStock: lowestPrice(g.rows).inStock }),
+      shops: Math.max(first.groupShops, shops.size),
+      shop: Math.max(first.groupShops, shops.size) === 1 ? first.shop : null,
+      bf: first.groupBf || g.rows.some((r) => r.bf),
       imageUrl: g.rows.map((r) => webAddress(r.imageUrl)).find((u) => u !== null) ?? null,
-      good: g.rows.filter((r) => r.verdict === 'good').length,
-      avoid: g.rows.filter((r) => r.verdict === 'avoid').length,
+      good: Math.max(first.groupGood, g.rows.filter((r) => r.verdict === 'good').length),
+      avoid: Math.max(first.groupAvoid, g.rows.filter((r) => r.verdict === 'avoid').length),
       option: g.rows.length === 1 ? optionLabel(g.rows[0].variantLabel, g.rows[0].nameCategory, g.rows[0].attrs) : null,
     };
   });
@@ -154,7 +158,8 @@ export type SellerView = Omit<Seller, 'groupKey' | 'shopId' | 'brand' | 'imageUr
   cheaper: SellerCheaper | null;
 };
 /** A variant of a seller's listing; label: the shop's variant title, else the clean option (the colour), else null. */
-export type VariantView = { id: number; sellerId: number; label: string | null; priceCents: number | null; inStock: boolean | null };
+/** seenAt: its newest reading (ISO), so an old one is never shown as a current price (review I3) */
+export type VariantView = { id: number; sellerId: number; label: string | null; priceCents: number | null; inStock: boolean | null; seenAt: string | null };
 export type ProductPage = {
   key: string;
   product: {
@@ -214,7 +219,7 @@ export function productPage(g: ProductGroup, thresholds: { cheaperPct: number; m
     const own = plainText(v.variantTitle);
     // a listing with one variant: its option is in the clean variant label (the identity specs taken out)
     const clean = !own && s && variantCount.get(v.sellerId) === 1 ? optionLabel(s.variantLabel, s.nameCategory, s.attrs) : null;
-    return { id: v.id, sellerId: v.sellerId, label: own ?? clean, priceCents: positive(v.priceCents) ? v.priceCents : null, inStock: v.inStock };
+    return { id: v.id, sellerId: v.sellerId, label: own ?? clean, priceCents: positive(v.priceCents) ? v.priceCents : null, inStock: v.inStock, seenAt: v.seenAt };
   });
   return {
     key: g.key,
