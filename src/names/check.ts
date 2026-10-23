@@ -23,7 +23,12 @@
 //   (16GB is not 16TB), and no number appears that the shop data does not have (A5 is not A55);
 // - codes mixing letters and digits (G6, A515, iPhone15) survive as a token or as adjacent tokens (iPhone 15), and
 //   codes in the name come from the shop data the same way; model words (Pro, Max, Plus, Mini, Ultra, Air, Lite,
-//   SE, FE, Neo, Slim, XL, XS from src/site/matching.ts) survive ("+" counts as Plus);
+//   SE, FE, Neo, Slim, XL, XS from src/site/matching.ts, and OLED) and edition, format and audience words (Digital,
+//   Disc, Bundle, Twin, Duo, Pack, Set, Kit, Starter, Deluxe, Collector's, GOTY, Kids, Junior) survive in the name
+//   itself, not only in the variant label ("+" counts as Plus; XL or XS may be a size in the label next to another
+//   size or listed in the sizes attribute; Pack may go when the pack count is an attribute), as does a + glued to a
+//   title word; pack and count numbers (Pack of 6, 6x330ml, 44 Nappies, Twin Pack) stay in the name or are the
+//   pack_count, count or pieces attribute (re-review);
 // - only CPU and GPU names (i5, i7-1335U, Ryzen 7, R7, Core Ultra 7, Apple M2, Snapdragon, Exynos, Dimensity,
 //   Celeron, N100, RTX 4060, GTX, RX 7600, Arc) may leave the name, when the cpu or gpu attribute holds them, and
 //   Windows codes (W11P, Win 11, Windows 11 Pro) when the os attribute is set;
@@ -39,7 +44,7 @@ import { MODEL } from '../site/matching.js';
 import { basicBrandStatus, brandName, fullBrandIn, hasBrand, isWebBrand, keepsBrand, type BrandStatus } from './brand.js';
 import type { Batch, BatchItem } from './prompt.js';
 import type { AttrSpec, CategorySchema } from './schema.js';
-import { compact, conditions, inRun, moneyValues, prep, QUANTITY, tokens, UNIT } from './text.js';
+import { compact, conditions, inRun, moneyValues, packCounts, prep, QUANTITY, tokens, UNIT } from './text.js';
 
 export { prep, tokens };
 
@@ -54,6 +59,20 @@ const URL_LIKE = /https?:|\bwww\.|[\p{L}\p{N}][\p{L}\p{N}_-]*\.[a-z]{2,}\b/iu;
 const URL_LIKE_ALL = /https?:\S*|\bwww\.\S*|[\p{L}\p{N}][\p{L}\p{N}_-]*(?:\.[\p{L}\p{N}_-]+)*\.[a-z]{2,}\b/giu;
 /** Endings that make a dotted word a web address even when the title has it. */
 const WEB_ENDING = /\.(?:com|mt|net|org|eu|uk|shop|store|online|info|biz|io|co|de|it)$/i;
+
+/**
+ * Words that tell one product from another: the model words of src/site/matching.ts plus OLED, and edition, format
+ * and audience words. When the title has one, the name itself must keep it, never only the variant label (re-review:
+ * an iPhone 15 Plus is not an iPhone 15, a Switch OLED not a Switch Lite, a Twin Pack not one blender).
+ */
+const NAME_WORDS = new Set([
+  ...MODEL,
+  'oled',
+  ...'digital disc bundle twin duo pack set kit starter deluxe collector goty kids junior'.split(' '),
+]);
+
+/** Letter sizes, for telling the size XS from the model word XS. */
+const SIZE_TOKENS = new Set(['xxxs', 'xxs', 'xs', 's', 'm', 'l', 'xl', 'xxl', 'xxxl', '2xl', '3xl']);
 
 /** Words of 3+ letters a name may use without the shop data having them: unit words only. */
 const ALPHA_ALLOW = new Set(['inch', 'inches', 'ssd', 'hdd', 'emmc', 'liter', 'liters', 'ltr', 'meter', 'meters', 'watt', 'watts', 'mah', 'ghz', 'mhz', 'khz', 'pcs']);
@@ -280,17 +299,28 @@ export function checkName(source: NameSource, a: NameAnswer): NameCheck {
       }
       return false;
     });
-  const inJoined = (t: string) => keptAll.some((k) => k !== t && joinOf(k, t));
+  const nameSet = new Set(nameToks);
+  if (name.includes('+')) nameSet.add('plus');
+  const inJoinedName = (t: string) => nameToks.some((k) => k !== t && joinOf(k, t));
+  // a size the attributes list may still go to the variant label (XL of a hoodie in sizes)
+  const sizes = new Set((Array.isArray(a.attrs.sizes) ? a.attrs.sizes : []).flatMap((x) => (typeof x === 'string' ? tokens(prep(x)) : [])));
+  const countAttr = [a.attrs.pack_count, a.attrs.count, a.attrs.pieces].filter((x): x is number => typeof x === 'number');
   for (const t of new Set(required)) {
-    if (MODEL.has(t) && !keptSet.has(t) && !inJoined(t)) lost.push(t);
-    else if (isCode(t) && !BARCODE.test(t) && !kept.some((l) => inRun(l, t))) lost.push(t);
+    if (NAME_WORDS.has(t)) {
+      // XL or XS is a size when the label holds it next to another size (XXS/XS)
+      const sizeInLabel = (t === 'xl' || t === 'xs') && labelToks.includes(t) && labelToks.some((x) => x !== t && SIZE_TOKENS.has(x));
+      const allowed = sizes.has(t) || sizeInLabel || (t === 'pack' && countAttr.length > 0);
+      if (!nameSet.has(t) && !inJoinedName(t) && !allowed) lost.push(t);
+    }
+    if (isCode(t) && !BARCODE.test(t) && !kept.some((l) => inRun(l, t))) lost.push(t);
   }
   const newTokens: string[] = [];
   // a + glued to a word (S24+) only when the title or variants have one
   const gluedPlus = /[\p{L}\p{N}]\+/u;
   if (gluedPlus.test(`${name} ${label}`) && !gluedPlus.test(wordData)) newTokens.push('+');
-  // a + glued to a title word (S23+, iPhone 15+, FE+, SPF 50+) survives as "+" or "plus" right after the same word
-  const keptText = prep(`${name} ${label}`);
+  // a + glued to a title word (S23+, iPhone 15+, FE+, SPF 50+) survives as "+" or "plus" right after the same word,
+  // in the name itself (re-review: a model is not a variant)
+  const keptText = prep(name);
   for (const m of prep(source.title).matchAll(/([\p{L}\p{N}]+)\+/gu)) {
     const w = m[1].replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
     if (!new RegExp(`(?:^|[^\\p{L}\\p{N}])${w}\\s*(?:\\+|plus\\b)`, 'u').test(keptText)) lost.push(`${m[1]}+`);
@@ -315,7 +345,12 @@ export function checkName(source: NameSource, a: NameAnswer): NameCheck {
   const nameMoney = new Set(moneyValues(name));
   const lostMoney = moneyValues(source.title).filter((m) => !nameMoney.has(m));
 
+  // pack and count numbers (Pack of 6, 6x330ml, 44 Nappies, Twin Pack) stay in the name or are the pack count
+  const nameNumbers = new Set(nameToks.map((t) => /^(\d+(?:\.\d+)?)/.exec(t)?.[1]).filter((x): x is string => !!x).map(Number));
+  const lostPacks = packCounts(source.title).filter((p) => !nameNumbers.has(p.n) && !countAttr.includes(p.n) && !(p.word !== null && nameSet.has(p.word)));
+
   const parts: string[] = [];
+  if (lostPacks.length > 0) parts.push(`pack size lost: ${lostPacks.map((p) => p.n).join(', ')}`);
   if (lostConditions.length > 0) parts.push(`condition lost: ${lostConditions.join(', ')}`);
   if (lostMoney.length > 0) parts.push(`currency value lost: ${lostMoney.join(', ')}`);
   if (lost.length > 0) parts.push(`lost tokens: ${[...new Set(lost)].join(', ')}`);
