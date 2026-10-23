@@ -1,3 +1,4 @@
+import { ExternalLink } from 'lucide-react';
 import { lazy, type ReactNode, Suspense, useId, useMemo, useState } from 'react';
 import { Link, useParams } from 'react-router';
 import { CheaperBox } from '@/components/site/CheaperBox';
@@ -354,6 +355,17 @@ function History({ rows, judged, low30 }: { rows: DayRow[]; judged: boolean; low
   );
 }
 
+/** The shop's product link, only when it is an http(s) address (scraped data is untrusted). */
+function webAddress(url: string | null): string | null {
+  if (!url) return null;
+  try {
+    const u = new URL(url);
+    return u.protocol === 'https:' || u.protocol === 'http:' ? u.href : null;
+  } catch {
+    return null;
+  }
+}
+
 function ProductContent({ data }: { data: ProductResponse }) {
   const { mode } = useMode();
   const advanced = mode === 'advanced';
@@ -362,6 +374,7 @@ function ProductContent({ data }: { data: ProductResponse }) {
   const facts = verdict.facts;
   const card = productCard(data);
   const tag = tagProps(card);
+  const shopUrl = webAddress(product.url);
   const avoid = verdict.label === 'avoid';
   const alarm = avoid && card.bf;
   const verdictId = product.productId;
@@ -423,6 +436,18 @@ function ProductContent({ data }: { data: ProductResponse }) {
               Price changed from {formatEuro(change.from)} to {formatEuro(change.row.price!)} on {formatDay(change.row.day)}
               {change.row.bf && ', while marked Black Friday'}
             </p>
+          )}
+          {shopUrl && (
+            <a
+              href={shopUrl}
+              target="_blank"
+              rel="noopener noreferrer nofollow"
+              className="mt-1 inline-flex min-h-11 w-fit items-center gap-1.5 rounded-sm font-semibold text-accent outline-none hover:underline focus-visible:ring-[3px] focus-visible:ring-ring/50"
+            >
+              View on {product.shop}
+              <ExternalLink className="size-4" aria-hidden="true" />
+              <span className="sr-only"> (opens in a new tab)</span>
+            </a>
           )}
           {tooNew ? (
             <div className="mt-1 flex flex-col gap-1 rounded-xl bg-secondary p-3">

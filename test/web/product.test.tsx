@@ -315,6 +315,24 @@ describe('product page, Simple', () => {
     expect(container.textContent).not.toMatch(/€0\.00/);
   });
 
+  it('links to the product on the shop website, opening a new tab', async () => {
+    await openLenovo();
+    const link = screen.getByRole('link', { name: /^View on AtoZ Electronics\s*\(opens in a new tab\)$/ });
+    expect(link.getAttribute('href')).toBe('https://atoz.example/p/7');
+    expect(link.getAttribute('target')).toBe('_blank');
+    expect(link.getAttribute('rel')).toBe('noopener noreferrer nofollow');
+  });
+
+  it('shows no shop link when the address is missing or not a web address', async () => {
+    for (const url of [null, 'javascript:alert(1)', 'ftp://atoz.example/p/7', 'not a url']) {
+      const data = lenovo();
+      data.product = { ...data.product, url };
+      await openLenovo(data);
+      expect(screen.queryByRole('link', { name: /View on/ })).toBeNull();
+      cleanup();
+    }
+  });
+
   it('renders shop text as text', async () => {
     const data = lenovo({ cheaper: null });
     data.product = { ...data.product, title: '<img src=x onerror=alert(1)> Laptop', shop: '<b>Evil</b>' };
