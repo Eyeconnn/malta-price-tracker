@@ -199,6 +199,25 @@ describe('veto: barcodes, part numbers and prices', () => {
   });
 });
 
+describe('veto: family words one side has (re-review 2: the rest of an older cluster follows only when the veto agrees)', () => {
+  const APART_FAMILY: [string, string, string][] = [
+    ['phones', 'Samsung Galaxy S25 256GB Navy', 'Samsung Galaxy S25 Edge 256GB Navy'],
+    ['phones', 'Samsung Galaxy Watch8 46mm Black', 'Samsung Galaxy Watch8 Classic 46mm Black'],
+    ['phones', 'Google Pixel 9 Pro 256GB Obsidian', 'Google Pixel 9 Pro Fold 256GB Obsidian'],
+    ['phones', 'Samsung Galaxy Z Flip7 256GB', 'Samsung Galaxy Z Fold7 256GB'],
+    ['tv-audio', 'Apple AirPods 4', 'Apple AirPods 4 ANC'],
+    ['tv-audio', 'Apple AirPods 4', 'Apple AirPods 4 with Active Noise Cancellation'],
+    ['tv-audio', 'Bose QuietComfort Headphones', 'Bose QuietComfort Noise Cancelling Headphones'],
+  ];
+  it.each(APART_FAMILY)('%s: %s vs %s', (cat, a, b) => expectVetoed(v(cat, a, null), v(cat, b, null)));
+  it('keeps the same family word on both sides, written either way', () => {
+    expectKept([v('tv-audio', 'Apple AirPods 4 ANC White', 'Apple'), v('tv-audio', 'Apple AirPods 4 with Active Noise Cancellation', 'Apple')]);
+    expectKept([v('phones', 'Samsung Galaxy S25 Edge 256GB Titanium Silver', 'Samsung'), v('phones', 'SAMSUNG GALAXY S25 EDGE 256GB SILVER', 'Samsung')]);
+    // a shared model code fixes the model: "Noise Cancelling" on one side is a feature
+    expectKept([v('tv-audio', 'Sony WH-CH720N Headphones Black', 'Sony'), v('tv-audio', 'Sony WH-CH720N Noise Cancelling Headphones', 'Sony')]);
+  });
+});
+
 describe('veto: colour siblings at one shop (review I1, I2): only colour words and their colour modifiers may differ', () => {
   // the reviewer's live examples: a word before a colour that names a model, a line or a part keeps them apart
   const APART_PAIRS: [string, string, string][] = [

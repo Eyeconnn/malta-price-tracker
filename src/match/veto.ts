@@ -236,9 +236,19 @@ function modelWords(texts: string[], category: string): Set<string> {
       }
     });
     if (/\bnew\s+(?:nintendo\s+)?[23]ds\b/.test(prep(text))) out.add('new');
+    // devices: a family word one listing has names another model (S25 Edge, Watch8 Classic, Pixel 9 Pro Fold, Z Flip)
+    // or another version (AirPods 4 with Active Noise Cancellation, written ANC or Noise Cancelling)
+    if (device) {
+      for (const t of toks) if (DEVICE_FAMILY.has(t)) out.add(t);
+      if (toks.includes('anc') || NOISE_CANCELLING.test(prep(text))) out.add('anc');
+    }
   }
   return out;
 }
+
+/** Device family words, as words of their own (Galaxy S25 Edge, not EdgeSense). */
+const DEVICE_FAMILY = new Set(['edge', 'classic', 'fold', 'flip']);
+const NOISE_CANCELLING = /\b(?:active\s+)?noise[\s-]*cancel+(?:ing|ling|ation|led)?\b/;
 
 /** Words that each name one class of thing; two listings naming different ones of a class differ. */
 const MATERIAL: Record<string, string> = Object.fromEntries(
@@ -619,6 +629,13 @@ export function vetoReasons(a: VetoListing, b: VetoListing): string[] {
 
   const ma = modelWords(xa, cat);
   const mb = modelWords(xb, cat);
+  // noise cancelling named on one side only is a feature when a shared model code fixes the model (WH-1000XM5),
+  // another version without one (AirPods 4 and AirPods 4 with Active Noise Cancellation)
+  const sharedCode = codesA.some((c) => c.length >= 4 && codesB.includes(c));
+  if (sharedCode && ma.has('anc') !== mb.has('anc')) {
+    ma.delete('anc');
+    mb.delete('anc');
+  }
   if (!equalSets(ma, mb)) add(`model words ${show(ma)} vs ${show(mb)}`);
   const pma = modelWords(segments(a.categoryPath), cat);
   const pmb = modelWords(segments(b.categoryPath), cat);

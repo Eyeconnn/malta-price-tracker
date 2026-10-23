@@ -117,3 +117,13 @@ export async function supersedeJudgements(sql: postgres.Sql, opts: { complete: b
     where id in (select id from covered group by id having ${opts.complete ? sql`bool_or(c)` : sql`bool_and(c)`})`;
   return res.count;
 }
+
+/**
+ * Whether a run judged everything there was to judge, so supersedeJudgements may remove every older judgement sharing
+ * a listing with a newer one: not stopped (Ctrl+C, the breaker, --max-cost), no failed batch, not a --pilot sample,
+ * no --category or --title filter, not the merge pass alone, and no batch cut by --max-batches. Any other run removes
+ * only older judgements whose every listing it judged again.
+ */
+export function runIsComplete(r: { stopped: boolean; failedBatches: number; pilot: boolean; filtered: boolean; mergeOnly: boolean; capped: boolean }): boolean {
+  return !r.stopped && r.failedBatches === 0 && !r.pilot && !r.filtered && !r.mergeOnly && !r.capped;
+}

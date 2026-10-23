@@ -7,7 +7,7 @@ import path from 'node:path';
 import postgres from 'postgres';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { candidateKey, fingerprint, normText } from '../../src/match/fingerprint.js';
-import { loadJudgements, saveJudgements, supersedeJudgements, type JudgementRow } from '../../src/match/store.js';
+import { loadJudgements, runIsComplete, saveJudgements, supersedeJudgements, type JudgementRow } from '../../src/match/store.js';
 import { buildSiteProducts } from '../../src/site/build.js';
 import { DEFAULT_SETTINGS } from '../../src/site/settings.js';
 
@@ -119,6 +119,21 @@ describe.skipIf(!process.env.SITE_BUILD_TEST_DB)('site-build with a merge-pass j
     // the run re-splits them into two new groups and stops after the first batch was saved
     await saveJudgements(sql, runId, [row('c', ['A-S', 'A-B', 'B-O'], [[0, 1, 2]])]);
     expect(await supersedeJudgements(sql, { complete: false })).toBe(0);
+    await build();
+    expect(pairs(await rows())).toEqual(pairs(before));
+  });
+
+  it('a run capped by --max-batches keeps older judgements with listings it did not judge again (re-review 1, probe12)', async () => {
+    await sql`delete from match_judgements`;
+    await saveJudgements(sql, runId, [row('c', ['A-S', 'A-B', 'B-O', 'G-S'], [[0, 1, 2, 3]]), row('c', ['B-DB', 'G-DB'], [[0, 1]])]);
+    await build();
+    const before = await rows();
+    const pairs = (r: Map<string, Row>) => LISTINGS.flatMap((x) => LISTINGS.filter((y) => x.key < y.key && r.get(x.key)!.canonical_id === r.get(y.key)!.canonical_id).map((y) => `${x.key}+${y.key}`));
+    // every batch it planned ran, but --max-batches cut the batch holding G-S's new group
+    await saveJudgements(sql, runId, [row('c', ['A-S', 'A-B', 'B-O'], [[0, 1, 2]])]);
+    const complete = runIsComplete({ stopped: false, failedBatches: 0, pilot: false, filtered: false, mergeOnly: false, capped: true });
+    expect(complete).toBe(false);
+    expect(await supersedeJudgements(sql, { complete })).toBe(0);
     await build();
     expect(pairs(await rows())).toEqual(pairs(before));
   });

@@ -64,7 +64,7 @@ const STORAGE = /(\d+)\s*(gb|tb)/i;
 /** A careful simulated Claude: listings are the same when their storage and Pro/Max words agree (colour ignored). */
 const sameModel = (l: Listing) => {
   const t = l.title.toLowerCase();
-  return `${t.match(STORAGE)?.[0].replace(/\s+/g, '') ?? '?'}|${/\bmax\b/.test(t) ? 'max' : ''}|${/\bpro\b/.test(t) ? 'pro' : ''}|${/edge/.test(t) ? 'edge' : ''}`;
+  return `${t.match(STORAGE)?.[0].replace(/\s+/g, '') ?? '?'}|${/\bmax\b/.test(t) ? 'max' : ''}|${/\bpro\b/.test(t) ? 'pro' : ''}|${/rugged/.test(t) ? 'rugged' : ''}`;
 };
 
 /** Simulated Claude output for a batch: clusters by key over the listings Claude is shown. */
@@ -306,14 +306,15 @@ describe('merge pass', () => {
   });
 
   describe('two different products with similar names in different chunks', () => {
-    // the S25 and the S25 Edge: same brand, same storage, names overlap; only the codes in two titles tell them apart
+    // the S25 and a rugged S25 the veto cannot tell apart by its shown titles: same brand, same storage, names
+    // overlap; only the codes in two other titles tell them apart
     const s25 = () => [
       L('atoz', 'Samsung Galaxy S25 256GB Navy Blue Smartphone', { brand: 'Samsung', priceCents: 89900 }),
       L('telecom', 'Samsung S25 256GB SM-S931B', { brand: 'Samsung', priceCents: 89900 }),
     ];
     const edge = () => [
-      L('epic', 'Samsung Galaxy S25 Edge 256GB Titanium Silver', { brand: 'Samsung', priceCents: 99900 }),
-      L('soundvision', 'Samsung S25 Edge SM-S937B 256GB', { brand: 'Samsung', priceCents: 99900 }),
+      L('epic', 'Samsung Galaxy S25 Rugged 256GB Titanium Silver', { brand: 'Samsung', priceCents: 99900 }),
+      L('soundvision', 'Samsung S25 Rugged SM-S937B 256GB', { brand: 'Samsung', priceCents: 99900 }),
     ];
     function setup() {
       const a = s25();

@@ -13,7 +13,9 @@
 // groups). --title keeps only groups with a listing whose title has the text; --plan prints the plan and calls Claude
 // for nothing. Every run
 // writes a report to out/judge/. Saved judgements replace older ones sharing their listings only at the end of the run
-// (src/match/store.ts supersedeJudgements), so a stopped run keeps every match it did not judge again.
+// (src/match/store.ts supersedeJudgements), and only a complete run (not stopped, no failed batch, no --pilot,
+// --category or --title, not --merge-pass alone, no batch cut by --max-batches) removes those with listings it did
+// not judge again; every other run keeps every match it did not judge again.
 // Reads with DASHBOARD_DATABASE_URL (read-only role; works before migration 013). Without --dry-run, writes
 // match_judgements and judge_runs with DATABASE_URL (needs migration 013); such a run needs --pilot or --max-batches.
 // A run stops after 5 failed batches in a row, and at once on a login or usage-limit error; --max-cost starts no new
@@ -49,6 +51,7 @@ import {
   loadStoredFingerprints,
   saveJudgements,
   startJudgeRun,
+  runIsComplete,
   supersedeJudgements,
   type JudgementRow,
   type StoredJudgement,
@@ -133,7 +136,10 @@ async function main() {
   const all = mergeOnly ? [] : buildCandidates(listings).filter(keep);
   const todo = all.filter((c) => stored.get(c.key) !== c.fingerprint);
   const chosen = pilot ? spreadSample(todo, limit, values.seed) : todo;
-  const batches = makeJudgeBatches(chosen, batchSize, maxListings).slice(0, maxBatches ?? Infinity);
+  const planned = makeJudgeBatches(chosen, batchSize, maxListings);
+  const batches = planned.slice(0, maxBatches ?? Infinity);
+  /** batches --max-batches left for a later run (either pass): the run is not complete (runIsComplete) */
+  let capped = batches.length < planned.length;
   const shownCount = (bs: JudgeBatch[]) => bs.reduce((n, b) => n + b.groups.reduce((m, g) => m + shownMembers(g.candidate).length, 0), 0);
   const groupCount = (bs: JudgeBatch[]) => bs.reduce((n, b) => n + b.groups.length, 0);
   console.log(
@@ -151,6 +157,7 @@ async function main() {
     const room = maxBatches === undefined ? Infinity : Math.max(0, maxBatches - usedBatches);
     const every = makeJudgeBatches(chosenM, batchSize, maxListings);
     const mb = every.slice(0, room);
+    if (mb.length < every.length) capped = true;
     console.log(
       `merge pass: ${plan.stats.clusters} judged clusters with an identity number, ${plan.stats.pairs} pairs of clusters with the same category, brand and numbers, ` +
         `${plan.stats.candidatePairs} candidate pairs; ${plan.candidates.length} merge groups, ${plan.todo.length} new or changed; ` +
@@ -310,13 +317,16 @@ async function main() {
     } else console.log('judge-matches: merge pass skipped (the run was stopped)');
   } finally {
     await rm(work, { recursive: true, force: true }).catch(() => {});
-    // older judgements the saved ones replace go only now (review I4): after a stopped, capped or failing run only
-    // those whose every listing was judged again
+    // older judgements the saved ones replace go only now (review I4); unless the run judged everything there was to
+    // judge (runIsComplete), only those whose every listing was judged again
     if (rw) {
-      const complete = !stopping && !budgetStop && !breakerStop && totals.failedBatches === 0;
+      const complete = runIsComplete({
+        stopped: stopping || budgetStop || breakerStop !== null, failedBatches: totals.failedBatches, pilot,
+        filtered: categories.length > 0 || title !== undefined, mergeOnly, capped,
+      });
       try {
         const removed = await supersedeJudgements(rw, { complete });
-        console.log(`judge-matches: ${removed} older judgements replaced${complete ? '' : ' (only those wholly judged again: the run did not finish every batch)'}`);
+        console.log(`judge-matches: ${removed} older judgements replaced${complete ? '' : ' (only those wholly judged again: a stopped, capped, failing, filtered, pilot or merge-only run)'}`);
       } catch (e) {
         console.log(`judge-matches: older judgements not removed (${(e as Error).message}); the next run removes them`);
       }

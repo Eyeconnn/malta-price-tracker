@@ -296,8 +296,11 @@ exactly the same product, so a product page can show every seller's price (desig
 5. **Storage**: `match_judgements` (one row per candidate group: members, fingerprint of their titles and variant
    titles, verdict, model, time) and `judge_runs` (migration 013). A group is judged again only when a member's title
    or variant titles change or another listing joins it. Saved judgements replace older ones sharing their listings
-   only at the end of a run: after a stopped, capped or failing run only the older judgements whose every listing was
-   judged again go, so no listing loses its match before it has a new judgement.
+   only at the end of a run, and only a complete run (not stopped, no failed batch, no `--pilot`, `--category` or
+   `--title`, not `--merge-pass` alone, no batch cut by `--max-batches`) removes older judgements with listings it did
+   not judge again; any other run removes only those whose every listing was judged again, so no listing loses its
+   match before it has a new judgement. A nightly run capped by `--max-batches` therefore leaves the rest for a later
+   night.
 6. **Site build**: with `pnpm site-build --judged-matching` (or `JUDGED_MATCHING=on`) the listings of a current,
    not vetoed judgement form a product with match method `judged`, trusted on the site like barcode matches. Barcode
    and part-number groups keep priority and are never merged with each other. Off by default.

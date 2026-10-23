@@ -12,6 +12,7 @@ import {
   loadJudgements,
   loadStoredFingerprints,
   saveJudgements,
+  runIsComplete,
   startJudgeRun,
   supersedeJudgements,
   type JudgementRow,
@@ -143,5 +144,18 @@ describe.skipIf(!process.env.SITE_BUILD_TEST_DB)('judge reads and writes on PGli
     const [r] = await sql`select finished_at, groups, matched, vetoes, reported_cost_usd::float as cost, report_path from judge_runs where id = ${runId}`;
     expect(r).toMatchObject({ groups: 3, matched: 2, vetoes: 1, cost: 0.0123, report_path: 'out/judge/x.html' });
     expect(r.finished_at).not.toBeNull();
+  });
+});
+
+describe('runIsComplete (re-review 1)', () => {
+  const full = { stopped: false, failedBatches: 0, pilot: false, filtered: false, mergeOnly: false, capped: false };
+  it('is complete only for a whole run: not stopped, no failed batch, no pilot, filter, merge pass alone or --max-batches cut', () => {
+    expect(runIsComplete(full)).toBe(true);
+    expect(runIsComplete({ ...full, stopped: true })).toBe(false);
+    expect(runIsComplete({ ...full, failedBatches: 1 })).toBe(false);
+    expect(runIsComplete({ ...full, pilot: true })).toBe(false);
+    expect(runIsComplete({ ...full, filtered: true })).toBe(false);
+    expect(runIsComplete({ ...full, mergeOnly: true })).toBe(false);
+    expect(runIsComplete({ ...full, capped: true })).toBe(false);
   });
 });
