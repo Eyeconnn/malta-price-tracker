@@ -467,6 +467,28 @@ describe('checkBatch', () => {
     expect(r.results[1].proposedLabel).toBe('tezenismalta.com');
   });
 
+  it('builds the canonical name from the fields with the pattern, ignoring the canonical_name text Claude wrote', () => {
+    const out = {
+      items: [
+        { key: '1', display_name: LENOVO_NAME, variant_label: null, canonical_name: 'anything Claude likes', attrs: { ...LENOVO_ATTRS, model: 'ThinkBook 16 G6 IRL' } },
+        { key: '2', display_name: 'Acer Aspire 5 A515', variant_label: 'Silver', canonical_name: 'acer aspire 5 a515', attrs: { brand: 'Acer' } },
+      ],
+    };
+    const r = checkBatch(batch, out, laptops);
+    expect(r.results[0]).toMatchObject({ status: 'ok', canonicalName: 'lenovo thinkbook16g6irl i5 16gbram 512gb 16in ssd windows', canonicalReason: null, proposedCanonical: 'anything Claude likes' });
+    // the display name is accepted, but without a product line there is no canonical name: it never name-matches
+    expect(r.results[1]).toMatchObject({ status: 'ok', canonicalName: null, canonicalReason: 'no product line or model' });
+  });
+
+  it('keeps no canonical name when the fields lose what tells the product apart', () => {
+    const b: Batch = { category: 'phones', items: [{ key: '1', group: group({ category: 'phones', title: 'Apple iPhone 15 Plus 128GB Black', brand: 'Apple' }) }] };
+    const out = { items: [{ key: '1', display_name: 'Apple iPhone 15 Plus', variant_label: '128GB, Black', canonical_name: null, attrs: { brand: 'Apple', model: 'iPhone 15', storage_gb: 128 } }] };
+    const r = checkBatch(b, out, schemas.phones);
+    expect(r.results[0].status).toBe('ok');
+    expect(r.results[0].canonicalName).toBeNull();
+    expect(r.results[0].canonicalReason).toMatch(/lost tokens: plus/);
+  });
+
   it('passes the title maker of the group to the name check', () => {
     const b: Batch = { category: 'beauty-health', items: [{ key: '1', group: group({ category: 'beauty-health', title: 'Therabody TheraCup (Single)', brand: 'Theragun', brandStatus: 'reliable', titleBrand: 'Therabody' }) }] };
     const r = checkBatch(b, { items: [{ key: '1', display_name: 'Theragun TheraCup', variant_label: 'Single', attrs: {} }] }, schemas['beauty-health']);

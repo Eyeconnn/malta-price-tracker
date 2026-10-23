@@ -43,6 +43,7 @@
 import { MODEL } from '../site/matching.js';
 import { basicBrandStatus, brandName, fullBrandIn, hasBrand, isWebBrand, keepsBrand, type BrandStatus } from './brand.js';
 import type { Batch, BatchItem } from './prompt.js';
+import { checkCanonical } from './canonical.js';
 import type { AttrSpec, CategorySchema } from './schema.js';
 import { compact, conditions, inRun, moneyValues, packCounts, prep, QUANTITY, tokens, UNIT } from './text.js';
 
@@ -65,14 +66,14 @@ const WEB_ENDING = /\.(?:com|mt|net|org|eu|uk|shop|store|online|info|biz|io|co|d
  * and audience words. When the title has one, the name itself must keep it, never only the variant label (re-review:
  * an iPhone 15 Plus is not an iPhone 15, a Switch OLED not a Switch Lite, a Twin Pack not one blender).
  */
-const NAME_WORDS = new Set([
+export const NAME_WORDS = new Set([
   ...MODEL,
   'oled',
   ...'digital disc bundle twin duo pack set kit starter deluxe collector goty kids junior'.split(' '),
 ]);
 
 /** Letter sizes, for telling the size XS from the model word XS. */
-const SIZE_TOKENS = new Set(['xxxs', 'xxs', 'xs', 's', 'm', 'l', 'xl', 'xxl', 'xxxl', '2xl', '3xl']);
+export const SIZE_TOKENS = new Set(['xxxs', 'xxs', 'xs', 's', 'm', 'l', 'xl', 'xxl', 'xxxl', '2xl', '3xl']);
 
 /** Words of 3+ letters a name may use without the shop data having them: unit words only. */
 const ALPHA_ALLOW = new Set(['inch', 'inches', 'ssd', 'hdd', 'emmc', 'liter', 'liters', 'ltr', 'meter', 'meters', 'watt', 'watts', 'mah', 'ghz', 'mhz', 'khz', 'pcs']);
@@ -80,7 +81,7 @@ const ALPHA_ALLOW = new Set(['inch', 'inches', 'ssd', 'hdd', 'emmc', 'liter', 'l
 /** Words the variant label may use to join its values. */
 const LABEL_JOINERS = new Set(['and']);
 
-const BARCODE = /^\d{8,}$/;
+export const BARCODE = /^\d{8,}$/;
 const PERCENT = /(\d+(?:\.\d+)?)\s*%/g;
 
 /** CPU and GPU names that may move into the cpu or gpu attribute. */
@@ -108,7 +109,7 @@ const stripPercentOff = (t: string) =>
   t.replace(/(?:^|\s)-\s*\d+(?:\.\d+)?\s*%/g, ' ').replace(/\d+(?:\.\d+)?\s*%\s*(?:off|discount|sale)\b/g, ' ');
 
 /** Percent off: shop noise, never required. A value with a currency stays (a gift card, a voucher: review C1). */
-function stripNoise(t: string): string {
+export function stripNoise(t: string): string {
   return stripPercentOff(t);
 }
 
@@ -120,7 +121,7 @@ function quantity(t: string): string | null {
   if (!m || (m[2] !== '' && !Object.hasOwn(UNIT, m[2]))) return null;
   return `${Number.parseFloat(m[1])}|${m[2] === '' ? '' : UNIT[m[2]]}`;
 }
-const isCode = (t: string) => hasDigit(t) && quantity(t) === null;
+export const isCode = (t: string) => hasDigit(t) && quantity(t) === null;
 
 /** Number atoms of a token: its quantity, or each digit run of a code (iPhone15 gives 15, so "iPhone 15" matches). */
 function atoms(t: string): string[] {
@@ -180,7 +181,7 @@ function nameTextProblem(s: string, title: string): string | null {
 }
 
 /** The title with the CPU, GPU and OS names removed that the attributes hold. */
-function requiredText(title: string, attrs: Record<string, unknown>): string {
+export function requiredText(title: string, attrs: Record<string, unknown>): string {
   const specText = compact(['cpu', 'gpu'].map((k) => (typeof attrs[k] === 'string' ? attrs[k] : '')).join(' '));
   let t = title;
   if (specText !== '') {
@@ -425,9 +426,17 @@ export type ItemResult = {
   /** what Claude proposed, for the report */
   proposedName: string | null;
   proposedLabel: string | null;
+  /**
+   * The canonical name built from the fields (src/names/canonical.ts), null when the item is rejected or the fields
+   * fail its check (canonicalReason); such a listing never name-matches. proposedCanonical: Claude's own text, for
+   * the report only.
+   */
+  canonicalName: string | null;
+  canonicalReason: string | null;
+  proposedCanonical: string | null;
 };
 
-type RawAnswer = { key?: unknown; display_name?: unknown; variant_label?: unknown; attrs?: unknown };
+type RawAnswer = { key?: unknown; display_name?: unknown; variant_label?: unknown; canonical_name?: unknown; attrs?: unknown };
 
 const tidy = (s: string) => s.replace(/\s+/g, ' ').trim();
 
@@ -447,6 +456,7 @@ export function checkBatch(batch: Batch, output: unknown, schema: CategorySchema
   const results = batch.items.map((item): ItemResult => {
     const reject = (reason: string, proposedName: string | null = null, dropped: string[] = [], proposedLabel: string | null = null): ItemResult => ({
       item, status: 'rejected', reason, displayName: null, variantLabel: null, attrs: {}, dropped, proposedName, proposedLabel,
+      canonicalName: null, canonicalReason: null, proposedCanonical: null,
     });
     const a = byKey.get(item.key);
     if (!a) return reject('missing from answer');
@@ -464,7 +474,14 @@ export function checkBatch(batch: Batch, output: unknown, schema: CategorySchema
     }
     const check = checkName({ title: g.title, brand: g.brand, brandStatus, brandNote: g.brandNote, titleBrand: g.titleBrand, variantTitles: g.variantTitles, mpn: g.mpn }, { display_name: name, variant_label: label, attrs });
     if (!check.ok) return reject(check.reason, name, dropped, label);
-    return { item, status: 'ok', reason: null, displayName: name, variantLabel: label, attrs, dropped, proposedName: name, proposedLabel: label };
+    // the canonical name is written by code from the fields and checked against the title (Claude's text is not used)
+    const canon = checkCanonical({ title: g.title, brand: g.brand, brandStatus, variantTitles: g.variantTitles, mpn: g.mpn }, batch.category, attrs);
+    return {
+      item, status: 'ok', reason: null, displayName: name, variantLabel: label, attrs, dropped, proposedName: name, proposedLabel: label,
+      canonicalName: canon.ok ? canon.canonical : null,
+      canonicalReason: canon.ok ? null : canon.reason,
+      proposedCanonical: typeof a.canonical_name === 'string' ? a.canonical_name : null,
+    };
   });
   return { results, unknownKeys };
 }

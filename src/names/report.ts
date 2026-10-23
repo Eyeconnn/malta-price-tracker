@@ -62,9 +62,12 @@ export type ReportRow = {
   /** the shop's brand value and whether it names the maker (src/names/brand.ts) */
   brand?: string | null;
   brandStatus?: string;
+  /** the checked canonical name, or why the fields gave none */
+  canonicalName?: string | null;
+  canonicalReason?: string | null;
 };
 
-const esc = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+export const esc = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
 
 export function formatAttrs(attrs: Record<string, unknown>): string {
   return Object.entries(attrs)
@@ -119,11 +122,12 @@ ${batchRows}
       .map(
         (r) => `<tr class="${r.status}"><td>${esc(r.shop)}</td><td>${esc(r.sourceTitle)}</td><td>${esc(r.name ?? '')}</td>` +
           `<td>${esc(r.variantLabel ?? '')}</td><td>${esc(formatAttrs(r.attrs))}${r.dropped.length > 0 ? `<div class="dropped">dropped: ${esc(r.dropped.join('; '))}</div>` : ''}</td>` +
+          `<td>${esc(r.canonicalName ?? '')}${r.canonicalReason ? `<div class="dropped">none: ${esc(r.canonicalReason)}</div>` : ''}</td>` +
           `<td>${esc(r.status)}</td><td>${esc(r.reason ?? '')}</td></tr>`,
       )
       .join('\n');
     return `<h2>${esc(cat)} <small>${ok} of ${list.length} accepted</small></h2>
-<table><thead><tr><th>Shop</th><th>Shop title</th><th>Clean name</th><th>Variant label</th><th>Attributes</th><th>Status</th><th>Reject reason</th></tr></thead>
+<table><thead><tr><th>Shop</th><th>Shop title</th><th>Clean name</th><th>Variant label</th><th>Attributes</th><th>Canonical name</th><th>Status</th><th>Reject reason</th></tr></thead>
 <tbody>
 ${body}
 </tbody></table>`;
@@ -154,11 +158,11 @@ ${sections.join('\n')}
 
 export const CSV_HEADER = [
   'category', 'shop', 'source_title', 'clean_name', 'variant_label', 'attributes', 'dropped_attributes', 'status', 'reason',
-  'shop_id', 'group_key', 'brand', 'brand_status',
+  'shop_id', 'group_key', 'brand', 'brand_status', 'canonical_name', 'canonical_reason',
 ];
 
 /** A cell that a spreadsheet could read as a formula gets a leading apostrophe; cells are quoted when needed. */
-function csvCell(v: string): string {
+export function csvCell(v: string): string {
   const safe = /^[=+\-@\t\r]/.test(v) ? `'${v}` : v;
   return /[",\r\n]/.test(safe) || safe !== v ? `"${safe.replace(/"/g, '""')}"` : safe;
 }
@@ -170,6 +174,7 @@ export function renderCsv(rows: ReportRow[]): string {
       [
         r.category, r.shop, r.sourceTitle, r.name ?? '', r.variantLabel ?? '', formatAttrs(r.attrs), r.dropped.join('; '), r.status, r.reason ?? '',
         r.shopId === undefined ? '' : String(r.shopId), r.groupKey ?? '', r.brand ?? '', r.brandStatus ?? '',
+        r.canonicalName ?? '', r.canonicalReason ?? '',
       ]
         .map(csvCell)
         .join(','),

@@ -1,33 +1,23 @@
-// Groups "the same product" across shops: same barcode, else same part number, else the same clean name and key
-// specs (design Part 3, "name + specs"), else similar titles. The title rule is ported from dashboard/src/page.ts
-// (tokens and sameProduct).
-import { hasBrand } from '../names/brand.js';
-import { compact, conditions, moneyValues, packCounts, prep } from '../names/text.js';
+// Groups "the same product" across shops: same barcode, else same part number, else the same canonical name
+// (design "Update 23 Oct: match by canonical normalised names"), else similar titles. The title rule is ported from
+// dashboard/src/page.ts (tokens and sameProduct).
+import { bundleWords, canonText, gpuMemory, PRICE_INCLUDES } from '../names/canon-text.js';
+import { conditions, moneyValues, prep } from '../names/text.js';
 import { cleanGtin } from '../util/normalise.js';
-import { COLOURS, IDENTITY, identityValues, nameKey, nameTokens, sameIdentity } from './identity.js';
+import { nameTokens } from './identity.js';
 
 /**
- * A row's accepted clean name (product_names, status ok) as the name rule reads it. brand: the row's reliable
- * brand in compact form (src/names/brand.ts: reliable or house), null when it has none; brandInName: the clean
- * name contains that brand.
+ * A listing's checked canonical name (product_names.canonical_name) and the category it was made for: names match
+ * within one category. guard: the distinguishing words of the shop's title (guardOf), a second check.
  */
-export type NameMatch = {
-  key: string;
-  /** the category the clean name was made for: names are compared within one category */
-  category: string;
-  brand: string | null;
-  brandInName: boolean;
-  /** the listing has several variants (site_products.variant_count > 1) */
-  multi: boolean;
-  identity: Record<string, string>;
-};
+export type NameMatch = { canonical: string; category: string; guard: string };
 
 /**
  * brand: the shop's brand field when it has one; two rows with different brands are never title-matched.
  * name: the accepted clean name, when the row has one (name matching).
  */
 export type MatchInput = { id: number; shopId: number; gtin: string | null; mpn: string | null; title: string; brand?: string | null; name?: NameMatch | null };
-export type MatchMethod = 'gtin' | 'mpn' | 'name' | 'title';
+export type MatchMethod = 'gtin' | 'mpn' | 'judged' | 'name' | 'title';
 export type Match = { key: string; method: MatchMethod };
 
 // Colours and filler words are ignored when comparing titles.
@@ -80,6 +70,20 @@ function mpnKey(mpn: string | null): string | null {
   // all zeros, or one character repeated ("0000000", "xxxxx")
   if (/^(.)\1*$/.test(n)) return null;
   return n.length >= 5 ? n : null;
+}
+
+/** Colour abbreviations at the end of a model code or part number (T500WHT and T500BLK are one product in two colours). */
+export const COLOUR_SUFFIX = /(\d)(?:wht|wh|blk|bk|blu|bl|red|rd|grn|gn|gry|gy|slv|sv|sil|pnk|pk|pur|ppl|gld|gd|brn|bei|nvy|org|ylw|yel)$/;
+
+/** A part number in one spelling with its colour suffix removed, or null when it is no usable part number. */
+export function mpnIdentity(mpn: string | null | undefined): string | null {
+  const k = mpnKey(mpn ?? null);
+  return k === null ? null : k.replace(COLOUR_SUFFIX, '$1');
+}
+
+/** A valid barcode (GS1 check digit) as 14 digits, or null. */
+export function gtinIdentity(gtin: string | null | undefined): string | null {
+  return gtinKey(gtin ?? null);
 }
 
 function distinctShops(items: MatchInput[]): boolean {
@@ -141,23 +145,14 @@ function brandKey(it: MatchInput): string | null {
 }
 
 /**
- * Whether the name rule keeps `it` apart from a member of a title group: both have the same clean name but their
- * brands or identity specs disagree (a pack of 6 and a pack of 12), so the title rule must not call them possibly
- * the same either. Nor are two named listings whose condition or currency values differ.
+ * Whether the name rule keeps `it` apart from a member of a title group: both have canonical names and they differ
+ * (a pack of 6 and a pack of 12), or their condition, money or audience differ, so the title rule must not call them
+ * possibly the same either.
  */
 function nameConflict(members: MatchInput[], it: MatchInput): boolean {
   const n = it.name;
   if (!n) return false;
-  return members.some(
-    (m) =>
-      m.name &&
-      ((m.name.key === n.key && !sameNamedProduct(m as Named, it as Named)) ||
-        // a used or refurbished item is not possibly the same as a new one, nor a €20 card a €50 one (review C1)
-        m.name.identity.condition !== n.identity.condition ||
-        m.name.identity.money !== n.identity.money ||
-        m.name.identity.audience !== n.identity.audience ||
-        m.name.identity.bundle !== n.identity.bundle),
-  );
+  return members.some((m) => m.name && (m.name.canonical !== n.canonical || m.name.category !== n.category || m.name.guard !== n.guard));
 }
 
 /** A numeric token present in more than this share of items (and at least TITLE_MIN_COMMON items) is too common to probe with. */
@@ -175,9 +170,10 @@ const TITLE_MAX_INDEX_KEYS = 8;
  * generation numbers) are not used to find candidates; an item is probed only through its rarest numeric tokens,
  * so the cost stays near linear. Items with only common numeric tokens are not title-matched. An item with a brand
  * never joins a group that already holds a different brand (an Acer and a Lenovo with the same specs differ).
+ * Returns every group of two or more items, also those at one shop (the judge's candidates read them too).
  */
-function matchByTitle(items: MatchInput[], out: Map<number, Match>): void {
-  type Group = { first: MatchInput; tokens: string[]; members: MatchInput[]; brand: string | null };
+export function titleGroups<T extends MatchInput>(items: T[]): T[][] {
+  type Group = { first: T; tokens: string[]; members: T[]; brand: string | null };
 
   const tokenised = items.map((it) => titleTokens(it.title));
   const freq = new Map<string, number>();
@@ -225,263 +221,111 @@ function matchByTitle(items: MatchInput[], out: Map<number, Match>): void {
     }
   });
 
-  for (const g of groups) {
-    if (!distinctShops(g.members)) continue;
-    for (const m of g.members) out.set(m.id, { key: `title:${g.first.id}`, method: 'title' });
+  return groups.filter((g) => g.members.length >= 2).map((g) => g.members);
+}
+
+/** Title groups with listings of two or more shops: possibly the same product (method title, never trusted). */
+function matchByTitle(items: MatchInput[], out: Map<number, Match>): void {
+  for (const members of titleGroups(items)) {
+    if (!distinctShops(members)) continue;
+    for (const m of members) out.set(m.id, { key: `title:${members[0].id}`, method: 'title' });
   }
 }
 
-/** Words that name the kind of spec in a variant label ("1TB SSD", "12GB RAM"), and joiners. */
-const SPEC_WORDS = new Set(['ssd', 'hdd', 'emmc', 'ram', 'rom', 'storage', 'memory', 'and', 'with']);
-
-/** Colour words: the shared colour list and the shop colour names of the title rule (Graphite, Midnight, ...). */
-const COLOUR_WORDS = new Set([
-  ...COLOURS.flatMap((c) => nameTokens(c)),
-  ...'black white silver grey gray blue red green pink purple gold yellow orange beige brown navy titanium natural desert midnight starlight graphite space sage mist lavender cream rose violet teal mint coral obsidian porcelain phantom dark light pastel multicolor multi transparent clear'.split(
-    ' ',
-  ),
-]);
-/** Letter sizes and size words: variant options, never identity. */
-const SIZE_WORDS = new Set(['xxxs', 'xxs', 'xs', 's', 'm', 'l', 'xl', 'xxl', 'xxxl', '2xl', '3xl', 'size', 'one', 'eu', 'uk', 'us']);
-
-/** A quantity in one unit class: storage in GB, volume in ml, weight in g, length in cm, screens in inches. */
-function quantityOf(t: string): { cls: string; value: number } | null {
-  const m = /^(\d+(?:\.\d+)?)(\p{L}+)$/u.exec(t);
-  if (!m) return null;
-  const n = Number(m[1]);
-  const scale: Record<string, [string, number]> = {
-    gb: ['gb', 1], tb: ['gb', 1024], ml: ['ml', 1], cl: ['ml', 10], dl: ['ml', 100], l: ['ml', 1000],
-    g: ['g', 1], kg: ['g', 1000], mm: ['cm', 0.1], cm: ['cm', 1], m: ['cm', 100], in: ['in', 1], w: ['w', 1], kw: ['w', 1000],
-  };
-  const s = scale[m[2]];
-  return s ? { cls: s[0], value: Math.round(n * s[1] * 100) / 100 } : { cls: m[2], value: n };
-}
-
-/** The unit class of a number spec of the attribute schema, and its factor to that class (L is 1000 ml). */
-const SPEC_CLASS: Record<string, [string, number]> = { GB: ['gb', 1], ml: ['ml', 1], L: ['ml', 1000], g: ['g', 1], kg: ['g', 1000], cm: ['cm', 1], inch: ['in', 1], W: ['w', 1] };
-
 /**
- * What a clean variant label adds to a listing's identity (review C2b, re-review). A number with a unit becomes the
- * category spec it measures when that is the only spec of its unit the attributes lack ("70cl" is volume_ml 700),
- * is dropped when the attributes already give it, and otherwise counts as it is. For a listing with one variant,
- * every other word and bare number of the label counts too (Plus, Ultra, Pro, OLED, Digital, Twin, 44), except
- * colour and size words, sizes the attributes list and a number after "size": the label of a single listing names
- * what this listing is, the label of a group lists its variants.
- */
-function labelIdentity(variantLabel: string | null, category: string | null, attrs: Record<string, unknown> | null, single: boolean): { fill: Record<string, string>; rest: string } {
-  const fill: Record<string, string> = {};
-  if (!variantLabel) return { fill, rest: '' };
-  const specs = category !== null && Object.hasOwn(IDENTITY, category) ? IDENTITY[category] : [];
-  const given = (key: string) => !!attrs && Object.hasOwn(attrs, key) && attrs[key] !== null && attrs[key] !== undefined;
-  const covered = (cls: string, value: number) =>
-    specs.some((s) => {
-      const c = s.unit ? SPEC_CLASS[s.unit] : undefined;
-      const v = attrs?.[s.key];
-      return c !== undefined && c[0] === cls && typeof v === 'number' && Math.round(v * c[1] * 100) / 100 === value;
-    });
-  const sizes = new Set((attrs && Array.isArray(attrs.sizes) ? attrs.sizes : []).flatMap((x) => (typeof x === 'string' ? nameTokens(x) : [])));
-  const toks = nameTokens(variantLabel);
-  const rest: string[] = [];
-  toks.forEach((t, i) => {
-    if (SPEC_WORDS.has(t) || COLOUR_WORDS.has(t) || SIZE_WORDS.has(t) || sizes.has(t) || toks[i - 1] === 'size') return;
-    const q = /\d/.test(t) && /\p{L}/u.test(t) ? quantityOf(t) : null;
-    if (q) {
-      if (covered(q.cls, q.value)) return;
-      const open = specs.filter((s) => s.unit && SPEC_CLASS[s.unit]?.[0] === q.cls && !given(s.key));
-      if (open.length === 1) {
-        const factor = SPEC_CLASS[open[0].unit!][1];
-        fill[open[0].key] = String(Math.round((q.value / factor) * 100) / 100);
-        return;
-      }
-      rest.push(`${q.value}${q.cls}`);
-      return;
-    }
-    if (single) rest.push(t);
-  });
-  return { fill, rest: [...new Set(rest)].sort().join(',') };
-}
-
-/** Audience words: a kids' or junior product is another product than the adult one (re-review). */
-const AUDIENCE: Record<string, string> = {
-  kid: 'kids', kids: 'kids', child: 'kids', children: 'kids', junior: 'junior', jr: 'junior', boys: 'boys', boy: 'boys', girls: 'girls',
-  girl: 'girls', baby: 'baby', babies: 'baby', infant: 'baby', toddler: 'toddler', toddlers: 'toddler', youth: 'youth', gs: 'gs', ps: 'ps', td: 'td',
-};
-
-/** A bundle (a console with two controllers, a set + a bag) is another product than the plain item (re-review). */
-const BUNDLE = [/(?:^|\s)\+\s*[\p{L}\p{N}]/u, /\bbundle\b/, /\bwith\s+\p{L}/u];
-
-export type NameExtra = {
-  /** the shop's title: its condition and values with a currency count even when an older clean name lost them */
-  title?: string;
-  /** the clean variant label */
-  variantLabel?: string | null;
-  /** how many variants the listing has (site_products.variant_count) */
-  variantCount?: number;
-};
-
-/**
- * The name rule's view of a clean name: its category and nameKey, the row's reliable brand (null when the brand
- * field is missing, unreliable or a placeholder; judged by the caller) and its identity: the category's key specs
- * from the attributes, plus what every listing has (review C1, C2b, re-review): the condition (new when none is
- * named), the values with a currency (none), the audience (adult), whether it is a bundle, the pack count (from
- * the attributes, else the title and label, else 1; a pack count in the text replaces a schema default) and what its
- * variant label adds (labelIdentity). Null when the name has no letters or digits.
+ * The name rule's view of a listing: its checked canonical name (src/names/canonical.ts) and category, and a second
+ * guard read from the shop's own title (never from Claude's fields): condition, values with a currency, and the
+ * gender, children's audience, platform, fragrance concentration, edition, format, bundle and pack words it names,
+ * and the GPU memory it states (guardOf). Listings whose guards differ are never one product. Null without a
+ * canonical name: such a listing never name-matches.
  */
 export function nameMatch(
-  displayName: string,
+  canonical: string | null,
   category: string | null,
-  attrs: Record<string, unknown> | null,
-  reliableBrand: string | null,
-  extra: NameExtra = {},
+  texts: { title?: string; displayName?: string | null; variantLabel?: string | null; variantTitles?: string[] } = {},
 ): NameMatch | null {
-  const key = nameKey(displayName);
-  if (key === '') return null;
-  const brand = reliableBrand && compact(reliableBrand) !== '' ? compact(reliableBrand) : null;
-  const texts = [displayName, extra.variantLabel ?? '', extra.title ?? ''].join(' \n ');
-  const single = (extra.variantCount ?? 1) <= 1;
-  const label = labelIdentity(extra.variantLabel ?? null, category, attrs, single);
-  const identity = { ...identityValues(category, attrs), ...label.fill };
-  const num = (v: unknown) => (typeof v === 'number' && Number.isFinite(v) ? String(v) : null);
-  const textPacks = [...new Set(packCounts(texts, { pieces: false }).map((p) => p.n))].sort((a, b) => a - b);
-  const pack = num(attrs?.pack_count) ?? num(attrs?.count) ?? (textPacks.length > 0 ? textPacks.join(',') : '1');
-  // a pack count the title or label names replaces the schema default (a 6-pack is never one bottle)
-  if (num(attrs?.pack_count) === null && textPacks.length > 0) delete identity.pack_count;
-  const audience = [...new Set(nameTokens(texts).flatMap((t) => (Object.hasOwn(AUDIENCE, t) ? [AUDIENCE[t]] : [])))].sort();
-  const bundleText = prep(`${displayName}\n${extra.title ?? ''}`);
-  return {
-    key,
-    category: category ?? '',
-    brand,
-    brandInName: reliableBrand !== null && brand !== null && hasBrand(nameTokens(displayName), reliableBrand),
-    multi: !single,
-    identity: {
-      ...identity,
-      condition: conditions(texts).join(',') || 'new',
-      money: moneyValues(texts).join(',') || 'none',
-      audience: audience.join(',') || 'adult',
-      bundle: BUNDLE.some((re) => re.test(bundleText)) ? 'yes' : 'no',
-      pack,
-      label_specs: label.rest,
-    },
-  };
+  if (!canonical || canonical.trim() === '') return null;
+  return { canonical: canonical.trim(), category: category ?? '', guard: guardOf(texts.title ?? '', category ?? '', texts.variantTitles ?? []) };
 }
 
-/** A clean name shared by more listings than this is too generic to match by ("Gift Card"): left alone. */
+/** Each guard word class: the words it reads (a title token) and the one spelling each counts as. */
+const GUARD: Record<string, Record<string, string>> = {
+  gender: { men: 'men', mens: 'men', man: 'men', homme: 'men', women: 'women', womens: 'women', woman: 'women', ladies: 'women', femme: 'women', unisex: 'unisex' },
+  audience: {
+    kids: 'kids', kid: 'kids', children: 'kids', child: 'kids', childrens: 'kids', junior: 'junior', jr: 'junior', boys: 'boys', boy: 'boys', girls: 'girls',
+    girl: 'girls', toddler: 'toddler', toddlers: 'toddler', youth: 'youth', baby: 'baby', gs: 'gs', ps: 'ps', td: 'td',
+  },
+  platform: { switch: 'switch', xbox: 'xbox', xboxone: 'xboxone', seriesx: 'seriesx', seriess: 'seriess', ps4: 'ps4', ps5: 'ps5', pc: 'pc', playstation: 'playstation' },
+  concentration: { edt: 'edt', edp: 'edp', edc: 'edc', parfum: 'parfum', cologne: 'edc', elixir: 'elixir', extrait: 'extrait' },
+  edition: { ultimate: 'ultimate', premium: 'premium', deluxe: 'deluxe', dayone: 'dayone', collector: 'collector', collectors: 'collector', signature: 'signature', limited: 'limited', goty: 'goty' },
+  format: { hardback: 'hardback', hardcover: 'hardback', paperback: 'paperback', digital: 'digital', disc: 'disc', kindle: 'kindle' },
+  pack: { monthly: 'monthly', box: 'box', jumbo: 'jumbo', mega: 'mega', value: 'value', bulk: 'bulk', multipack: 'multipack' },
+  // the form of a medicine or supplement: 24 tablets and 24 capsules are two products (the name check reads both as filler)
+  form: {
+    tablet: 'tablet', tablets: 'tablet', caplet: 'tablet', caplets: 'tablet', capsule: 'capsule', capsules: 'capsule', softgel: 'softgel',
+    softgels: 'softgel', sachet: 'sachet', sachets: 'sachet', gummy: 'gummy', gummies: 'gummy', effervescent: 'effervescent', syrup: 'syrup',
+  },
+};
+/** Edition words that are colours or plain words elsewhere: only games read them (FC 25 Gold, DualSense Edge). */
+const GAME_EDITION: Record<string, string> = { gold: 'gold', standard: 'standard', edge: 'edge' };
+
+/** The second guard of a title (see nameMatch), as one string. */
+export function guardOf(title: string, category: string, variantTitles: string[] = []): string {
+  const plain = canonText(title)
+    .replace(/\bxbox\s+one\b/g, ' xboxone ')
+    .replace(/\bseries\s+([xs])\b/g, ' series$1 ')
+    .replace(/\bday\s+one\b/g, ' dayone ')
+    .replace(/\bgame\s+of\s+the\s+year\b/g, ' goty ');
+  const toks = nameTokens(plain);
+  const words = (map: Record<string, string>) => [...new Set(toks.flatMap((t) => (Object.hasOwn(map, t) ? [map[t]] : [])))].sort().join(',');
+  const edition = [words(GUARD.edition), category === 'gaming' ? words(GAME_EDITION) : ''].filter((x) => x !== '').join(',');
+  // a bundle: "&", "and", "with <item>", or bundleWords (+ item spaced or not, w/, incl., includes; Copilot+ PC and
+  // Pro+ are labels, incl. VAT is a price)
+  const bundle = /&|\band\b|\bwith\s+[\p{L}\p{N}]/u.test(plain.replace(PRICE_INCLUDES, ' ')) || bundleWords(plain) ? 'bundle' : '';
+  // the Windows edition: Windows 11 Home and Pro are two laptops (the name check reads the OS family from os)
+  const osEdition = [...prep(title).matchAll(/\bw(?:in(?:dows)?)?\s*(?:7|8|10|11)\s*(home|pro|h|p|s)?\b/g)].map((m) => ({ h: 'home', p: 'pro' })[m[1] as 'h' | 'p'] ?? m[1] ?? 'windows');
+  // conditions of the title and of every variant title (a group whose variants are refurbished is refurbished)
+  const conds = [...new Set([title, ...variantTitles].flatMap((t) => conditions(t)))].sort();
+  return [
+    conds.join(',') || 'new',
+    moneyValues(title).join(',') || 'none',
+    words(GUARD.gender),
+    words(GUARD.audience),
+    words(GUARD.platform),
+    words(GUARD.concentration),
+    edition,
+    words(GUARD.format),
+    bundle,
+    words(GUARD.pack),
+    gpuMemory(prep(title)).join(','),
+    [...new Set(osEdition)].sort().join(','),
+    words(GUARD.form),
+  ].join('|');
+}
+
+/** A canonical name shared by more listings than this is too generic to trust ("giftcard"): left alone. */
 const NAME_BUCKET_MAX = 200;
 
 type Named = MatchInput & { name: NameMatch };
 
-const sameValues = (a: Record<string, string>, b: Record<string, string>) =>
-  Object.keys(a).length === Object.keys(b).length && Object.entries(a).every(([k, v]) => b[k] === v);
+/** Listings that may form a name group: two or more, at one shop (each colour on its own) or more. */
+const groupable = (members: MatchInput[]) => members.length >= 2;
 
 /**
- * Listings that may form a name group: two or more shops, or two or more listings of one shop whose identity
- * specs are the same (not only agreeing where both have them: within one shop a missing storage is not a match).
- */
-function groupable(members: MatchInput[]): boolean {
-  if (distinctShops(members)) return true;
-  const named = members as Named[];
-  return named.length >= 2 && named.every((m) => sameValues(m.name.identity, named[0].name.identity));
-}
-
-const keysOf = (m: Named) => Object.keys(m.name.identity);
-const hasAllKeys = (a: Named, b: Named) => keysOf(b).every((k) => Object.hasOwn(a.name.identity, k));
-
-/**
- * Same brand (or both none, or one none when the shared name carries the other's brand), every identity spec both
- * have equal, and a listing with several variants has every identity spec the other has (review C2a: a 256GB and
- * 512GB group is not the 512GB-only listing). The names are already equal (same bucket).
- */
-function sameNamedProduct(a: Named, b: Named): boolean {
-  const ba = a.name.brand;
-  const bb = b.name.brand;
-  const brandOk = ba === bb || (ba === null && b.name.brandInName) || (bb === null && a.name.brandInName);
-  if (!brandOk || !sameIdentity(a.name.identity, b.name.identity)) return false;
-  return (!a.name.multi || hasAllKeys(a, b)) && (!b.name.multi || hasAllKeys(b, a));
-}
-
-/**
- * The clusters of one name bucket, the same whatever the order of the listings (review I1):
- * 1. Seeds are the listings with the fullest identity: no other listing's specs are a strict superset of theirs.
- *    Seeds with the same specs and brand form a core.
- * 2. Cores that agree are linked. A linked set where every pair agrees is one cluster. Otherwise each core is its
- *    own cluster, and a core that agrees with two or more of the others (ram 12GB next to a 256GB and a 512GB) is
- *    ambiguous and dropped.
- * 3. Every other (partial) listing joins the one cluster it agrees with, else none. After all clusters exist, a
- *    partial listing that disagrees with a member of its cluster or agrees with another whole cluster is dropped.
- */
-function clusterBucket(members: Named[]): Named[][] {
-  const strictSubset = (a: Named, b: Named) => keysOf(a).length < keysOf(b).length && hasAllKeys(b, a);
-  const seeds = members.filter((m) => !members.some((o) => o !== m && strictSubset(m, o)));
-  const seedSet = new Set(seeds);
-  const partials = members.filter((m) => !seedSet.has(m));
-
-  const coreMap = new Map<string, Named[]>();
-  for (const s of seeds) {
-    const sig = `${s.name.brand ?? ''}|${JSON.stringify(Object.entries(s.name.identity).sort(([x], [y]) => (x < y ? -1 : 1)))}`;
-    const core = coreMap.get(sig);
-    if (core) core.push(s);
-    else coreMap.set(sig, [s]);
-  }
-  const cores = [...coreMap.values()].sort((a, b) => Math.min(...a.map((m) => m.id)) - Math.min(...b.map((m) => m.id)));
-  const agree = (x: Named[], y: Named[]) => x.every((m) => y.every((n) => m === n || sameNamedProduct(m, n)));
-  const usable = cores.filter((c) => agree(c, c));
-
-  const clusters: Named[][] = [];
-  const seen = new Set<Named[]>();
-  for (const start of usable) {
-    if (seen.has(start)) continue;
-    const comp: Named[][] = [];
-    const stack = [start];
-    seen.add(start);
-    while (stack.length > 0) {
-      const c = stack.pop()!;
-      comp.push(c);
-      for (const d of usable) {
-        if (!seen.has(d) && agree(c, d)) {
-          seen.add(d);
-          stack.push(d);
-        }
-      }
-    }
-    if (comp.every((c) => comp.every((d) => c === d || agree(c, d)))) clusters.push(comp.flat());
-    else for (const c of comp) if (comp.filter((d) => d !== c && agree(c, d)).length < 2) clusters.push(c);
-  }
-
-  const fitsAll = (p: Named, cluster: Named[]) => cluster.every((m) => m === p || sameNamedProduct(m, p));
-  const attached = new Map<Named, number>();
-  for (const p of partials) {
-    const fits = clusters.map((c, i) => (fitsAll(p, c) ? i : -1)).filter((i) => i >= 0);
-    if (fits.length === 1) attached.set(p, fits[0]);
-  }
-  const final = clusters.map((c, i) => [...c, ...partials.filter((p) => attached.get(p) === i)]);
-  const drop = new Set<Named>();
-  for (const [p, i] of attached) {
-    if (!fitsAll(p, final[i]) || final.some((c, j) => j !== i && fitsAll(p, c))) drop.add(p);
-  }
-  return final.map((c) => c.filter((m) => !drop.has(m)));
-}
-
-/**
- * Name matching (design Part 3). Listings with an accepted clean name are bucketed by category and nameKey (no
- * pairwise work across buckets) and clustered by clusterBucket: each listing joins the one cluster it agrees with
- * (brand and identity specs with every member). A listing that agrees with two or more clusters (a phone without
- * storage next to a 256GB and a 512GB one) joins none.
+ * Name matching (design "Update 23 Oct"): listings whose canonical names are exactly equal within one category,
+ * and whose shop texts agree on condition, money and audience (the second guard), are one product.
  *
  * With GTIN and MPN groups (they keep priority, decided before this runs):
- * - a cluster without a code-matched member is a name group when it spans two or more shops, or when it is two or
- *   more listings of one shop with exactly the same identity specs (a shop that lists each colour or size as its own
- *   product: colour and size are variant options, so they become one product with those options);
- * - a cluster holding members of exactly one code group, where every named member of that code group is in the
- *   cluster (their names and specs agree), adds its other listings to that code group with method 'name';
- * - otherwise (members of two code groups, or a code group whose named listings disagree) code groups are never
- *   merged, and only the cluster's listings without a code match may form a name group of their own.
+ * - a set of equal listings without a code-matched member is a name group;
+ * - a set holding members of exactly one code group, where every named member of that code group is in the set,
+ *   adds its other listings to that code group with method 'name';
+ * - otherwise code groups are never merged, and only the set's listings without a code match may form a name group.
  */
 function matchByName(items: MatchInput[], out: Map<number, Match>): void {
+  const keyOf = (it: Named) => `${it.name.category}|${it.name.canonical}|${it.name.guard}`;
   const buckets = groupByKey(
-    items.filter((it): it is Named => !!it.name && it.name.key !== ''),
-    // one category's names only (review I2)
-    (it) => `${(it as Named).name.category}|${(it as Named).name.key}`,
+    items.filter((it): it is Named => !!it.name),
+    (it) => keyOf(it as Named),
   ) as Map<string, Named[]>;
   // the named members of each code group, to check that all of them agree before a listing joins it
   const namedOfCode = new Map<string, Set<number>>();
@@ -494,45 +338,164 @@ function matchByName(items: MatchInput[], out: Map<number, Match>): void {
       namedOfCode.set(code, set);
     }
   }
-
   const assign = (members: MatchInput[], key: string) => {
     for (const m of members) out.set(m.id, { key, method: 'name' });
   };
 
-  for (const members of buckets.values()) {
-    if (members.length < 2 || members.length > NAME_BUCKET_MAX) continue;
-    for (const cluster of clusterBucket(members)) {
-      if (cluster.length === 0) continue;
-      const free = cluster.filter((m) => !out.has(m.id));
-      if (free.length === 0) continue;
-      const codes = new Set(cluster.filter((m) => out.has(m.id)).map((m) => out.get(m.id)!.key));
-      if (codes.size === 0) {
-        if (groupable(cluster)) assign(free, `name:${Math.min(...cluster.map((m) => m.id))}`);
+  for (const cluster of buckets.values()) {
+    if (cluster.length < 2 || cluster.length > NAME_BUCKET_MAX) continue;
+    const free = cluster.filter((m) => !out.has(m.id));
+    if (free.length === 0) continue;
+    const codes = new Set(cluster.filter((m) => out.has(m.id)).map((m) => out.get(m.id)!.key));
+    if (codes.size === 0) {
+      if (groupable(cluster)) assign(free, `name:${Math.min(...cluster.map((m) => m.id))}`);
+      continue;
+    }
+    if (codes.size === 1) {
+      const code = [...codes][0];
+      const ids = new Set(cluster.map((m) => m.id));
+      if ([...namedOfCode.get(code)!].every((id) => ids.has(id))) {
+        assign(free, code);
         continue;
       }
-      if (codes.size === 1) {
-        const code = [...codes][0];
-        const ids = new Set(cluster.map((m) => m.id));
-        if ([...namedOfCode.get(code)!].every((id) => ids.has(id))) {
-          assign(free, code);
-          continue;
-        }
-      }
-      if (groupable(free)) assign(free, `name:${Math.min(...free.map((m) => m.id))}`);
     }
+    if (groupable(free)) assign(free, `name:${Math.min(...free.map((m) => m.id))}`);
   }
 }
 
 /**
- * For every item that matches an item from another shop, returns its group key and how it was matched.
- * GTIN groups first, then MPN, then the clean name, then title; an item grouped by a stronger method is not
- * regrouped (the name rule may add listings to a GTIN or MPN group, see matchByName).
+ * Judged matching (design "Update 23 Oct, afternoon"): each cluster lists site_products ids Claude judged exactly the
+ * same product, whose judgement fingerprint is current and which the veto in code did not overrule (src/match/apply.ts).
+ * With GTIN and MPN groups (they keep priority, decided before this runs), as for name groups:
+ * - a cluster without a code-matched member is a judged group (also listings of one shop: its colours);
+ * - a cluster holding members of exactly one code group, where every judged member of that code group is in the
+ *   cluster, adds its other listings to that code group with method 'judged';
+ * - otherwise code groups are never merged, and only the cluster's listings without a code match may form a group.
  */
-export function assignMatches(items: MatchInput[]): Map<number, Match> {
+function matchByJudged(items: MatchInput[], clusters: number[][], out: Map<number, Match>): void {
+  const byId = new Map(items.map((it) => [it.id, it]));
+  // two valid barcodes at two shops, or two part numbers, are two products whatever the judgement says (review C3)
+  const conflict = (x: MatchInput, y: MatchInput) => {
+    const gx = gtinKey(x.gtin);
+    const gy = gtinKey(y.gtin);
+    if (gx !== null && gy !== null && gx !== gy && x.shopId !== y.shopId) return true;
+    const px = mpnIdentity(x.mpn);
+    const py = mpnIdentity(y.mpn);
+    return px !== null && py !== null && px !== py;
+  };
+  const lists: number[][] = [];
+  /** clusters the barcodes split: their free listings join no code group (which part they belong to is unknown) */
+  const split = new Set<number[]>();
+  for (const c of clusters) {
+    const parts: number[][] = [];
+    for (const id of [...new Set(c)].filter((i) => byId.has(i)).sort((x, y) => x - y)) {
+      const home = parts.find((p) => p.every((o) => !conflict(byId.get(o)!, byId.get(id)!)));
+      if (home) home.push(id);
+      else parts.push([id]);
+    }
+    for (const p of parts) {
+      if (p.length < 2) continue;
+      lists.push(p);
+      if (parts.length > 1) split.add(p);
+    }
+  }
+  // the listings of each code group, to check a joining listing against every one of them (review G4, G5)
+  const membersOf = new Map<string, MatchInput[]>();
+  for (const [id, m] of out) {
+    const it = byId.get(id);
+    if (!it) continue;
+    const list = membersOf.get(m.key);
+    if (list) list.push(it);
+    else membersOf.set(m.key, [it]);
+  }
+  /** A listing never joins a code group whose barcode or part number differs from its own or a member's. */
+  const fits = (id: number, code: string) => {
+    const it = byId.get(id)!;
+    if (code.startsWith('gtin:')) {
+      const g = gtinKey(it.gtin);
+      if (g !== null && `gtin:${g}` !== code) return false;
+    }
+    if (code.startsWith('mpn:')) {
+      const p = mpnKey(it.mpn);
+      if (p !== null && `mpn:${p}` !== code) return false;
+    }
+    return (membersOf.get(code) ?? []).every((m) => !conflict(m, it) && !conflictSameShop(m, it));
+  };
+  /** Two barcodes or part numbers that differ, also at one shop (a code group holds one product). */
+  const conflictSameShop = (x: MatchInput, y: MatchInput) => {
+    const gx = gtinKey(x.gtin);
+    const gy = gtinKey(y.gtin);
+    return gx !== null && gy !== null && gx !== gy;
+  };
+  /**
+   * A new judged group: listings of two or more shops, or the colour or size variants one shop lists on their own
+   * (titles that differ only in colour or size words); a group of one shop's listings is otherwise no product of
+   * several sellers (review G7).
+   */
+  const assignNew = (ids: number[], key: string) => {
+    if (new Set(ids.map((id) => byId.get(id)!.shopId)).size > 1 || variantsOfOne(ids.map((id) => byId.get(id)!))) assign(ids, key);
+  };
+  const judgedOfCode = new Map<string, Set<number>>();
+  for (const c of lists) {
+    for (const id of c) {
+      const code = out.get(id)?.key;
+      if (code === undefined) continue;
+      const set = judgedOfCode.get(code) ?? new Set<number>();
+      set.add(id);
+      judgedOfCode.set(code, set);
+    }
+  }
+  const assign = (ids: number[], key: string) => {
+    for (const id of ids) out.set(id, { key, method: 'judged' });
+  };
+  for (const c of lists) {
+    const free = c.filter((id) => !out.has(id));
+    if (free.length === 0) continue;
+    const codes = new Set(c.filter((id) => out.has(id)).map((id) => out.get(id)!.key));
+    if (codes.size === 0) {
+      assignNew(free, `judged:${Math.min(...c)}`);
+      continue;
+    }
+    if (codes.size === 1 && !split.has(c)) {
+      const code = [...codes][0];
+      const ids = new Set(c);
+      if ([...judgedOfCode.get(code)!].every((id) => ids.has(id))) {
+        assign(free.filter((id) => fits(id, code)), code);
+        continue;
+      }
+    }
+    if (free.length >= 2) assignNew(free, `judged:${Math.min(...free)}`);
+  }
+}
+
+/** Size words of clothing and shoes (one product in several sizes). */
+const SIZE_TOKENS = new Set('xs xl xxl xxxl 2xl 3xl 4xl small medium large size'.split(' '));
+
+/** Whether listings are colour or size variants of one product: different titles, the same words besides colour and size. */
+function variantsOfOne(items: MatchInput[]): boolean {
+  const norm = (t: string) => t.toLowerCase().replace(/\s+/g, ' ').trim();
+  const core = (t: string) =>
+    titleTokens(t.replace(/\b(?:size|eu|uk|us)\s*\d+(?:\.\d+)?\b/gi, ' ')).filter((w) => !SIZE_TOKENS.has(w)).sort().join(' ');
+  for (let i = 0; i < items.length; i++) {
+    for (let j = i + 1; j < items.length; j++) {
+      if (norm(items[i].title) === norm(items[j].title) || core(items[i].title) !== core(items[j].title)) return false;
+    }
+  }
+  return true;
+}
+
+/**
+ * For every item that matches an item from another shop, returns its group key and how it was matched.
+ * GTIN groups first, then MPN, then the judged clusters (opts.judged), then the clean name, then title; an item
+ * grouped by a stronger method is not regrouped (the judged and name rules may add listings to a GTIN or MPN group,
+ * see matchByJudged and matchByName).
+ */
+export function assignMatches(items: MatchInput[], opts: { judged?: number[][] } = {}): Map<number, Match> {
   const out = new Map<number, Match>();
   matchByGtin(items, out);
   let rest = items.filter((it) => !out.has(it.id));
   matchByMpn(rest, out);
+  if (opts.judged && opts.judged.length > 0) matchByJudged(items, opts.judged, out);
   matchByName(items, out);
   rest = items.filter((it) => !out.has(it.id));
   matchByTitle(rest, out);

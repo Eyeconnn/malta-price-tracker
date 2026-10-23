@@ -144,3 +144,26 @@ export function packCounts(text: string, opts: { pieces?: boolean } = {}): { n: 
   if (/\btriple[\s-]?pack\b/.test(t)) out.set(3, 'triple');
   return [...out.entries()].map(([n, word]) => ({ n, word }));
 }
+
+/** A number with a unit in one unit class: storage in GB, volume in ml, weight in g, length in cm (null otherwise). */
+export function quantityClass(t: string): { cls: string; value: number } | null {
+  const m = /^(\d+(?:\.\d+)?)(\p{L}+)$/u.exec(t);
+  if (!m || !Object.hasOwn(UNIT, m[2])) return null;
+  const n = Number(m[1]);
+  const unit = UNIT[m[2]];
+  const scale: Record<string, [string, number]> = {
+    gb: ['gb', 1], tb: ['gb', 1024], ml: ['ml', 1], cl: ['ml', 10], dl: ['ml', 100], l: ['ml', 1000],
+    g: ['g', 1], kg: ['g', 1000], mm: ['cm', 0.1], cm: ['cm', 1], m: ['cm', 100], in: ['in', 1], w: ['w', 1], kw: ['w', 1000],
+  };
+  const s = scale[unit];
+  return s ? { cls: s[0], value: Math.round(n * s[1] * 100) / 100 } : { cls: unit, value: n };
+}
+
+/** A prepped text without its condition words and values with a currency (they are checked as such). */
+export function withoutConditionsAndMoney(t: string): string {
+  let s = t;
+  for (const [, re] of CONDITIONS) s = s.replace(new RegExp(re.source, 'g'), ' ');
+  s = s.replace(/\bgrade[\s-]?[abc]\b/g, ' ').replace(/\bcondition\b/g, ' ');
+  for (const re of MONEY) s = s.replace(new RegExp(re.source, 'g'), ' ');
+  return s;
+}

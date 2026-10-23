@@ -23,11 +23,17 @@ export const SCHEMA_FILE = path.resolve('config/attribute-schemas.json');
 
 /** The entry of a category that lists its identity specs (src/site/identity.ts); never an attribute key. */
 export const IDENTITY_KEY = 'identity';
+/** The entry of a category that lists its canonical name fields (src/names/canonical.ts); never an attribute key. */
+export const CANONICAL_KEY = 'canonical';
 
 type RawSpec = Omit<AttrSpec, 'values'> & { values?: string[]; list?: string };
-type RawFile = { lists?: Record<string, string[]>; categories?: Record<string, Record<string, RawSpec>> };
+type RawFile = { lists?: Record<string, string[]>; shared?: Record<string, RawSpec>; categories?: Record<string, Record<string, RawSpec>> };
 
-/** Resolves shared lists and checks the file: every site category present, every spec complete. */
+/**
+ * Resolves shared lists and checks the file: every site category present, every spec complete. The shared attributes
+ * (line, condition, audience, pack count, ...: the canonical name fields of every category) follow each category's
+ * own keys, unless the category defines the key itself.
+ */
 export function parseAttributeSchemas(raw: unknown): AttributeSchemas {
   const file = raw as RawFile;
   const lists = file.lists ?? {};
@@ -36,9 +42,10 @@ export function parseAttributeSchemas(raw: unknown): AttributeSchemas {
     const cat = file.categories?.[slug];
     if (!cat) throw new Error(`attribute schemas: no entry for category ${slug}`);
     const schema: CategorySchema = {};
-    for (const [key, spec] of Object.entries(cat)) {
-      // the category's key specs for matching across shops (src/site/identity.ts), not an attribute
-      if (key === IDENTITY_KEY) continue;
+    const shared = Object.entries(file.shared ?? {}).filter(([k]) => !Object.hasOwn(cat, k));
+    for (const [key, spec] of [...Object.entries(cat), ...shared]) {
+      // the key specs shown after a name (src/site/identity.ts) and the canonical name fields: not attributes
+      if (key === IDENTITY_KEY || key === CANONICAL_KEY) continue;
       if (!/^[a-z][a-z0-9_]*$/.test(key)) throw new Error(`attribute schemas: bad key ${slug}.${key}`);
       if (!spec.meaning) throw new Error(`attribute schemas: ${slug}.${key} has no meaning`);
       const resolved: AttrSpec = { type: spec.type, meaning: spec.meaning };
@@ -72,7 +79,7 @@ function valueSchema(spec: AttrSpec): object {
   return { type: 'string' };
 }
 
-/** JSON schema for one batch answer of a category: { items: [{ key, display_name, variant_label, attrs }] }. */
+/** JSON schema for one batch answer of a category: { items: [{ key, display_name, variant_label, canonical_name, attrs }] }. */
 export function answerJsonSchema(schema: CategorySchema): object {
   const attrProps: Record<string, object> = {};
   for (const [key, spec] of Object.entries(schema)) {
@@ -89,9 +96,10 @@ export function answerJsonSchema(schema: CategorySchema): object {
             key: { type: 'string' },
             display_name: { type: 'string' },
             variant_label: { type: ['string', 'null'] },
+            canonical_name: { type: ['string', 'null'] },
             attrs: { type: 'object', properties: attrProps, additionalProperties: false },
           },
-          required: ['key', 'display_name', 'variant_label', 'attrs'],
+          required: ['key', 'display_name', 'variant_label', 'canonical_name', 'attrs'],
           additionalProperties: false,
         },
       },

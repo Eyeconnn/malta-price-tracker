@@ -1,6 +1,8 @@
-// pnpm site-build [--shop slug] [--skip-if-built-hours 20] [--name-matching]
+// pnpm site-build [--shop slug] [--skip-if-built-hours 20] [--name-matching] [--judged-matching]
 // --name-matching (or NAME_MATCHING=on): also group listings by clean name. Off by default (owner decision 23 Oct:
 // name matching waits for canonical names), so products are grouped by barcode, model number and admin confirmation.
+// --judged-matching (or JUDGED_MATCHING=on): also group the listings Claude judged the same product (pnpm
+// judge-matches, match_judgements) while each judgement is current and the veto in code agrees. Off by default.
 // Builds the public site's tables (site_products, verdicts history, canonical ids, shop_ratings) from the scraped prices.
 // --skip-if-built-hours N: do nothing when a full build (no --shop) ran within the last N hours and no scrape
 // finished or started since it began (backup cron); a build that ran before the cloud scrapes finished is redone.
@@ -24,6 +26,7 @@ const { values } = parseArgs({
     shop: { type: 'string' },
     'skip-if-built-hours': { type: 'string' },
     'name-matching': { type: 'boolean' },
+    'judged-matching': { type: 'boolean' },
   },
 });
 
@@ -50,8 +53,9 @@ async function build(sql: postgres.Sql, started: number) {
 
   const settings = await loadSettings(sql);
   const nameMatching = values['name-matching'] === true || /^(1|on|true|yes)$/i.test(process.env.NAME_MATCHING ?? '');
-  console.log(`site-build: name matching ${nameMatching ? 'on' : 'off'}`);
-  const built = await buildSiteProducts(sql, settings, now, { shop: values.shop, log: (line) => console.log(line), nameMatching });
+  const judgedMatching = values['judged-matching'] === true || /^(1|on|true|yes)$/i.test(process.env.JUDGED_MATCHING ?? '');
+  console.log(`site-build: name matching ${nameMatching ? 'on' : 'off'}, judged matching ${judgedMatching ? 'on' : 'off'}`);
+  const built = await buildSiteProducts(sql, settings, now, { shop: values.shop, log: (line) => console.log(line), nameMatching, judgedMatching });
   const rated = await buildShopRatings(sql, settings, now);
   // only a full build counts for --skip-if-built-hours; a failure above never gets here
   if (values.shop === undefined) await markFullBuild(sql, now);

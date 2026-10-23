@@ -81,7 +81,19 @@ Results are copied into a new `site_products.display_name` column at site-build 
 
 The aim of the clean names: search works by general product, not by product per shop. When the same product is sold by several shops, a search result leads to one product page showing the product and every seller's price.
 
-### Update 23 Oct: match by canonical normalised names (owner decision)
+### Update 23 Oct, afternoon: Claude judges candidate groups side by side (owner decision, supersedes canonical-name matching)
+
+Four review rounds showed that building identical canonical names per listing both merges different products and matches very few real ones (1 of 12 realistic true pairs). The owner chose side-by-side judging:
+
+1. **Candidates.** Groups of listings at different shops (and colour/size listings at one shop) that are likely the same product: the existing title-similarity groups, plus listings sharing a model code, in the same or a neighbouring category. Bounded size (at most 12 listings per candidate group; larger groups are split by brand and model code first).
+2. **Judging.** `pnpm judge-matches` (Claude Code in scripting mode on the owner's PC, the same billing-safe runner, caps and circuit breaker as the name normaliser) sends each candidate group with every listing's shop title, variant titles, brand, category path, codes, clean name, attributes and current price. Claude answers which listings are exactly the same product, listing every difference it sees (storage, size of the product, edition, platform, pack or piece count, condition, region or model code, concentration, audience, bundle, version, material). "Same product" means a shopper would get the identical item; colour and clothing size are variant options, not differences.
+3. **Veto in code.** A "same" answer is overruled when the listings' titles or data disagree on any number with a unit, model code (normalised), condition, money value, pack or piece count, audience, platform, edition, format, bundle words, Windows or OS version, or region code. The veto reuses the existing guard helpers.
+4. **Storage and use.** Judgements are stored per candidate group with the member listings, a fingerprint of their titles, the model and the time; they are redone only when a member's title changes or a new listing joins the candidate group. Site-build groups listings judged the same and not vetoed as match method `judged`, trusted like barcode matches. GTIN/MPN groups keep priority and are never merged with each other.
+5. **Pilot first.** A dry-run pilot of a few hundred candidate groups writes a report (each group, Claude's answer and differences, vetoes, cost) for the owner before anything is saved or switched on.
+
+The canonical-name machinery below stays in the code only where it helps (clean display names, the guard used by the veto); canonical-name matching is not switched on.
+
+### Update 23 Oct: match by canonical normalised names (owner decision, superseded above)
 
 Review rounds showed that matching on free-form clean names with word rules both merges different products and misses real matches (shops word the same product differently). The owner chose to match "using normalised product names". So:
 

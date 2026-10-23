@@ -11,7 +11,14 @@ export type StoredResult = {
   variantLabel: string | null;
   attrs: Record<string, unknown>;
   reason: string | null;
+  /** the checked canonical name (src/names/canonical.ts), null without one */
+  canonicalName?: string | null;
+  /** why the fields gave no canonical name */
+  canonicalReason?: string | null;
 };
+
+/** One canonical name result of --backfill-canonical: only the canonical columns of a stored name. */
+export type CanonicalResult = { shopId: number; groupKey: string; canonicalName: string | null; reason: string | null };
 
 export type RunTotals = {
   batches: number;
@@ -47,26 +54,73 @@ export async function finishRun(sql: postgres.Sql, runId: number, t: RunTotals):
     where id = ${runId}`;
 }
 
-/** Upserts one batch of results into product_names. */
+/** Whether product_names has the canonical columns yet (migration 012), asked once per connection. */
+const hasCanonical = new WeakMap<postgres.Sql, Promise<boolean>>();
+export function hasCanonicalColumns(sql: postgres.Sql): Promise<boolean> {
+  let p = hasCanonical.get(sql);
+  if (!p) {
+    p = sql`
+      select count(*)::int as n from information_schema.columns
+      where table_schema = current_schema() and table_name = 'product_names'
+        and column_name in ('canonical_name', 'canonical_status', 'canonical_reason')`.then((r) => r[0].n === 3);
+    hasCanonical.set(sql, p);
+  }
+  return p;
+}
+
+/** canonical_status of a result: ok with a name, rejected when the name is ok but gave none, null when rejected. */
+function canonicalStatus(r: StoredResult): 'ok' | 'rejected' | null {
+  if (r.status !== 'ok') return null;
+  return r.canonicalName ? 'ok' : 'rejected';
+}
+
+/**
+ * Upserts one batch of results into product_names, with the canonical columns in the same statement once migration
+ * 012 has run (canonical_status: see canonicalStatus).
+ */
 export async function saveResults(sql: postgres.Sql, runId: number, model: string, results: StoredResult[]): Promise<void> {
   if (results.length === 0) return;
+  const withCanonical = await hasCanonicalColumns(sql);
   const col = <T>(f: (r: StoredResult) => T) => results.map(f);
+  const ok = (r: StoredResult) => r.status === 'ok';
   await sql`
     insert into product_names (shop_id, group_key, source_title, title_hash, category, display_name, variant_label, attrs,
-      status, reject_reason, model, run_id, normalised_at)
+      status, reject_reason, model, run_id, normalised_at
+      ${withCanonical ? sql`, canonical_name, canonical_status, canonical_reason` : sql``})
     select t.shop_id, t.group_key, t.source_title, t.title_hash, t.category, t.display_name, t.variant_label, t.attrs::jsonb,
       t.status, t.reject_reason, ${model}, ${runId}, now()
+      ${withCanonical ? sql`, t.canonical_name, t.canonical_status, t.canonical_reason` : sql``}
     from unnest(
       ${col((r) => r.group.shopId)}::int[], ${col((r) => r.group.groupKey)}::text[], ${col((r) => r.group.title)}::text[],
       ${col((r) => titleHash(r.group.title, r.group.variantTitles))}::text[], ${col((r) => r.category)}::text[],
       ${col((r) => r.displayName)}::text[], ${col((r) => r.variantLabel)}::text[], ${col((r) => JSON.stringify(r.attrs))}::text[],
-      ${col((r) => r.status)}::text[], ${col((r) => r.reason)}::text[]
-    ) as t(shop_id, group_key, source_title, title_hash, category, display_name, variant_label, attrs, status, reject_reason)
+      ${col((r) => r.status)}::text[], ${col((r) => r.reason)}::text[],
+      ${col((r) => (ok(r) ? (r.canonicalName ?? null) : null))}::text[], ${col(canonicalStatus)}::text[],
+      ${col((r) => (canonicalStatus(r) === 'rejected' ? (r.canonicalReason ?? null) : null))}::text[]
+    ) as t(shop_id, group_key, source_title, title_hash, category, display_name, variant_label, attrs, status, reject_reason,
+      canonical_name, canonical_status, canonical_reason)
     on conflict (shop_id, group_key) do update set
       source_title = excluded.source_title, title_hash = excluded.title_hash, category = excluded.category,
       display_name = excluded.display_name, variant_label = excluded.variant_label, attrs = excluded.attrs,
       status = excluded.status, reject_reason = excluded.reject_reason, model = excluded.model, run_id = excluded.run_id,
-      normalised_at = excluded.normalised_at`;
+      normalised_at = excluded.normalised_at
+      ${withCanonical ? sql`, canonical_name = excluded.canonical_name, canonical_status = excluded.canonical_status, canonical_reason = excluded.canonical_reason` : sql``}`;
+}
+
+/**
+ * --backfill-canonical: writes only the canonical columns of names stored as ok (one statement); the display name,
+ * label, attrs and status stay as they are, so a canonical name that fails never retires an accepted name.
+ */
+export async function saveCanonical(sql: postgres.Sql, rows: CanonicalResult[]): Promise<number> {
+  if (rows.length === 0) return 0;
+  const res = await sql`
+    update product_names pn set canonical_name = t.canonical_name,
+      canonical_status = case when t.canonical_name is null then 'rejected' else 'ok' end,
+      canonical_reason = case when t.canonical_name is null then t.reason else null end
+    from unnest(${rows.map((r) => r.shopId)}::int[], ${rows.map((r) => r.groupKey)}::text[], ${rows.map((r) => r.canonicalName)}::text[],
+      ${rows.map((r) => r.reason)}::text[]) as t(shop_id, group_key, canonical_name, reason)
+    where pn.shop_id = t.shop_id and pn.group_key = t.group_key and pn.status = 'ok'`;
+  return res.count;
 }
 
 /** The names stored as ok (for --recheck-stored). */
@@ -83,6 +137,7 @@ export async function markRejected(sql: postgres.Sql, rows: { shopId: number; gr
   const res = await sql`
     update product_names pn set status = 'rejected', reject_reason = 'recheck: ' || t.reason, display_name = null,
       variant_label = null, attrs = '{}'::jsonb, normalised_at = now()
+      ${(await hasCanonicalColumns(sql)) ? sql`, canonical_name = null, canonical_status = null, canonical_reason = null` : sql``}
     from unnest(${rows.map((r) => r.shopId)}::int[], ${rows.map((r) => r.groupKey)}::text[], ${rows.map((r) => r.reason)}::text[])
       as t(shop_id, group_key, reason)
     where pn.shop_id = t.shop_id and pn.group_key = t.group_key and pn.status = 'ok'`;

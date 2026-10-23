@@ -31,6 +31,17 @@ describe('changedGroups', () => {
     const fresh = group({ groupKey: 'new', title: 'C' });
     expect(changedGroups([same, changed, fresh]).map((g) => g.groupKey)).toEqual(['changed', 'new']);
   });
+
+  it('--backfill-canonical: only names stored ok and never tried for a canonical name; tried and rejected ones with --retry-rejected', () => {
+    const lacking = group({ groupKey: 'lacking', title: 'A', storedHash: titleHash('A', []), storedStatus: 'ok', storedCanonicalStatus: null });
+    const has = group({ groupKey: 'has', title: 'B', storedHash: titleHash('B', []), storedStatus: 'ok', storedCanonicalStatus: 'ok' });
+    const tried = group({ groupKey: 'tried', title: 'E', storedHash: titleHash('E', []), storedStatus: 'ok', storedCanonicalStatus: 'rejected' });
+    const rejected = group({ groupKey: 'rejected', title: 'C', storedHash: titleHash('C', []), storedStatus: 'rejected', storedCanonicalStatus: null });
+    const fresh = group({ groupKey: 'new', title: 'D' });
+    const all = [lacking, has, tried, rejected, fresh];
+    expect(changedGroups(all, { backfillCanonical: true }).map((g) => g.groupKey)).toEqual(['lacking']);
+    expect(changedGroups(all, { backfillCanonical: true, retryRejected: true }).map((g) => g.groupKey)).toEqual(['lacking', 'tried']);
+  });
 });
 
 describe('pilotSample', () => {
