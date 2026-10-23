@@ -261,6 +261,63 @@ select id, started_at, finished_at, batches, items, accepted, rejected, failed_b
 from name_runs order by id desc limit 10;
 ```
 
+## Product matching by Claude (pilot)
+
+`pnpm judge-matches` decides which listings of different shops (and the colours one shop lists on their own) are
+exactly the same product, so a product page can show every seller's price (design "Update 23 Oct, afternoon" in
+`docs/superpowers/specs/2026-10-22-names-and-attributes-design.md`).
+
+1. **Candidates** (`src/match/candidates.ts`): fresh listings of visible shops that are likely one product: the
+   title-similarity groups, plus listings sharing a model code (4 or more characters, or a 5 to 8 digit set number) in
+   the same or a neighbouring category, never across two brands. At most 12 listings per group (larger ones are split
+   by brand, model code and title); groups already matched by one barcode or part number are left out.
+2. **Judging** (`src/match/judge.ts`): one `claude -p` call holds up to 15 groups (120 listings), with each listing's
+   shop, title, variant titles, brand, shop category, codes, clean name, attributes and price. Claude answers which
+   listings are exactly the same product and lists every difference between the others. Same runner and safety as
+   the name normaliser: the owner's own login, never an API key or `--bare`, tools off, no MCP servers, no settings,
+   allowlisted environment, shop text passed as data.
+3. **Veto** (`src/match/veto.ts`): a "same" is overruled in code when the listings disagree on a number with a unit,
+   a model code, model words (Pro, Plus, Ultra), condition, money, pack or piece count (variant titles included),
+   audience or gender (also from the shop's category path), platform, edition, format, bundle words, OS or Windows
+   version and edition, storage type, SIM, region (plug, version, voltage), material, size words, the variety of a
+   drink, food or toiletry, the brand or the category.
+4. **Storage**: `match_judgements` (one row per candidate group: members, fingerprint of their titles and variant
+   titles, verdict, model, time) and `judge_runs` (migration 013). A group is judged again only when a member's title
+   or variant titles change or another listing joins it.
+5. **Site build**: with `pnpm site-build --judged-matching` (or `JUDGED_MATCHING=on`) the listings of a current,
+   not vetoed judgement form a product with match method `judged`, trusted on the site like barcode matches. Barcode
+   and part-number groups keep priority and are never merged with each other. Off by default.
+
+Pilot first (a dry run writes only the report, `out/judge/<run>-<model>.html` and `.csv`: each group's listings with
+shop, title and price, Claude's clusters and differences, the vetoes, tokens and cost per batch and per 100 groups):
+
+```bash
+pnpm judge-matches --model sonnet --effort low --pilot --limit 300 --dry-run --max-cost 10   # 300 groups spread over categories
+pnpm judge-matches --model haiku --effort low --pilot --limit 300 --dry-run --max-cost 5     # the same groups (same seed), cheaper model
+```
+
+Full run, after the owner approves the pilot and `pnpm migrate` has added migration 013 (writes need it and
+`DATABASE_URL`; reads use `DASHBOARD_DATABASE_URL` and work before it). A run that writes needs `--pilot` or
+`--max-batches`, so cap it and repeat until nothing is left:
+
+```bash
+pnpm judge-matches --model sonnet --effort low --max-batches 200 --max-cost 20 --parallel 3
+pnpm site-build --judged-matching      # or JUDGED_MATCHING=on in the site-build workflow once the owner switches it on
+```
+
+Options: `--model` (required), `--effort`, `--pilot` with `--limit` (default 300) and `--seed`, `--category <slug>`
+(repeatable), `--batch-size` (groups per call, default 15), `--max-listings` (listings per call, default 120),
+`--parallel` (default 2, max 6), `--max-batches`, `--max-cost <usd>` (no new batch once the reported cost reaches it),
+`--timeout` (seconds per call, default 600), `--dry-run`, `--save-raw` (keeps each batch's raw JSON). A run stops
+after 5 failed batches in a row and at once on a login or usage-limit error; Ctrl+C stops after the running batches.
+Progress:
+
+```sql
+select count(*), count(*) filter (where jsonb_array_length(verdict -> 'final') > 0) as with_match from match_judgements;
+select id, started_at, finished_at, groups, judged, rejected, matched, vetoes, failed_batches, reported_cost_usd
+from judge_runs order by id desc limit 10;
+```
+
 ## Public site (web/)
 
 The public Black Friday Guide: a React app plus a Cloudflare Worker (`web/worker`, Worker name `bf-guide`) that serves the app and a JSON API. Shoppers check whether a Black Friday "was" price is real against the EU rule (lowest price of the previous 30 days). Verdicts, shop ratings and cross-shop matches are built from this repo's price history by the nightly `site-build` job; the Worker only reads them. The "How we check" page explains the rules to visitors and shows the live thresholds from `GET /api/thresholds`.
