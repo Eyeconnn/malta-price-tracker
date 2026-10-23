@@ -118,3 +118,10 @@ describe('spreadSample', () => {
     expect(spreadSample(groups, 4, 'pilot')).toEqual(s);
   });
 });
+
+describe('candidateCodes: feature codes are not model codes', () => {
+  it('skips 5-in-1, IP68, USB3, Wi-Fi 6 and DDR5', () => {
+    expect(candidateCodes('Shark SpeedStyle Pro 5-in-1 Hair Dryer HD752EU')).toEqual(['hd752eu']);
+    expect(candidateCodes('Rugged phone IP68 USB3 WiFi6 DDR5 LPDDR5X PCIe4 HDMI2 Cat6 Gen4')).toEqual([]);
+  });
+});

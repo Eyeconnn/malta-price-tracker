@@ -43,9 +43,12 @@ const MIN_CODE = 4;
 /** A code shared by more listings than this is a family or chip name, not one product. */
 const MAX_CODE_SHARE = 40;
 
+/** Feature and standard codes many products share (5-in-1, IP68, USB3, Wi-Fi 6, DDR5, PCIe 4, HDMI 2.1, Cat6, Gen4). */
+const FEATURE_CODE = /^(?:\d+in\d+|ip\d+[a-z]?|usb\d*[a-z]?\d*|wifi\d+[a-z]?|ddr\d+[a-z]?|lpddr\d+[a-z]?|gddr\d+[a-z]?|pcie\d+|hdmi\d+|cat\d+[a-z]?|gen\d+|bt\d+|qi\d+|x\d{2,3})$/;
+
 /** Model codes (src/match/veto.ts) of 4 or more characters, and set or article numbers of 5 to 8 digits. */
 export function candidateCodes(title: string): string[] {
-  const out = new Set(modelCodes(title).filter((c) => c.length >= MIN_CODE));
+  const out = new Set(modelCodes(title).filter((c) => c.length >= MIN_CODE && !FEATURE_CODE.test(c)));
   for (const t of canonText(title).split(/[^\p{L}\p{N}]+/u)) if (/^\d{5,8}$/.test(t)) out.add(t);
   return [...out].sort();
 }
