@@ -1,19 +1,20 @@
 // The merge pass of pnpm judge-matches (live check 23 Oct: one iPhone 17 Pro 512GB became two judged products and a
 // title group, because its candidate group was judged in chunks). After judging, the clusters of different
-// judgements that look like one product (same category and brand, equal identity numbers and model words, title
-// words in common, and no veto between their shown listings) are judged again together, one listing per cluster.
+// judgements that look like one product (same category and brand, equal identity numbers and model words, most title
+// words in common, not both at one and the same shop only, and no veto between their shown listings) are judged
+// again together, one listing per cluster.
 // Two clusters are merged only when Claude says same and the veto passes for every cross pair of their listings (the
 // shown ones and all others). The result is stored as a judgement like the others (key "m...", fingerprint over all
 // members): it is newer, so the site build takes its listings from it; the chunk judgements stay for their other
 // listings. Pure: the CLI reads and writes.
-import { canonText } from '../names/canon-text.js';
+import { resolveJudgements } from './apply.js';
 import { titleTokens } from '../site/matching.js';
 import { MAX_GROUP, toCandidate, type Candidate, type Listing } from './candidates.js';
 import { candidateKey, memberRef } from './fingerprint.js';
 import { readAnswers, type JudgeBatch } from './judge.js';
 import { listingRows, storedMembers, vetoListing, type Settled } from './settle.js';
 import type { JudgementRow, StoredJudgement } from './store.js';
-import { applyVeto, identityOf, vetoReasons } from './veto.js';
+import { applyVeto, colourWords, identityOf, vetoReasons } from './veto.js';
 
 /** A judged cluster (or a listing a judgement left alone) with the key of its judgement (Resolved.groups). */
 export type JudgedGroup = { key: string; ids: number[] };
@@ -40,7 +41,7 @@ function brandOf(members: Listing[], rep: Listing): string {
   return brands.length > 0 ? mostCommon(brands) : compact(rep.title.split(/\s+/)[0]);
 }
 
-type Signature = { category: string; brand: string; numbers: string; models: string; words: Set<string> };
+type Signature = { category: string; brand: string; numbers: string; models: string; words: Set<string>; shops: Set<number> };
 
 /** What a cluster must share with another to be a merge candidate; null without an identity number. */
 function signature(c: Cluster): Signature | null {
@@ -50,18 +51,35 @@ function signature(c: Cluster): Signature | null {
   const id = identityOf(rep.title, category);
   if (id.numbers.length === 0) return null;
   const brandWords = new Set(titleTokens(c.members.map((m) => m.brand ?? '').join(' ')).concat(brand));
-  const words = new Set(c.members.flatMap((m) => titleTokens(m.title)).filter((w) => !/\d/.test(w) && !brandWords.has(w)));
-  return { category, brand, numbers: id.numbers.join(','), models: id.models.join(','), words };
+  const colours = new Set(colourWords(rep.title));
+  const words = new Set(titleTokens(rep.title).filter((w) => !/\d/.test(w) && !brandWords.has(w) && !colours.has(w)));
+  return { category, brand, numbers: id.numbers.join(','), models: id.models.join(','), words, shops: new Set(c.members.map((m) => m.shopId)) };
 }
 
-const overlap = (a: Set<string>, b: Set<string>) => [...a].some((w) => b.has(w));
+/**
+ * The title words of the two shown listings (colours, brand and numbers left out) are mostly shared: at least half
+ * of all their words (Gundam HG kits or paints of one range share "model kit" or "game color", not their names).
+ */
+function overlap(a: Set<string>, b: Set<string>): boolean {
+  const both = [...a].filter((w) => b.has(w)).length;
+  return both > 0 && both >= MIN_WORD_SHARE * (a.size + b.size - both);
+}
+const MIN_WORD_SHARE = 0.5;
+/** Buckets of at least this many clusters leave out the words most of their clusters share. */
+const COMMON_MIN_BUCKET = 4;
+
+/** Two clusters that hold listings of one shop only, the same shop: no product of several sellers to make. */
+const oneShop = (a: Signature, b: Signature) => a.shops.size === 1 && b.shops.size === 1 && [...a.shops][0] === [...b.shops][0];
 
 export type MergeStats = {
   /** clusters (and listings left alone) of current judgements with an identity number */
   clusters: number;
   /** pairs of clusters of different judgements with the same category, brand and identity numbers */
   pairs: number;
-  /** of those, pairs with the same model words, title words in common and no veto between their shown listings */
+  /**
+   * of those, pairs with the same model words, not both at one and the same shop only, most title words in common and
+   * no veto between their shown listings
+   */
   candidatePairs: number;
 };
 
@@ -84,40 +102,55 @@ export function mergeCandidates(groups: JudgedGroup[], byId: Map<number, Listing
     const k = `${c.sig.category}|${c.sig.brand}|${c.sig.numbers}`;
     buckets.set(k, [...(buckets.get(k) ?? []), i]);
   });
-  const parent = clusters.map((_, i) => i);
-  const find = (i: number): number => (parent[i] === i ? i : (parent[i] = find(parent[i])));
+  // units: the clusters of one merge judgement stay together (a new merge covers all of it, so it never falls apart
+  // into its chunks and back again); every other cluster is a unit of its own
+  const unitOf = clusters.map((c, i) => (isMergeKey(c.source) ? c.source : `${c.source}#${i}`));
+  const unitClusters = new Map<string, number[]>();
+  clusters.forEach((_, i) => unitClusters.set(unitOf[i], [...(unitClusters.get(unitOf[i]) ?? []), i]));
+  const links = new Map<string, Set<string>>();
+  const link = (u: string, v: string) => links.set(u, (links.get(u) ?? new Set()).add(v));
   const reps = clusters.map((c) => vetoListing(repOf(c.members)));
   for (const ids of buckets.values()) {
+    // words most clusters of a larger bucket share (Bandai Model Kit, Game Air) say nothing about which one it is
+    const df = new Map<string, number>();
+    for (const i of ids) for (const w of clusters[i].sig.words) df.set(w, (df.get(w) ?? 0) + 1);
+    const common = (w: string) => ids.length >= COMMON_MIN_BUCKET && df.get(w)! > ids.length / 2;
+    const own = ids.map((i) => new Set([...clusters[i].sig.words].filter((w) => !common(w))));
     for (let x = 0; x < ids.length; x++) {
       for (let y = x + 1; y < ids.length; y++) {
         const a = clusters[ids[x]];
         const b = clusters[ids[y]];
         if (a.source === b.source) continue;
         stats.pairs++;
-        if (a.sig.models !== b.sig.models || !overlap(a.sig.words, b.sig.words)) continue;
+        // the distinctive words when both have some, else all words (two iPhone 17 Pro titles may have none left)
+        const [wa, wb] = own[x].size > 0 && own[y].size > 0 ? [own[x], own[y]] : [a.sig.words, b.sig.words];
+        if (a.sig.models !== b.sig.models || oneShop(a.sig, b.sig) || !overlap(wa, wb)) continue;
         if (vetoReasons(reps[ids[x]], reps[ids[y]]).length > 0) continue;
         stats.candidatePairs++;
-        const ra = find(ids[x]);
-        const rb = find(ids[y]);
-        if (ra !== rb) parent[Math.max(ra, rb)] = Math.min(ra, rb);
+        link(unitOf[ids[x]], unitOf[ids[y]]);
+        link(unitOf[ids[y]], unitOf[ids[x]]);
       }
     }
   }
-  const comps = new Map<number, Cluster[]>();
-  clusters.forEach((c, i) => {
-    const r = find(i);
-    comps.set(r, [...(comps.get(r) ?? []), c]);
-  });
+  // groups around a seed: the unit with most links, then its linked units while there is room (every unit of a
+  // group is linked to the seed, so a chain of loosely similar names does not become one group)
+  const size = (u: string) => unitClusters.get(u)!.length;
+  const order = (u: string, v: string) => links.get(v)!.size - links.get(u)!.size || size(v) - size(u) || (u < v ? -1 : 1);
+  const used = new Set<string>();
   const candidates: Candidate[] = [];
-  for (const comp of comps.values()) {
-    if (comp.length < 2) continue;
-    const sorted = [...comp].sort((a, b) => canonText(repOf(a.members).title).localeCompare(canonText(repOf(b.members).title)) || repOf(a.members).id - repOf(b.members).id);
-    const parts = Math.ceil(sorted.length / MAX_GROUP);
-    const size = Math.ceil(sorted.length / parts);
-    for (let i = 0; i < sorted.length; i += size) {
-      const chunk = sorted.slice(i, i + size);
-      if (chunk.length >= 2 && new Set(chunk.map((c) => c.source)).size >= 2) candidates.push(mergeCandidateOf(chunk));
+  for (const seed of [...links.keys()].sort(order)) {
+    if (used.has(seed) || size(seed) > MAX_GROUP) continue;
+    const group = [seed];
+    let n = size(seed);
+    for (const u of [...links.get(seed)!].sort(order)) {
+      if (used.has(u) || n + size(u) > MAX_GROUP) continue;
+      group.push(u);
+      n += size(u);
     }
+    if (group.length < 2) continue;
+    for (const u of group) used.add(u);
+    const chosen = group.flatMap((u) => unitClusters.get(u)!).sort((x, y) => x - y).map((i) => clusters[i]);
+    candidates.push(mergeCandidateOf(chosen));
   }
   return { candidates: candidates.sort((a, b) => (a.key < b.key ? -1 : 1)), stats };
 }
@@ -209,4 +242,31 @@ export function overlayJudgements(stored: StoredJudgement[], rows: JudgementRow[
   const kept = stored.filter((j) => !keys.has(j.key) && !((!merge || isMergeKey(j.key)) && refsOf(j).some((r) => refs.has(r))));
   let id = stored.reduce((n, j) => Math.max(n, j.id), 0);
   return [...kept, ...rows.map((r) => ({ ...r, id: ++id, judgedAt: at }))];
+}
+
+/** Whether some listing of a candidate group has the text in its title (case and spacing ignored). */
+export function hasTitle(c: Candidate, text: string): boolean {
+  const norm = (s: string) => s.toLowerCase().replace(/\s+/g, ' ').trim();
+  const t = norm(text);
+  return t === '' || c.members.some((m) => norm(m.title).includes(t));
+}
+
+export type MergePlan = { candidates: Candidate[]; todo: Candidate[]; stats: MergeStats };
+
+/**
+ * The merge pass's groups for today's listings: the stored judgements (with this run's saved ones overlaid, see
+ * overlayJudgements) resolved as the site build does, their clusters paired (mergeCandidates), and those whose stored
+ * judgement is current left out (storedFingerprints by key). Filters: categories (none: all) and a title text.
+ */
+export function planMerge(
+  judgements: StoredJudgement[],
+  listings: Listing[],
+  opts: { storedFingerprints: Map<string, string>; categories?: string[]; title?: string },
+): MergePlan {
+  const current = new Map(listings.map((l) => [memberRef(l), l]));
+  const { groups } = resolveJudgements(judgements, current);
+  const { candidates: all, stats } = mergeCandidates(groups, new Map(listings.map((l) => [l.id, l])));
+  const cats = opts.categories ?? [];
+  const candidates = all.filter((c) => (cats.length === 0 || cats.includes(c.category)) && (opts.title === undefined || hasTitle(c, opts.title)));
+  return { candidates, todo: candidates.filter((c) => opts.storedFingerprints.get(c.key) !== c.fingerprint), stats };
 }

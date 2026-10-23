@@ -137,7 +137,7 @@ describe('splitting by model family', () => {
     const fam: Listing[] = [];
     for (const s of shops) for (const c of ['Silver', 'Deep Blue', 'Cosmic Orange']) fam.push(L(s, `Apple iPhone 17 Pro 512GB ${c}`, { brand: 'Apple' }));
     // a second Silver listing at telecom (the same shop and colour listed twice)
-    fam.push(L('telecom', 'Apple iPhone 17 Pro 512GB Silver eSIM', { brand: 'Apple' }));
+    fam.push(L('telecom', 'Apple iPhone 17 Pro 512GB - Silver', { brand: 'Apple' }));
     // a case at one shop shares the family words but the veto keeps it off the phone
     fam.push(L('epic', 'Apple iPhone 17 Pro 512GB Silver Case', { brand: 'Apple', priceCents: 2999 }));
     const cands = buildCandidates(fam);
@@ -147,7 +147,7 @@ describe('splitting by model family', () => {
     expect(shown.length).toBeLessThanOrEqual(MAX_GROUP);
     // every shop and every colour is shown to Claude
     expect(new Set(shown.map((l) => l.shopSlug)).size).toBe(5);
-    expect(new Set(shown.map((l) => l.title.replace(/.*512GB /, '').replace(' eSIM', '')))).toEqual(new Set(['Silver', 'Deep Blue', 'Cosmic Orange']));
+    expect(new Set(shown.map((l) => l.title.replace(/.*512GB (- )?/, '')))).toEqual(new Set(['Silver', 'Deep Blue', 'Cosmic Orange']));
     // the message holds only the shown listings
     const batch = makeJudgeBatches([big])[0];
     expect(judgeMessage(batch).split('\n')[1].match(/"title"/g)).toHaveLength(shown.length);
@@ -159,6 +159,24 @@ describe('splitting by model family', () => {
     const m = products(firstPass(fam, sameModel), fam);
     expect(productsOf(m, phones).size).toBe(1);
     expect(m.get(caseL.id)?.method).not.toBe('judged');
+  });
+
+  it('never attaches a listing whose title differs in more than colour, and attaches nothing where colours name products', () => {
+    const shops = ['atoz', 'intercomp', 'soundvision', 'telecom', 'epic'];
+    const fam: Listing[] = [];
+    for (const s of shops) for (const c of ['Silver', 'Deep Blue', 'Cosmic Orange']) fam.push(L(s, `Apple iPhone 17 Pro 512GB ${c}`, { brand: 'Apple' }));
+    const esim = L('telecom', 'Apple iPhone 17 Pro 512GB Silver eSIM', { brand: 'Apple' });
+    const big = buildCandidates([...fam, esim]).find((c) => c.reps)!;
+    expect(big.members.some((m) => m.id === esim.id)).toBe(false);
+
+    // 14 paints of one range at two shops: each colour is its own product
+    const paints: Listing[] = [];
+    for (const c of ['Evil Red', 'Bloody Red', 'Dead White', 'Bone White', 'Electric Blue', 'Magic Blue', 'Sun Yellow']) {
+      for (const s of ['gamebreaker', 'gamesplus']) paints.push(L(s, `Vallejo Game Color ${c} 18ml`, { brand: 'Vallejo', category: 'gaming', priceCents: 350 }));
+    }
+    const cands = buildCandidates(paints);
+    expect(cands.some((c) => c.reps)).toBe(false);
+    expect(cands.every((c) => c.members.length <= MAX_GROUP)).toBe(true);
   });
 });
 
@@ -206,6 +224,22 @@ describe('merge pass', () => {
     expect(after.candidates).toHaveLength(1);
     expect(productsOf(products(after.stored, p), p).size).toBe(before);
     expect(mergePass(after.stored, p, () => 'same', 3).candidates).toHaveLength(0);
+  });
+
+  it('asks again with every cluster of a merge judgement when a new listing pairs with one of them', () => {
+    const { p, stored } = liveSplit();
+    const after = mergePass(stored, p, (l) => String(l.id));
+    // a new shop lists the phone; its own candidate group judged it apart from a phone case
+    const x = L('klikk', 'Apple iPhone 17 Pro 512GB Cosmic Orange', { brand: 'Apple' });
+    const caseX = L('klikk', 'Apple iPhone 17 Pro 512GB Cosmic Orange Case', { brand: 'Apple', priceCents: 2999 });
+    const bt = makeJudgeBatches([buildCandidates([x, caseX])[0]])[0];
+    const list = [...p, x, caseX];
+    const stored2 = overlayJudgements(after.stored, settleBatch(bt, claude(bt, (l) => String(l.id)), ctx).judgements, new Date(3), false);
+    const again = mergePass(stored2, list, () => 'same', 4);
+    expect(again.candidates).toHaveLength(1);
+    // the three clusters of the merge judgement and the new listing
+    expect(shownMembers(again.candidates[0])).toHaveLength(4);
+    expect(productsOf(products(again.stored, list), [...p, x]).size).toBe(1);
   });
 
   it('never merges 256GB and 512GB, also when Claude wrongly says same', () => {

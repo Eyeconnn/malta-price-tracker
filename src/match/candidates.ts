@@ -11,7 +11,7 @@ import { createHash } from 'node:crypto';
 import { canonText } from '../names/canon-text.js';
 import { titleGroups, titleTokens } from '../site/matching.js';
 import { candidateKey, fingerprint } from './fingerprint.js';
-import { colourWords, identityOf, modelCodes, sameOrNeighbour, vetoReasons } from './veto.js';
+import { colourWords, identityOf, modelCodes, sameOrNeighbour, vetoReasons, withoutColours } from './veto.js';
 import { vetoListing } from './settle.js';
 
 /** One fresh site_products row of a visible shop, with what the judge sends Claude. */
@@ -224,13 +224,21 @@ function splitParts(members: Listing[], codesOf: (l: Listing) => string[]): Part
 const colourKey = (l: Listing) => colourWords(l.title).join(' ');
 
 /**
+ * Categories where a colour is an option of one product (a phone, a TV, a shoe). Elsewhere it often names another
+ * product (a paint, a lipstick shade, card sleeves), so a large family there is cut in title order instead.
+ */
+const COLOUR_VARIANT_CATEGORIES = new Set(['phones', 'laptops', 'tv-audio', 'appliances', 'home-kitchen', 'fashion', 'sports', 'baby']);
+
+/**
  * A family larger than MAX_GROUP: Claude is shown one listing per shop and colour, or when that is still too many a
  * set covering every shop and every colour, or one listing per shop (in chunks when there are more shops than
- * MAX_GROUP). Every other listing is attached to a shown listing of its shop (one of its colour first) when the veto
- * finds no difference between them besides colour; the rest are leftovers, judged as plain listings.
+ * MAX_GROUP). Every other listing is attached to a shown listing of its shop (one of its colour first) when their
+ * titles differ only in colour words and the veto finds no difference; the rest are leftovers, judged as plain
+ * listings. Outside COLOUR_VARIANT_CATEGORIES every listing is a leftover.
  */
 export function familyParts(fam: Listing[]): { parts: Part[]; leftovers: Listing[] } {
   const sorted = [...fam].sort((a, b) => a.id - b.id);
+  if (!COLOUR_VARIANT_CATEGORIES.has(mostCommon(sorted.map((l) => l.category)))) return { parts: [], leftovers: sorted };
   const firstOf = (key: (l: Listing) => string) => groupBy(sorted, key).map((g) => g[0]);
   let reps = firstOf((l) => `${l.shopId}|${colourKey(l)}`);
   if (reps.length > MAX_GROUP) {
@@ -260,7 +268,8 @@ export function familyParts(fam: Listing[]): { parts: Part[]; leftovers: Listing
     if (repSet.has(l)) continue;
     const atShop = reps.filter((r) => r.shopId === l.shopId);
     const order = [...atShop.filter((r) => colourKey(r) === colourKey(l)), ...atShop.filter((r) => colourKey(r) !== colourKey(l))];
-    const home = order.find((r) => vetoReasons(vetoListing(r), vetoListing(l)).length === 0);
+    const core = withoutColours(l.title);
+    const home = order.find((r) => withoutColours(r.title) === core && vetoReasons(vetoListing(r), vetoListing(l)).length === 0);
     if (home) attached.get(home)!.push(l);
     else leftovers.push(l);
   }
@@ -345,7 +354,8 @@ export function buildCandidates(listings: Listing[]): Candidate[] {
   for (const comp of comps.values()) {
     if (comp.length < 2) continue;
     for (const part of splitGroup(comp, codesOf)) {
-      if (part.members.length < 2 || codeMatched(part.members)) continue;
+      // a part Claude would be shown one listing of (one shop's copies of one title) has nothing to judge
+      if (part.members.length < 2 || (part.reps && part.reps.length < 2) || codeMatched(part.members)) continue;
       out.push(toCandidate(part));
     }
   }

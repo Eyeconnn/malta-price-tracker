@@ -801,3 +801,19 @@ export function identityOf(title: string, category: string): { numbers: string[]
 export function colourWords(title: string): string[] {
   return [...new Set(words(title).filter((w) => COLOURS.has(w)))].sort();
 }
+
+/**
+ * A title's words without its colour phrases (a colour word and the word before it: Deep Blue, Cosmic Orange, Jet
+ * Black), in order: two listings with the same words here differ at most in colour.
+ */
+export function withoutColours(title: string): string {
+  const ws = words(title);
+  const drop = new Set<number>();
+  ws.forEach((w, i) => {
+    if (!COLOURS.has(w)) return;
+    drop.add(i);
+    const before = ws[i - 1];
+    if (before !== undefined && !/\d/.test(before) && !MODEL.has(before) && !COLOURS.has(before)) drop.add(i - 1);
+  });
+  return ws.filter((_, i) => !drop.has(i)).join(' ');
+}
