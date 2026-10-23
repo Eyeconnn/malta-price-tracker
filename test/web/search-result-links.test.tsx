@@ -112,6 +112,8 @@ describe('Search page results', () => {
     expect(link.getAttribute('aria-label')).toBe('Samsung Galaxy S25 Ultra Smartphone, 256GB, from €1,199.00 at 3 shops');
     expect(link.getAttribute('href')).toBe('/product/c5');
     expect(screen.getAllByRole('heading', { level: 1 })).toHaveLength(1);
+    // the verdicts, Black Friday and stock are the link's description
+    expect(document.getElementById(link.getAttribute('aria-describedby')!)!.textContent).toBe('Deal to avoid at 1 shop, Black Friday');
   });
 
   it('names the option of a product sold as one listing after another middle dot', async () => {
@@ -129,6 +131,8 @@ describe('Search page results', () => {
     expect(cards[0]!.textContent).toContain('Price not shown by the shop');
     expect(cards[0]!.textContent).not.toContain('€0.00');
     expect(cards[1]!.textContent).toContain('Out of stock');
+    const gone = within(cards[1]!).getByRole('link');
+    expect(document.getElementById(gone.getAttribute('aria-describedby')!)!.textContent).toBe('Real deal, out of stock');
     expect(screen.getByText('2 products')).toBeTruthy();
   });
 

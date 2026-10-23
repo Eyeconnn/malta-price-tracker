@@ -11,6 +11,7 @@ import { ShopBadge } from '@/components/site/ShopBadge';
 import { Button } from '@/components/ui/button';
 import { ApiError, api, type Card, type Change, type ShopResponse, type ShopStats, useApi } from '@/lib/api';
 import { formatDay, formatEuro } from '@/lib/format';
+import { listingPath } from '@/lib/links';
 import { cn } from '@/lib/utils';
 
 /** Cards per list on a shop page. */
@@ -143,7 +144,7 @@ function ChangeTable({ caption, rows, tone, none }: { caption: string; rows: Cha
                 <tr key={r.id} className="border-t border-line align-top">
                   <th scope="row" className="px-2 py-2 font-medium">
                     <Link
-                      to={`/p/${r.id}`}
+                      to={listingPath(r.id)}
                       className="rounded-sm outline-none hover:underline focus-visible:ring-[3px] focus-visible:ring-ring/50"
                     >
                       {r.title}

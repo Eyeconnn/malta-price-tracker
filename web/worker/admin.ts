@@ -173,7 +173,8 @@ function toReport(r: Row): AdminReport {
     targetType: String(r.target_type),
     targetId: num(r.target_id),
     target: {
-      link: productLink !== null ? `/p/${productLink}` : shopLink !== null ? `/shops/${encodeURIComponent(shopLink)}` : null,
+      // the product page with that listing marked (/p/:id still redirects there)
+      link: productLink !== null ? `/product/s${productLink}?seller=${productLink}` : shopLink !== null ? `/shops/${encodeURIComponent(shopLink)}` : null,
       label: strOrNull(r.label),
     },
     reason: strOrNull(r.reason),

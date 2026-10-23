@@ -277,7 +277,7 @@ describe('shop page', () => {
       const rises = await screen.findByRole('table', { name: 'Top price rises' });
       expect(within(rises).getAllByRole('columnheader').every((th) => th.getAttribute('scope') === 'col')).toBe(true);
       const row = within(rises).getByRole('link', { name: 'Change 21' }).closest('tr')!;
-      expect(within(row).getByRole('link').getAttribute('href')).toBe('/p/21');
+      expect(within(row).getByRole('link').getAttribute('href')).toBe('/product/s21?seller=21');
       expect(row.textContent).toContain('€709.00');
       expect(row.textContent).toContain('€799.00');
       expect(row.textContent).toContain('20 Oct');

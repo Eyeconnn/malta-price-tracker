@@ -166,7 +166,7 @@ describe('home', () => {
     mockApi({ '/api/home': home() });
     renderAt('/');
     const first = (await screen.findAllByRole('article'))[0]!;
-    expect(within(first).getByRole('link', { name: 'Product 1' }).getAttribute('href')).toBe('/p/1');
+    expect(within(first).getByRole('link', { name: 'Product 1' }).getAttribute('href')).toBe('/product/s1?seller=1');
     expect(within(first).getByRole('link', { name: 'Alpha Shop' }).getAttribute('href')).toBe('/shops/alpha');
   });
 

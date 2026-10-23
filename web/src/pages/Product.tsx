@@ -1,6 +1,6 @@
 import { ExternalLink } from 'lucide-react';
-import { lazy, type ReactNode, Suspense, useEffect, useId, useMemo, useState } from 'react';
-import { Link, Navigate, useNavigate, useParams } from 'react-router';
+import { lazy, type ReactNode, Suspense, useEffect, useId, useMemo, useRef, useState } from 'react';
+import { Link, Navigate, useLocation, useNavigate, useParams, useSearchParams } from 'react-router';
 import { DayTable } from '@/components/site/DayTable';
 import { AlarmBanner, avoidFact, avoidKind, BlackFridayMark, NO_PRICE, PriceLine, tagProps } from '@/components/site/DealCard';
 import { Notice } from '@/components/site/DealList';
@@ -90,19 +90,34 @@ function optionsOf(variants: VariantView[]): Option[] {
  * and stock), or the seller's listing as built (its verdict variant) when no option is chosen. null when the
  * seller does not name the option.
  */
-type Shown = { variantId: number | null; priceCents: number | null; wasCents: number | null; inStock: boolean | null; checked: boolean };
+type Shown = {
+  variantId: number | null;
+  priceCents: number | null;
+  wasCents: number | null;
+  inStock: boolean | null;
+  checked: boolean;
+  /** the Malta day of the variant's newest reading when that is older than the last 30 days: it is not current */
+  lastSeen: string | null;
+};
 
-function shownFor(s: SellerView, variants: VariantView[], option: string | null): Shown | null {
-  if (option === null) return { variantId: s.productId, priceCents: s.priceCents, wasCents: s.wasCents, inStock: s.inStock, checked: true };
+/** The days a variant's newest reading may be old and still show as its price (as the old listing page). */
+const CURRENT_DAYS = 30;
+const DAY_MS = 86_400_000;
+const dayNumber = (day: string) => Math.round(Date.parse(`${day}T00:00:00Z`) / DAY_MS);
+
+function shownFor(s: SellerView, variants: VariantView[], option: string | null, today: string): Shown | null {
+  if (option === null) return { variantId: s.productId, priceCents: s.priceCents, wasCents: s.wasCents, inStock: s.inStock, checked: true, lastSeen: null };
   const v = variants.find((x) => x.sellerId === s.id && x.label !== null && optionKey(x.label) === option);
   if (!v) return null;
   const checked = v.id === s.productId;
+  const seenDay = !checked && v.seenAt && !Number.isNaN(Date.parse(v.seenAt)) ? maltaDay(new Date(v.seenAt)) : null;
   return {
     variantId: v.id,
     priceCents: checked ? s.priceCents : v.priceCents,
     wasCents: checked ? s.wasCents : null,
     inStock: checked ? s.inStock : v.inStock,
     checked,
+    lastSeen: seenDay !== null && dayNumber(today) - dayNumber(seenDay) >= CURRENT_DAYS ? seenDay : null,
   };
 }
 
@@ -119,7 +134,7 @@ function Section({ title, children, className }: { title: string; children: Reac
 }
 
 /** Advanced: every stored fact behind one seller's verdict. "Days worth buying" only for a judged verdict (R44). */
-function NumbersPanel({ shop, facts, judged }: { shop: string; facts: VerdictFacts; judged: boolean }) {
+function NumbersPanel({ title, facts, judged }: { title: string; facts: VerdictFacts; judged: boolean }) {
   const at = (v: { price: number; at: string } | undefined) =>
     v && positive(v.price) && typeof v.at === 'string' && DAY.test(v.at) ? `${formatEuro(v.price)} on ${formatDay(v.at)}` : null;
   const rows: [string, string | null, string?][] = [
@@ -140,7 +155,7 @@ function NumbersPanel({ shop, facts, judged }: { shop: string; facts: VerdictFac
     ['Days worth buying', judged && finite(facts.daysWorthBuying) && finite(facts.historyDays) ? `${facts.daysWorthBuying} of ${facts.historyDays}` : null],
   ];
   return (
-    <Section title={`Numbers at ${shop}`}>
+    <Section title={title}>
       <dl className="m-0 flex flex-col text-sm">
         {rows
           .filter((r): r is [string, string, string?] => r[1] !== null)
@@ -202,7 +217,8 @@ function SellerRow({
   raiseWindowDays,
   option,
   factsOpen,
-  onShowFacts,
+  onToggleFacts,
+  selected,
 }: {
   seller: SellerView;
   shown: Shown;
@@ -220,8 +236,10 @@ function SellerRow({
   option: string | null;
   /** the three numbers are shown for this seller (Simple; one seller at a time) */
   factsOpen: boolean;
-  /** shows the three numbers here; null when this seller has none to show (R44: only a judged verdict) */
-  onShowFacts: (() => void) | null;
+  /** opens or closes the three numbers here; null when this seller has none to show (R44: only a judged verdict) */
+  onToggleFacts: (() => void) | null;
+  /** the listing the visitor came from (?seller=) */
+  selected: boolean;
 }) {
   const titleId = useId();
   const base = sellerCard(seller);
@@ -235,21 +253,29 @@ function SellerRow({
   const tooNew = checked && seller.verdict.label === 'insufficient' && base.priceCents !== null;
   const tracked = finite(seller.verdict.facts?.historyDays) ? seller.verdict.facts.historyDays : null;
   const factsId = useId();
+  const panel = useRef<HTMLDivElement>(null);
+  const openedHere = useRef(false);
+  // the facts the visitor opened get the focus, so the button that opened them does not leave it behind
+  useEffect(() => {
+    if (factsOpen && openedHere.current) panel.current?.focus();
+    openedHere.current = false;
+  }, [factsOpen]);
   const priceRise = checked && avoid && avoidKind(base) === 'price';
   // A recent change of the shown variant within the raise window (R43). A price-raise avoid already says it in its
   // tag and fact. Another option of the listing counts from today, so an old price is never called recent.
   const change = useMemo(() => {
-    if (shown.variantId === null || !finite(raiseWindowDays) || priceRise) return null;
+    if (shown.variantId === null || shown.lastSeen !== null || !finite(raiseWindowDays) || priceRise) return null;
     const rows = dayRows(history, shown.variantId, null);
     return checked ? recentChange(rows, raiseWindowDays) : recentChange(rows, raiseWindowDays, maltaDay(new Date()));
-  }, [history, shown.variantId, raiseWindowDays, checked, priceRise]);
+  }, [history, shown.variantId, shown.lastSeen, raiseWindowDays, checked, priceRise]);
   return (
     <li
       aria-labelledby={titleId}
       data-cheapest={cheapest ? 'true' : undefined}
       data-verdict={checked ? seller.verdict.label : undefined}
       data-alarm={alarm ? 'true' : undefined}
-      className={cn('glass overflow-hidden', cheapest && 'border-2 border-good', alarm && 'border-2 border-bad')}
+      data-selected={selected ? 'true' : undefined}
+      className={cn('glass overflow-hidden', cheapest && 'border-2 border-good', selected && 'border-2 border-accent', alarm && 'border-2 border-bad')}
     >
       {alarm && <AlarmBanner card={base} />}
       <div className={cn('relative flex flex-col gap-1.5 p-4', tag && 'pr-24')}>
@@ -270,6 +296,7 @@ function SellerRow({
           </h3>
           {cheapest && <span className="rounded-full border border-good px-2 py-0.5 text-xs font-bold text-good">Cheapest</span>}
         </div>
+        {selected && <p className="text-xs font-semibold text-accent">The listing you came from</p>}
         {option && (
           <p data-option className="text-sm font-medium">
             {option}
@@ -277,8 +304,12 @@ function SellerRow({
         )}
         {/* the shop's own title stays visible, so a clean name never hides what the shop wrote */}
         <p className="text-xs break-words text-muted-foreground">{seller.title}</p>
-        <PriceLine card={card} className="[&>span:first-child]:text-2xl" />
-        {shown.inStock === false && <p className="text-sm text-muted-foreground">Out of stock</p>}
+        {shown.lastSeen ? (
+          <p className="text-lg font-semibold">Last seen on {formatDay(shown.lastSeen)}</p>
+        ) : (
+          <PriceLine card={card} className="[&>span:first-child]:text-2xl" />
+        )}
+        {shown.inStock === false && !shown.lastSeen && <p className="text-sm text-muted-foreground">Out of stock</p>}
         {checked && seller.bf && !alarm && <BlackFridayMark />}
         {fact && <p className="font-semibold text-bad">{fact}</p>}
         {change && <PriceChangeLine change={change} />}
@@ -297,17 +328,23 @@ function SellerRow({
         ) : (
           seller.verdict.reason && <p className="text-[15px] leading-relaxed">{seller.verdict.reason}</p>
         )}
-        {factsOpen && seller.verdict.facts ? (
-          <div id={factsId}>
-            <ThreeNumbers shop={seller.shop} facts={seller.verdict.facts} />
-          </div>
-        ) : (
-          onShowFacts && (
-            <Button variant="outline" className="min-h-11 w-fit" aria-expanded={false} onClick={onShowFacts}>
-              {`Show the price facts at ${seller.shop}`}
-            </Button>
-          )
+        {onToggleFacts && (
+          <Button
+            variant="outline"
+            className="min-h-11 w-fit"
+            aria-expanded={factsOpen}
+            aria-controls={factsId}
+            onClick={() => {
+              openedHere.current = !factsOpen;
+              onToggleFacts();
+            }}
+          >
+            {`${factsOpen ? 'Hide' : 'Show'} the price facts at ${seller.shop}`}
+          </Button>
         )}
+        <div id={factsId} ref={panel} tabIndex={-1} hidden={!(factsOpen && seller.verdict.facts)} className="rounded-xl outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50">
+          {factsOpen && seller.verdict.facts && <ThreeNumbers shop={seller.shop} facts={seller.verdict.facts} />}
+        </div>
         <div className="flex flex-wrap items-center gap-x-4">
           {shopUrl && (
             <a
@@ -342,12 +379,26 @@ function SellerRow({
 }
 
 /** Advanced: one price line per seller (lazy Recharts), the day table of one chosen seller, both cut to 7 / 30 days. */
-function History({ data, sellers, shownBy }: { data: ProductPage; sellers: SellerView[]; shownBy: Map<number, Shown> }) {
+function History({
+  data,
+  sellers,
+  shownBy,
+  options,
+  start,
+}: {
+  data: ProductPage;
+  sellers: SellerView[];
+  shownBy: Map<number, Shown>;
+  /** how many options the product has: lines and numbers name theirs when it has several */
+  options: number;
+  /** the seller whose price by day shows first */
+  start: number | null;
+}) {
   const [range, setRange] = useState<Range>('30');
   const reduced = useMediaQuery('(prefers-reduced-motion: reduce)');
   const tableId = useId();
   const headingId = useId();
-  const [chosen, setChosen] = useState<number | null>(data.cheapestId);
+  const [chosen, setChosen] = useState<number | null>(start);
   const seller = sellers.find((s) => s.id === chosen) ?? sellers[0];
 
   const labelOf = useMemo(() => new Map(data.variants.map((v) => [v.id, v.label])), [data.variants]);
@@ -364,12 +415,13 @@ function History({ data, sellers, shownBy }: { data: ProductPage; sellers: Selle
         .map((s) => {
           const variant = shownBy.get(s.id)?.variantId ?? null;
           const rows = variant === null ? [] : lastDays(dayRows(data.history.filter((h) => h.sellerId === s.id), variant, null), RANGES[range]);
-          const label = variant !== null && (variantsPer.get(s.id) ?? 0) > 1 ? labelOf.get(variant) : null;
+          // seller and option, so two listings of one shop (each colour on its own) are told apart
+          const label = variant !== null && (options > 1 || (variantsPer.get(s.id) ?? 0) > 1) ? labelOf.get(variant) : null;
           return { id: s.id, shop: s.shop, legend: label ? `${s.shop} (${label})` : s.shop, rows };
         })
         .filter((l) => l.rows.length > 0)
         .slice(0, SERIES_MAX),
-    [sellers, shownBy, data.history, range, variantsPer, labelOf],
+    [sellers, shownBy, data.history, range, variantsPer, labelOf, options],
   );
 
   const shown = seller ? shownBy.get(seller.id) : undefined;
@@ -467,19 +519,29 @@ function History({ data, sellers, shownBy }: { data: ProductPage; sellers: Selle
           <DayTable id={tableId} rows={rows} judged={judged} low30={low30} />
         )}
       </div>
-      {seller?.verdict.facts && <NumbersPanel shop={seller.shop} facts={seller.verdict.facts} judged={seller.verdict.label === 'good' || seller.verdict.label === 'avoid'} />}
+      {seller?.verdict.facts && (
+        <NumbersPanel
+          // the numbers are about the option the verdict checked: say so when another one is chosen
+          title={shown && !shown.checked ? `Numbers at ${seller.shop}, for ${labelOf.get(seller.productId ?? -1) ?? 'another option'}` : `Numbers at ${seller.shop}`}
+          facts={seller.verdict.facts}
+          judged={seller.verdict.label === 'good' || seller.verdict.label === 'avoid'}
+        />
+      )}
     </>
   );
 }
 
-function ProductContent({ data }: { data: ProductPage }) {
+function ProductContent({ data, selectedId }: { data: ProductPage; selectedId: number | null }) {
   const { mode } = useMode();
   const advanced = mode === 'advanced';
   const titleId = useId();
   const listId = useId();
   const [option, setOption] = useState<string | null>(null);
   // Simple: the seller whose three numbers are shown, the cheapest by default (one seller at a time)
-  const [factsFor, setFactsFor] = useState<number | null>(data.cheapestId);
+  const selected = selectedId !== null && data.sellers.some((s) => s.id === selectedId) ? selectedId : null;
+  const [factsFor, setFactsFor] = useState<number | null>(selected ?? data.cheapestId);
+  // the clock is read once per page view
+  const [today] = useState(() => maltaDay(new Date()));
   const [announcement, setAnnouncement] = useState('');
   const { product } = data;
 
@@ -487,11 +549,11 @@ function ProductContent({ data }: { data: ProductPage }) {
   const shownBy = useMemo(() => {
     const m = new Map<number, Shown>();
     for (const s of data.sellers) {
-      const shown = shownFor(s, data.variants, option);
+      const shown = shownFor(s, data.variants, option, today);
       if (shown) m.set(s.id, shown);
     }
     return m;
-  }, [data.sellers, data.variants, option]);
+  }, [data.sellers, data.variants, option, today]);
   const sellers = data.sellers.filter((s) => shownBy.has(s.id));
   const labelOf = (id: number | null) => (id === null ? null : (data.variants.find((v) => v.id === id)?.label ?? null));
   /** R44: only a good or avoid verdict, shown on the variant it is about, has numbers to show */
@@ -513,7 +575,7 @@ function ProductContent({ data }: { data: ProductPage }) {
   const choose = (key: string | null) => {
     setOption(key);
     const label = key === null ? 'All options' : (options.find((o) => o.key === key)?.label ?? '');
-    const n = key === null ? data.sellers.length : data.sellers.filter((s) => shownFor(s, data.variants, key) !== null).length;
+    const n = key === null ? data.sellers.length : data.sellers.filter((s) => shownFor(s, data.variants, key, today) !== null).length;
     setAnnouncement(`${label}: ${n} ${n === 1 ? 'shop' : 'shops'}`);
   };
 
@@ -582,7 +644,8 @@ function ProductContent({ data }: { data: ProductPage }) {
               raiseWindowDays={data.raiseWindowDays}
               option={ownOption(s)}
               factsOpen={!advanced && factsFor === s.id && hasFacts(s)}
-              onShowFacts={!advanced && hasFacts(s) ? () => setFactsFor(s.id) : null}
+              onToggleFacts={!advanced && hasFacts(s) ? () => setFactsFor((cur) => (cur === s.id ? null : s.id)) : null}
+              selected={s.id === selected}
             />
           ))}
         </ol>
@@ -590,7 +653,7 @@ function ProductContent({ data }: { data: ProductPage }) {
 
       {advanced && (
         <>
-          <History data={data} sellers={sellers} shownBy={shownBy} />
+          <History data={data} sellers={sellers} shownBy={shownBy} options={options.length} start={selected ?? data.cheapestId} />
           {product.attributes.length > 0 && (
             <Section title="Product details">
               <dl className="m-0 flex flex-col text-sm">
@@ -662,6 +725,10 @@ const notFound = (state: { status: string; error?: unknown }) =>
 export function ProductPage() {
   const { key } = useParams();
   const navigate = useNavigate();
+  const location = useLocation();
+  const [params] = useSearchParams();
+  const sellerParam = params.get('seller');
+  const selectedId = sellerParam !== null && ID.test(sellerParam) ? Number(sellerParam) : null;
   const valid = key !== undefined && KEY.test(key);
   const state = useApi(
     valid ? key : null,
@@ -676,13 +743,13 @@ export function ProductPage() {
   // a listing of a matched product answers with the product's own key: that is the address to keep
   const canonical = state.status === 'ready' && KEY.test(state.data.key) && state.data.key !== key ? state.data.key : null;
   useEffect(() => {
-    if (canonical) navigate(productPath(canonical), { replace: true });
-  }, [canonical, navigate]);
+    if (canonical) navigate(productPath(canonical) + location.search, { replace: true });
+  }, [canonical, navigate, location.search]);
 
   if (!valid || notFound(state)) return <NotFound />;
   if (state.status === 'error') return <Failed retry={state.retry} />;
   if (state.status !== 'ready') return <Loading />;
-  return <ProductContent key={state.data.key} data={state.data} />;
+  return <ProductContent key={state.data.key} data={state.data} selectedId={selectedId} />;
 }
 
 /** An old listing link (/p/:id): goes to its product's page, replacing the address, so old links keep working. */

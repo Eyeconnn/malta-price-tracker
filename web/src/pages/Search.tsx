@@ -2,7 +2,7 @@ import { useEffect, useId, useRef, useState } from 'react';
 import { Link, useSearchParams } from 'react-router';
 import { BlackFridayMark, NO_PRICE } from '@/components/site/DealCard';
 import { Notice } from '@/components/site/DealList';
-import { ProductImage, productPath, resultLabel, resultPrice, resultTitle, sellersLine, verdictParts } from '@/components/site/ProductResult';
+import { ProductImage, productPath, resultLabel, resultPrice, resultTitle, sellersLine, verdictNote, verdictParts } from '@/components/site/ProductResult';
 import { SEARCH_DEBOUNCE_MS, SearchBox, SearchStatus, searchPath, useSearch } from '@/components/site/SearchBox';
 import { Button } from '@/components/ui/button';
 import { type ProductResult, useDebounced } from '@/lib/api';
@@ -18,6 +18,8 @@ const SLUG = /^[a-z0-9-]{1,64}$/;
  */
 function ProductCard({ result }: { result: ProductResult }) {
   const id = useId();
+  const descId = useId();
+  const description = [verdictNote(result), result.inStock ? '' : 'out of stock'].filter((x) => x !== '').join(', ');
   return (
     <article aria-labelledby={id} className="glass relative flex min-h-11 items-start gap-3 p-4">
       <ProductImage url={result.imageUrl} className="size-16" />
@@ -26,6 +28,7 @@ function ProductCard({ result }: { result: ProductResult }) {
           <Link
             to={productPath(result.key)}
             aria-label={resultLabel(result)}
+            aria-describedby={description ? descId : undefined}
             className="rounded-sm outline-none after:absolute after:inset-0 after:rounded-2xl after:content-[''] hover:underline hover:after:bg-secondary focus-visible:after:ring-[3px] focus-visible:after:ring-ring"
           >
             {resultTitle(result)}
@@ -41,6 +44,11 @@ function ProductCard({ result }: { result: ProductResult }) {
           ))}
           {!result.inStock && <span className="text-muted-foreground">Out of stock</span>}
         </div>
+        {description && (
+          <span id={descId} className="sr-only">
+            {description}
+          </span>
+        )}
       </div>
       <p className="max-w-32 flex-none text-right font-bold tabular-nums">
         {result.priceCents === null ? <span className="text-xs font-medium text-muted-foreground">{NO_PRICE}</span> : resultPrice(result)}

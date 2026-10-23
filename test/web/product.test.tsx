@@ -128,10 +128,10 @@ function page(extra: Partial<ProductPage> = {}): ProductPage {
     sellers: [beta, alpha, gamma],
     cheapestId: 2,
     variants: [
-      { id: REP, sellerId: 1, label: 'Black', priceCents: 79900, inStock: true },
-      { id: SMALL, sellerId: 1, label: 'Grey', priceCents: 75900, inStock: false },
-      { id: 80, sellerId: 2, label: 'black', priceCents: 69900, inStock: true },
-      { id: 90, sellerId: 3, label: null, priceCents: null, inStock: false },
+      { id: REP, sellerId: 1, label: 'Black', priceCents: 79900, inStock: true, seenAt: '2026-10-22T18:00:00.000Z' },
+      { id: SMALL, sellerId: 1, label: 'Grey', priceCents: 75900, inStock: false, seenAt: '2026-10-22T18:00:00.000Z' },
+      { id: 80, sellerId: 2, label: 'black', priceCents: 69900, inStock: true, seenAt: '2026-10-22T18:00:00.000Z' },
+      { id: 90, sellerId: 3, label: null, priceCents: null, inStock: false, seenAt: null },
     ],
     history: [...lenovoHistory.map((h) => ({ ...h, sellerId: 1 })), ...smallHistory.map((h) => ({ ...h, sellerId: 1 })), ...betaHistory.map((h) => ({ ...h, sellerId: 2 }))].sort(
       (a, b) => a.at.localeCompare(b.at) || a.productId - b.productId,
@@ -159,7 +159,7 @@ function mockApi(answer: (key: string) => Response, listing: (id: string) => Res
 
 function Where() {
   const loc = useLocation();
-  return <output data-testid="where">{loc.pathname}</output>;
+  return <output data-testid="where">{loc.pathname + loc.search}</output>;
 }
 
 function renderAt(path: string) {
@@ -332,7 +332,7 @@ describe('product page, variant options', () => {
     const group = screen.getByRole('radiogroup', { name: 'Option' });
     expect(within(group).getAllByRole('radio').map((r) => r.textContent)).toEqual(['All', 'Black', 'Grey']);
     cleanup();
-    await openProduct(page({ variants: [{ id: 80, sellerId: 2, label: 'Black', priceCents: 69900, inStock: true }] }));
+    await openProduct(page({ variants: [{ id: 80, sellerId: 2, label: 'Black', priceCents: 69900, inStock: true, seenAt: null }] }));
     expect(screen.queryByRole('radiogroup', { name: 'Option' })).toBeNull();
     // the one option is named, so a shop that lists each colour on its own shows which one this is
     expect(screen.getByText('Option: Black')).toBeTruthy();
@@ -376,7 +376,7 @@ describe('product page, Advanced', () => {
     expect(chart.getAttribute('data-lines')).toBe('2');
     expect(chart.getAttribute('role')).toBe('img');
     const legend = screen.getByRole('list', { name: 'Chart lines' });
-    expect(within(legend).getAllByRole('listitem').map((l) => l.textContent)).toEqual(['Beta', 'Alpha (Black)']);
+    expect(within(legend).getAllByRole('listitem').map((l) => l.textContent)).toEqual(['Beta (black)', 'Alpha (Black)']);
   });
 
   it('never mixes variants: choosing Grey draws Alpha from the Grey readings', async () => {
@@ -384,6 +384,26 @@ describe('product page, Advanced', () => {
     fireEvent.click(within(screen.getByRole('radiogroup', { name: 'Option' })).getByRole('radio', { name: 'Grey' }));
     const legend = await screen.findByRole('list', { name: 'Chart lines' });
     expect(within(legend).getAllByRole('listitem').map((l) => l.textContent)).toEqual(['Alpha (Grey)']);
+    // the numbers are about the checked option, and say so
+    expect(screen.getByRole('region', { name: 'Numbers at Alpha, for Black' })).toBeTruthy();
+  });
+
+  it("names each line by its seller and option, also for a shop's colours listed on their own", async () => {
+    const blue: SellerView = { ...beta, id: 4, productId: 40, shop: 'AtoZ', shopSlug: 'atoz' };
+    const black: SellerView = { ...beta, id: 5, productId: 50, shop: 'AtoZ', shopSlug: 'atoz' };
+    await openProduct(
+      page({
+        sellers: [blue, black],
+        cheapestId: 4,
+        variants: [
+          { id: 40, sellerId: 4, label: 'Blue', priceCents: 69900, inStock: true, seenAt: null },
+          { id: 50, sellerId: 5, label: 'Black', priceCents: 69900, inStock: true, seenAt: null },
+        ],
+        history: [...betaHistory.map((h) => ({ ...h, productId: 40, sellerId: 4 })), ...betaHistory.map((h) => ({ ...h, productId: 50, sellerId: 5 }))],
+      }),
+    );
+    const legend = await screen.findByRole('list', { name: 'Chart lines' });
+    expect(within(legend).getAllByRole('listitem').map((l) => l.textContent)).toEqual(['AtoZ (Blue)', 'AtoZ (Black)']);
   });
 
   it("shows the day table of the chosen seller: the cheapest first, another by choice, with R44's column", async () => {
@@ -541,14 +561,51 @@ describe('product page, Simple, price changes and facts per seller', () => {
 
   it("shows another judged seller's three numbers when asked, one seller at a time", async () => {
     await openProduct(page({ sellers: [goodBeta, alpha, gamma] }));
+    // the cheapest seller's facts are open: its button says so
+    expect(within(sellerItem('Beta')).getByRole('button', { name: 'Hide the price facts at Beta' }).getAttribute('aria-expanded')).toBe('true');
     const button = within(sellerItem('Alpha')).getByRole('button', { name: 'Show the price facts at Alpha' });
     expect(button.getAttribute('aria-expanded')).toBe('false');
     fireEvent.click(button);
     const facts = within(sellerItem('Alpha')).getByRole('list', { name: 'Price facts at Alpha' });
+    // the button stays, says the facts are open, and the focus moves to them
+    expect(within(sellerItem('Alpha')).getByRole('button', { name: 'Hide the price facts at Alpha' }).getAttribute('aria-expanded')).toBe('true');
+    expect(facts.closest('[tabindex="-1"]')).toBe(document.activeElement);
+    expect(button.getAttribute('aria-controls')).toBe(document.activeElement!.id);
     expect(within(facts).getByText('Lowest 30 days').nextElementSibling!.textContent).toBe('€709.00');
     expect(within(facts).getByText('Real change').nextElementSibling!.textContent).toBe('+12.7%');
     expect(within(sellerItem('Beta')).queryByRole('list', { name: /Price facts/ })).toBeNull();
     expect(within(sellerItem('Beta')).getByRole('button', { name: 'Show the price facts at Beta' })).toBeTruthy();
+    // and closes again
+    fireEvent.click(within(sellerItem('Alpha')).getByRole('button', { name: 'Hide the price facts at Alpha' }));
+    expect(within(sellerItem('Alpha')).queryByRole('list', { name: /Price facts/ })).toBeNull();
+  });
+
+  it('says when an option was last seen instead of showing an old price as current (review I3)', async () => {
+    const data = page();
+    data.variants = data.variants.map((v) => (v.id === SMALL ? { ...v, seenAt: '2026-09-01T18:00:00.000Z' } : v));
+    await openProduct(data);
+    fireEvent.click(within(screen.getByRole('radiogroup', { name: 'Option' })).getByRole('radio', { name: 'Grey' }));
+    const a = sellerItem('Alpha');
+    expect(within(a).getByText('Last seen on 1 Sep')).toBeTruthy();
+    expect(a.textContent).not.toContain('€759.00');
+    expect(within(a).queryByText('Out of stock')).toBeNull();
+  });
+
+  it('marks the listing a link came from (?seller=) and opens its facts', async () => {
+    mockApi(() => json(page()));
+    renderAt('/product/c5?seller=1');
+    await screen.findByRole('heading', { level: 1, name: TITLE });
+    expect(sellerItem('Alpha').getAttribute('data-selected')).toBe('true');
+    expect(within(sellerItem('Alpha')).getByText('The listing you came from')).toBeTruthy();
+    expect(within(sellerItem('Alpha')).getByRole('list', { name: 'Price facts at Alpha' })).toBeTruthy();
+    expect(sellerItem('Beta').getAttribute('data-selected')).toBeNull();
+  });
+
+  it('keeps ?seller= when the address moves to the product key', async () => {
+    mockApi(() => json(page()));
+    renderAt('/product/s1?seller=1');
+    await screen.findByRole('heading', { level: 1, name: TITLE });
+    await waitFor(() => expect(screen.getByTestId('where').textContent).toBe('/product/c5?seller=1'));
   });
 
   it('shows no three numbers for a none or insufficient verdict (R44)', async () => {
@@ -579,8 +636,8 @@ describe('product page, Simple, price changes and facts per seller', () => {
         sellers: [blue, black],
         cheapestId: 4,
         variants: [
-          { id: 40, sellerId: 4, label: 'Blue', priceCents: 69900, inStock: true },
-          { id: 50, sellerId: 5, label: 'Black', priceCents: 70900, inStock: true },
+          { id: 40, sellerId: 4, label: 'Blue', priceCents: 69900, inStock: true, seenAt: null },
+          { id: 50, sellerId: 5, label: 'Black', priceCents: 70900, inStock: true, seenAt: null },
         ],
         history: [],
       }),
