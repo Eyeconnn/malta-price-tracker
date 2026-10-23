@@ -131,10 +131,8 @@ function readGroup(n: number, item: Record<string, unknown>): GroupAnswer {
     for (const id of c) {
       const i = index(id);
       if (i === null) return { ok: false, reason: `unknown listing id ${String(id)}` };
-      if (seen.has(i)) {
-        if (members.includes(i)) continue;
-        return { ok: false, reason: `listing ${i + 1} in two clusters` };
-      }
+      if (members.includes(i)) return { ok: false, reason: `listing ${i + 1} twice in a cluster` };
+      if (seen.has(i)) return { ok: false, reason: `listing ${i + 1} in two clusters` };
       seen.add(i);
       members.push(i);
     }

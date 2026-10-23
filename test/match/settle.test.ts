@@ -31,7 +31,7 @@ describe('settleBatch', () => {
     expect(r.judgements.map((j) => j.key)).toEqual(['cphones', 'cdrinks']);
     const [j] = r.judgements;
     expect(j).toMatchObject({ fingerprint: 'fp-cphones', model: 'haiku', effort: 'low' });
-    expect(j.members[2]).toEqual({ shop_id: 3, group_key: phones.members[2].groupKey, site_product_id: phones.members[2].id });
+    expect(j.members[2]).toEqual({ shop_id: 3, group_key: phones.members[2].groupKey, site_product_id: phones.members[2].id, title: 'apple iphone 15 plus 128gb black', variants: [] });
     expect(j.verdict.clusters).toEqual([[0, 1, 2]]);
     expect(j.verdict.final).toEqual([[0, 1]]);
     expect(j.verdict.vetoed.map((v) => [v.a, v.b])).toEqual([[0, 2], [1, 2]]);
@@ -45,6 +45,13 @@ describe('settleBatch', () => {
     ]);
     expect(r.judgements).toEqual([]);
     expect(r.rejected).toBe(2);
+  });
+
+  it('vetoes with the prices and shops of the listings', () => {
+    const cheap = C('cprice', [L(1, 'Sony WH-1000XM5', { brand: 'Sony', category: 'tv-audio', priceCents: 30000 }), L(2, 'Sony WH-1000XM5', { brand: 'Sony', category: 'tv-audio', priceCents: 2500 })]);
+    const r = settleBatch(makeJudgeBatches([cheap])[0], { items: [{ group: 'G1', clusters: [['1', '2']], apart: [] }] }, { model: 'haiku', effort: null, batch: 1, firstIndex: 1 });
+    expect(r.rows[0].final).toEqual([]);
+    expect(r.rows[0].vetoed[0].reasons).toContain('price 30000 vs 2500 cents');
   });
 });
 

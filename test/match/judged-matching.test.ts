@@ -46,3 +46,21 @@ describe('assignMatches with judged clusters', () => {
     expect(assignMatches(items, { judged: [[1, 99]] }).get(1)!.method).toBe('title');
   });
 });
+
+describe('assignMatches with judged clusters: barcodes and part numbers (review 23 Oct, C3)', () => {
+  const m = (id: number, shopId: number, gtin: string | null, mpn: string | null = null): MatchInput => ({ id, shopId, gtin, mpn, title: 'Hot Wheels Monster Truck', brand: 'Mattel' });
+  it('never groups two listings with different valid barcodes at different shops', () => {
+    expect(assignMatches([m(1, 1, '5000112637922'), m(2, 2, '5449000000996')], { judged: [[1, 2]] }).size).toBe(0);
+  });
+  it('groups the colours one shop lists with their own barcodes', () => {
+    expect(assignMatches([m(1, 1, '5000112637922'), m(2, 1, '5449000000996')], { judged: [[1, 2]] }).get(1)?.method).toBe('judged');
+  });
+  it('never adds a listing to a GTIN group whose barcode differs from its own', () => {
+    const r = assignMatches([m(1, 1, '5000112637922'), m(2, 2, '5000112637922'), m(3, 3, '4006381333931')], { judged: [[1, 3]] });
+    expect(r.get(3)).toBeUndefined();
+  });
+  it('never groups listings with different part numbers', () => {
+    expect(assignMatches([m(1, 1, null, '82XM00ABUK'), m(2, 2, null, '83ER0012UK')], { judged: [[1, 2]] }).size).toBe(0);
+    expect(assignMatches([m(1, 1, null, 'T500WHT'), m(2, 2, null, 'T500BLK')], { judged: [[1, 2]] }).get(1)?.method).toBe('judged');
+  });
+});

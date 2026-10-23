@@ -322,6 +322,7 @@ export async function assignCanonicalIds(
       id: string;
       shop_id: number;
       group_key: string;
+      price_cents: number | null;
       gtin: string | null;
       mpn: string | null;
       title: string;
@@ -335,7 +336,7 @@ export async function assignCanonicalIds(
       name_category: string | null;
     }[]
   >`
-    select sp.id, sp.shop_id, sp.group_key, sp.gtin, sp.mpn, sp.title, sp.brand, sp.category, sp.canonical_id, sp.match_method,
+    select sp.id, sp.shop_id, sp.group_key, sp.price_cents, sp.gtin, sp.mpn, sp.title, sp.brand, sp.category, sp.canonical_id, sp.match_method,
       to_jsonb(pn) ->> 'canonical_name' as canonical_name, pn.display_name, pn.variant_label, pn.category as name_category
     from site_products sp
     left join product_names pn on pn.shop_id = sp.shop_id and pn.group_key = sp.group_key
@@ -359,7 +360,7 @@ export async function assignCanonicalIds(
   if (opts.judgedMatching === true) {
     const resolved = await judgedClusters(
       sql,
-      raw.map((r) => ({ id: Number(r.id), shopId: r.shop_id, groupKey: r.group_key, title: r.title, brand: r.brand, category: r.category, gtin: r.gtin, mpn: r.mpn })),
+      raw.map((r) => ({ id: Number(r.id), shopId: r.shop_id, groupKey: r.group_key, title: r.title, brand: r.brand, category: r.category, gtin: r.gtin, mpn: r.mpn, priceCents: r.price_cents })),
     );
     judged = resolved.clusters;
     opts.onJudged?.(resolved);

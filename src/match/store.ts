@@ -3,7 +3,11 @@
 import type postgres from 'postgres';
 import { memberRef } from './fingerprint.js';
 
-export type StoredMember = { shop_id: number; group_key: string; site_product_id: number };
+/**
+ * A judged listing. title and variants (normalised, as the fingerprint reads them) are what Claude saw: the site build
+ * keeps the judgement while the title is the same and no new variant appeared (a variant that vanished keeps it).
+ */
+export type StoredMember = { shop_id: number; group_key: string; site_product_id: number; title?: string; variants?: string[] };
 export type StoredVerdict = {
   /** Claude's clusters (indexes into members), every member in one */
   clusters: number[][];

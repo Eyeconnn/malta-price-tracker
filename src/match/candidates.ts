@@ -6,7 +6,7 @@
 // out. Pure: src/match/load.ts reads the listings.
 import { createHash } from 'node:crypto';
 import { canonText } from '../names/canon-text.js';
-import { titleGroups } from '../site/matching.js';
+import { titleGroups, titleTokens } from '../site/matching.js';
 import { candidateKey, fingerprint } from './fingerprint.js';
 import { modelCodes, sameOrNeighbour } from './veto.js';
 
@@ -96,9 +96,42 @@ function groupBy<T>(items: T[], keyOf: (t: T) => string): T[][] {
 
 const titleOrder = (a: Listing, b: Listing) => canonText(a.title).localeCompare(canonText(b.title)) || a.id - b.id;
 
-/** Splits a group larger than MAX_GROUP by brand, then by its most shared model code, then into chunks by title. */
-function split(members: Listing[], codesOf: (l: Listing) => string[]): Listing[][] {
+/** Shared title words over all title words of two listings. */
+function similarity(a: Listing, b: Listing): number {
+  const x = new Set(titleTokens(a.title));
+  const y = new Set(titleTokens(b.title));
+  let both = 0;
+  for (const w of x) if (y.has(w)) both++;
+  return both / Math.max(1, x.size + y.size - both);
+}
+
+/**
+ * Splits a group larger than MAX_GROUP by brand, then by its most shared model code, then into chunks by title. A
+ * listing left alone by the split is judged with the part most like it that still has room (review minor).
+ */
+export function splitGroup(members: Listing[], codesOf: (l: Listing) => string[]): Listing[][] {
   if (members.length <= MAX_GROUP) return [members];
+  const parts = splitParts(members, codesOf);
+  const groups = parts.filter((p) => p.length >= 2);
+  const alone = parts.filter((p) => p.length === 1).map((p) => p[0]);
+  for (const l of alone) {
+    let best: Listing[] | null = null;
+    let score = 0;
+    for (const g of groups) {
+      if (g.length >= MAX_GROUP) continue;
+      const s = Math.max(...g.map((m) => similarity(l, m)));
+      if (s > score) {
+        score = s;
+        best = g;
+      }
+    }
+    if (best) best.push(l);
+    else groups.push([l]);
+  }
+  return groups;
+}
+
+function splitParts(members: Listing[], codesOf: (l: Listing) => string[]): Listing[][] {
   const out: Listing[][] = [];
   for (const byBrand of groupBy(members, (m) => compact(m.brand) || compact(m.title.split(/\s+/)[0]))) {
     if (byBrand.length <= MAX_GROUP) {
@@ -178,7 +211,7 @@ export function buildCandidates(listings: Listing[]): Candidate[] {
   const out: Candidate[] = [];
   for (const comp of comps.values()) {
     if (comp.length < 2) continue;
-    for (const part of split(comp, codesOf)) {
+    for (const part of splitGroup(comp, codesOf)) {
       if (part.length < 2 || codeMatched(part)) continue;
       const members = [...part].sort((a, b) => a.id - b.id);
       out.push({ key: candidateKey(members), fingerprint: fingerprint(members), category: mostCommon(members.map((m) => m.category)), members });

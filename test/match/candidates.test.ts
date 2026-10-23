@@ -2,7 +2,7 @@
 // from the title-similarity groups and from model codes shared within the same or a neighbouring category, at most
 // 12 per group, groups already matched by one barcode or part number left out, with a key and a fingerprint.
 import { describe, expect, it } from 'vitest';
-import { buildCandidates, candidateCodes, MAX_GROUP, spreadSample, type Listing } from '../../src/match/candidates.js';
+import { buildCandidates, candidateCodes, MAX_GROUP, splitGroup, spreadSample, type Listing } from '../../src/match/candidates.js';
 import { candidateKey, fingerprint } from '../../src/match/fingerprint.js';
 
 let nextId = 1;
@@ -123,5 +123,24 @@ describe('candidateCodes: feature codes are not model codes', () => {
   it('skips 5-in-1, IP68, USB3, Wi-Fi 6 and DDR5', () => {
     expect(candidateCodes('Shark SpeedStyle Pro 5-in-1 Hair Dryer HD752EU')).toEqual(['hd752eu']);
     expect(candidateCodes('Rugged phone IP68 USB3 WiFi6 DDR5 LPDDR5X PCIe4 HDMI2 Cat6 Gen4')).toEqual([]);
+  });
+});
+
+describe('splitGroup: a one-listing remainder joins its nearest group (review minor)', () => {
+  it('adds the remainder to the most similar part that has room, never past 12', () => {
+    const codes = new Map<number, string[]>();
+    const list: Listing[] = [];
+    const add = (title: string, code: string) => {
+      const l = L(list.length + 1, title, { brand: 'Sony', category: 'tv-audio' });
+      codes.set(l.id, [code]);
+      list.push(l);
+    };
+    for (let i = 0; i < 10; i++) add(`Sony Bravia 55 inch KD55X85L ${i}`, 'kd55x85l');
+    add('Sony WH-1000XM4 Headphones Black', 'wh1000xm4');
+    add('Sony WH-1000XM4 Headphones Silver', 'wh1000xm4');
+    add('Sony WH-1000XM4 Headphones Blue edition', 'wh1000xm4b');
+    const parts = splitGroup(list, (l) => codes.get(l.id)!);
+    expect(parts.map((p) => p.length).sort((a, b) => a - b)).toEqual([3, 10]);
+    expect(parts.find((p) => p.length === 3)!.every((m) => m.title.includes('WH-1000XM4'))).toBe(true);
   });
 });

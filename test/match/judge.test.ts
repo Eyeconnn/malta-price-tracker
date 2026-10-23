@@ -87,5 +87,6 @@ describe('readAnswers', () => {
     expect(readAnswers(batch, { items: [{ group: gx.id, clusters: [['1', '2'], ['2', '3']], apart: [] }] }).get(gx.id)).toEqual({ ok: false, reason: 'listing 2 in two clusters' });
     expect(readAnswers(batch, { items: [{ group: gx.id, clusters: 'all', apart: [] }] }).get(gx.id)).toEqual({ ok: false, reason: 'clusters is not a list' });
     expect(readAnswers(batch, null).get(gx.id)).toEqual({ ok: false, reason: 'no answer for the group' });
+    expect(readAnswers(batch, { items: [{ group: gx.id, clusters: [['1', '1', '2']], apart: [] }] }).get(gx.id)).toEqual({ ok: false, reason: 'listing 1 twice in a cluster' });
   });
 });

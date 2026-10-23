@@ -1,13 +1,15 @@
 // One judged batch turned into what the judge reports and stores: each group's answer read (judge.ts), the veto
 // applied to the clusters Claude called the same (veto.ts), and a judgement row per valid answer.
 import type { Listing } from './candidates.js';
+import { normText } from './fingerprint.js';
 import { readAnswers, type JudgeBatch } from './judge.js';
 import type { JudgeGroupRow } from './report.js';
 import type { JudgementRow } from './store.js';
 import { applyVeto, type VetoListing } from './veto.js';
 
-export const vetoListing = (l: Pick<Listing, 'title' | 'variantTitles' | 'brand' | 'category' | 'categoryPath' | 'gtin' | 'mpn'>): VetoListing => ({
+export const vetoListing = (l: Pick<Listing, 'title' | 'variantTitles' | 'brand' | 'category' | 'categoryPath' | 'gtin' | 'mpn' | 'shopId'> & { priceCents?: number | null }): VetoListing => ({
   title: l.title, variantTitles: l.variantTitles, brand: l.brand, category: l.category, categoryPath: l.categoryPath, gtin: l.gtin, mpn: l.mpn,
+  shopId: l.shopId, priceCents: l.priceCents,
 });
 
 const listingRows = (members: Listing[]) => members.map((m) => ({ shop: m.shopSlug, shopId: m.shopId, groupKey: m.groupKey, title: m.title, priceCents: m.priceCents }));
@@ -37,7 +39,10 @@ export function settleBatch(batch: JudgeBatch, output: unknown, ctx: { model: st
       fingerprint: c.fingerprint,
       model: ctx.model,
       effort: ctx.effort,
-      members: c.members.map((m) => ({ shop_id: m.shopId, group_key: m.groupKey, site_product_id: m.id })),
+      members: c.members.map((m) => ({
+        shop_id: m.shopId, group_key: m.groupKey, site_product_id: m.id, title: normText(m.title),
+        variants: [...new Set(m.variantTitles.map(normText).filter((v) => v !== ''))].sort(),
+      })),
       verdict: { clusters: a.verdict.clusters, apart: a.verdict.apart, vetoed: veto.vetoed, final: veto.clusters },
     });
   });

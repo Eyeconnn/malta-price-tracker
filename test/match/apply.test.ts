@@ -2,7 +2,7 @@
 // titles and variant titles is current; newest first, each listing in one judgement only; today's veto applied again.
 import { describe, expect, it } from 'vitest';
 import { resolveJudgements, type CurrentListing } from '../../src/match/apply.js';
-import { fingerprint } from '../../src/match/fingerprint.js';
+import { fingerprint, normText } from '../../src/match/fingerprint.js';
 import type { StoredJudgement } from '../../src/match/store.js';
 
 const cur = (id: number, shopId: number, groupKey: string, title: string, more: Partial<CurrentListing> = {}): CurrentListing => ({
@@ -13,7 +13,7 @@ let n = 0;
 function judgement(members: CurrentListing[], clusters: number[][], judgedAt: number): StoredJudgement {
   return {
     id: ++n, key: `c${n}`, judgedAt: new Date(judgedAt), model: 'haiku', effort: 'low', fingerprint: fingerprint(members),
-    members: members.map((m) => ({ shop_id: m.shopId, group_key: m.groupKey, site_product_id: m.id })),
+    members: members.map((m) => ({ shop_id: m.shopId, group_key: m.groupKey, site_product_id: m.id, title: normText(m.title), variants: m.variantTitles.map(normText) })),
     verdict: { clusters, apart: [], vetoed: [], final: clusters.filter((c) => c.length > 1) },
   };
 }
@@ -50,5 +50,24 @@ describe('resolveJudgements', () => {
     const r = resolveJudgements([newer, older], byRef([a, b, c, cur(40, 4, 'D', 'Apple iPhone 15 128GB Green')]));
     expect(r.clusters).toEqual([[10, 30]]);
     expect(r.used).toBe(2);
+  });
+
+  it('keeps a judgement when a variant vanished, and makes it stale when a new variant appears (review I1)', () => {
+    const withVariants = { ...a, variantTitles: ['128GB', '256GB'] };
+    const j = judgement([withVariants, b], [[0, 1]], 1);
+    expect(resolveJudgements([j], byRef([{ ...a, variantTitles: ['128GB'] }, b]))).toMatchObject({ clusters: [[10, 20]], stale: 0 });
+    expect(resolveJudgements([j], byRef([{ ...a, variantTitles: ['128GB', '512GB'] }, b]))).toMatchObject({ clusters: [], stale: 1 });
+  });
+
+  it('falls back to the fingerprint for a judgement stored without titles', () => {
+    const j = judgement([a, b], [[0, 1]], 1);
+    j.members = j.members.map(({ shop_id, group_key, site_product_id }) => ({ shop_id, group_key, site_product_id }));
+    expect(resolveJudgements([j], byRef([a, b]))).toMatchObject({ clusters: [[10, 20]] });
+    expect(resolveJudgements([j], byRef([{ ...a, variantTitles: [] }, { ...b, variantTitles: ['x'] }]))).toMatchObject({ clusters: [], stale: 1 });
+  });
+
+  it('applies the price veto with the current prices', () => {
+    const j = judgement([a, b], [[0, 1]], 1);
+    expect(resolveJudgements([j], byRef([{ ...a, priceCents: 79900 }, { ...b, priceCents: 2000 }]))).toMatchObject({ clusters: [], vetoed: 1 });
   });
 });

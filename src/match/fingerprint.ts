@@ -8,7 +8,9 @@ export type MemberText = MemberRef & { title: string; variantTitles: string[] };
 
 export const memberRef = (m: MemberRef) => `${m.shopId}|${m.groupKey}`;
 
-const norm = (s: string) => s.normalize('NFKC').toLowerCase().replace(/\s+/g, ' ').trim();
+/** A title in the one spelling the fingerprint and the stored members use. */
+export const normText = (s: string) => s.normalize('NFKC').toLowerCase().replace(/\s+/g, ' ').trim();
+const norm = normText;
 const sha = (s: string) => createHash('sha256').update(s).digest('hex');
 
 /** "c" and 32 hex characters of the sha256 of the sorted member refs (shop id and group key). */

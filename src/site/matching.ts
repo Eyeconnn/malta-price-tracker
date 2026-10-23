@@ -72,6 +72,20 @@ function mpnKey(mpn: string | null): string | null {
   return n.length >= 5 ? n : null;
 }
 
+/** Colour abbreviations at the end of a model code or part number (T500WHT and T500BLK are one product in two colours). */
+export const COLOUR_SUFFIX = /(\d)(?:wht|wh|blk|bk|blu|bl|red|rd|grn|gn|gry|gy|slv|sv|sil|pnk|pk|pur|ppl|gld|gd|brn|bei|nvy|org|ylw|yel)$/;
+
+/** A part number in one spelling with its colour suffix removed, or null when it is no usable part number. */
+export function mpnIdentity(mpn: string | null | undefined): string | null {
+  const k = mpnKey(mpn ?? null);
+  return k === null ? null : k.replace(COLOUR_SUFFIX, '$1');
+}
+
+/** A valid barcode (GS1 check digit) as 14 digits, or null. */
+export function gtinIdentity(gtin: string | null | undefined): string | null {
+  return gtinKey(gtin ?? null);
+}
+
 function distinctShops(items: MatchInput[]): boolean {
   for (let i = 1; i < items.length; i++) if (items[i].shopId !== items[0].shopId) return true;
   return false;
@@ -359,8 +373,45 @@ function matchByName(items: MatchInput[], out: Map<number, Match>): void {
  * - otherwise code groups are never merged, and only the cluster's listings without a code match may form a group.
  */
 function matchByJudged(items: MatchInput[], clusters: number[][], out: Map<number, Match>): void {
-  const known = new Set(items.map((it) => it.id));
-  const lists = clusters.map((c) => [...new Set(c)].filter((id) => known.has(id))).filter((c) => c.length >= 2);
+  const byId = new Map(items.map((it) => [it.id, it]));
+  // two valid barcodes at two shops, or two part numbers, are two products whatever the judgement says (review C3)
+  const conflict = (x: MatchInput, y: MatchInput) => {
+    const gx = gtinKey(x.gtin);
+    const gy = gtinKey(y.gtin);
+    if (gx !== null && gy !== null && gx !== gy && x.shopId !== y.shopId) return true;
+    const px = mpnIdentity(x.mpn);
+    const py = mpnIdentity(y.mpn);
+    return px !== null && py !== null && px !== py;
+  };
+  const lists: number[][] = [];
+  /** clusters the barcodes split: their free listings join no code group (which part they belong to is unknown) */
+  const split = new Set<number[]>();
+  for (const c of clusters) {
+    const parts: number[][] = [];
+    for (const id of [...new Set(c)].filter((i) => byId.has(i)).sort((x, y) => x - y)) {
+      const home = parts.find((p) => p.every((o) => !conflict(byId.get(o)!, byId.get(id)!)));
+      if (home) home.push(id);
+      else parts.push([id]);
+    }
+    for (const p of parts) {
+      if (p.length < 2) continue;
+      lists.push(p);
+      if (parts.length > 1) split.add(p);
+    }
+  }
+  /** A listing never joins a code group whose barcode or part number differs from its own. */
+  const fits = (id: number, code: string) => {
+    const it = byId.get(id)!;
+    if (code.startsWith('gtin:')) {
+      const g = gtinKey(it.gtin);
+      return g === null || `gtin:${g}` === code;
+    }
+    if (code.startsWith('mpn:')) {
+      const p = mpnKey(it.mpn);
+      return p === null || `mpn:${p}` === code;
+    }
+    return true;
+  };
   const judgedOfCode = new Map<string, Set<number>>();
   for (const c of lists) {
     for (const id of c) {
@@ -382,11 +433,11 @@ function matchByJudged(items: MatchInput[], clusters: number[][], out: Map<numbe
       assign(free, `judged:${Math.min(...c)}`);
       continue;
     }
-    if (codes.size === 1) {
+    if (codes.size === 1 && !split.has(c)) {
       const code = [...codes][0];
       const ids = new Set(c);
       if ([...judgedOfCode.get(code)!].every((id) => ids.has(id))) {
-        assign(free, code);
+        assign(free.filter((id) => fits(id, code)), code);
         continue;
       }
     }

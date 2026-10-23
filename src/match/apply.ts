@@ -1,9 +1,9 @@
 // The site build's use of stored judgements (design "Update 23 Oct, afternoon", point 4, JUDGED_MATCHING on): a
-// judgement counts only while every member is still listed and the fingerprint of their titles and variant titles
-// is the one Claude saw; newest first, each listing belongs to one judgement only; the veto in code runs again on
+// judgement counts only while every member is still listed with the title Claude saw and no variant it did not see
+// (a variant that vanished keeps it, review I1; a judgement stored without titles needs its fingerprint); newest first, each listing belongs to one judgement only; the veto in code runs again on
 // today's data, so a better veto applies at once. The result is clusters of site_products ids for assignMatches.
 import type postgres from 'postgres';
-import { fingerprint, memberRef } from './fingerprint.js';
+import { fingerprint, memberRef, normText } from './fingerprint.js';
 import { loadVariantTitles } from './load.js';
 import { vetoListing } from './settle.js';
 import { loadJudgements, type StoredJudgement } from './store.js';
@@ -20,6 +20,7 @@ export type CurrentListing = {
   categoryPath: string | null;
   gtin: string | null;
   mpn: string | null;
+  priceCents?: number | null;
 };
 
 export type Resolved = { clusters: number[][]; read: number; used: number; stale: number; vetoed: number };
@@ -32,11 +33,21 @@ export function resolveJudgements(judgements: StoredJudgement[], current: Map<st
   for (const j of order) {
     const refs = j.members.map((m) => memberRef({ shopId: m.shop_id, groupKey: m.group_key }));
     const members = refs.map((r) => current.get(r));
-    if (members.some((m) => m === undefined) || fingerprint(members as CurrentListing[]) !== j.fingerprint) {
+    if (members.some((m) => m === undefined)) {
       out.stale++;
       continue;
     }
     const list = members as CurrentListing[];
+    // what Claude saw: the same title and no new variant (a variant that vanished keeps the judgement, review I1)
+    const unchanged = j.members.every((m, i) => {
+      if (m.title === undefined) return fingerprint(list) === j.fingerprint;
+      const seen = new Set(m.variants ?? []);
+      return normText(list[i].title) === m.title && list[i].variantTitles.map(normText).every((v) => v === '' || seen.has(v));
+    });
+    if (!unchanged) {
+      out.stale++;
+      continue;
+    }
     const free = (i: number) => !claimed.has(refs[i]);
     const clusters = (j.verdict.clusters ?? []).map((c) => c.filter((i) => Number.isInteger(i) && i >= 0 && i < list.length && free(i)));
     const veto = applyVeto(list.map(vetoListing), clusters);
@@ -50,7 +61,17 @@ export function resolveJudgements(judgements: StoredJudgement[], current: Map<st
   return out;
 }
 
-export type BuildRow = { id: number; shopId: number; groupKey: string; title: string; brand: string | null; category: string | null; gtin: string | null; mpn: string | null };
+export type BuildRow = {
+  id: number;
+  shopId: number;
+  groupKey: string;
+  title: string;
+  brand: string | null;
+  category: string | null;
+  gtin: string | null;
+  mpn: string | null;
+  priceCents: number | null;
+};
 
 /**
  * The judged clusters for assignCanonicalIds: stored judgements (none before migration 013) resolved against the
@@ -80,7 +101,7 @@ export async function judgedClusters(sql: postgres.Sql, rows: BuildRow[]): Promi
   for (const [ref, r] of wanted) {
     current.set(ref, {
       id: r.id, shopId: r.shopId, groupKey: r.groupKey, title: r.title, variantTitles: variants.get(ref) ?? [], brand: r.brand,
-      category: r.category ?? 'other', categoryPath: paths.get(r.id) ?? null, gtin: r.gtin, mpn: r.mpn,
+      category: r.category ?? 'other', categoryPath: paths.get(r.id) ?? null, gtin: r.gtin, mpn: r.mpn, priceCents: r.priceCents,
     });
   }
   return resolveJudgements(judgements, current);
