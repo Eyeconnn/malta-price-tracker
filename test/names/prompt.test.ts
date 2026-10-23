@@ -111,6 +111,14 @@ describe('systemPrompt', () => {
     expect(p).toMatch(/Pack of 6[^.]*44 Nappies[^.]*display_name or[^.]*pack_count/);
   });
 
+  it('asks for the canonical name fields and a canonical_name in the category pattern, colour and size never', () => {
+    const p = systemPrompt('phones', schemas.phones);
+    expect(p).toMatch(/canonical_name[^\n]*brand model\|line storage_gb/);
+    expect(p).toMatch(/condition[^\n]*audience[^\n]*pack_count[^\n]*bundle/);
+    expect(p).toMatch(/never colour or size/);
+    expect(answerJsonSchema(schemas.phones)).toMatchObject({ properties: { items: { items: { required: expect.arrayContaining(['canonical_name']) } } } });
+  });
+
   it('says to keep the not_the_brand value when the title contains it', () => {
     expect(systemPrompt('toys', schemas.toys)).toMatch(/not_the_brand[^.]*\. When the title contains it, keep it/);
   });

@@ -1,13 +1,11 @@
-// What makes two shops' listings one product by name (design Part 3, owner decision "name + specs"), and the
-// short specs summary shown after a clean name. Pure, so the site build (Node) and the Worker share it.
+// Clean names in one spelling and the short specs summary shown after a clean name. Pure, so the site build (Node)
+// and the Worker share it. (Matching across shops uses canonical names: src/names/canonical.ts.)
 //
 // - nameKey: the clean name with case, accents, trademark signs, spacing, punctuation, UK/US spelling and unit
 //   spelling made equal (the normaliser's own text helpers, src/names/text.ts): "Galaxy Tab-S10" = "Galaxy TabS10",
 //   "15.6"" = "15.6 inch", "512 SSD" = "512GB". "+" reads as "plus" and "&" as "and", so an S25+ is never an S25.
-// - identity: per site category the key specs (config/attribute-schemas.json, "identity"). Two listings are the
-//   same product only when every spec both have is equal; a spec on one side only does not block, and a spec with a
-//   default counts a missing value as that default (a drink without a pack count is one bottle). Colour and size are
-//   variant options and never part of identity.
+// - identity: per site category the key specs (config/attribute-schemas.json, "identity") a summary may show.
+//   Colour and size are variant options and never part of it.
 // - specsSummary: the identity specs a clean name does not already carry ("256GB, 12GB RAM"), for "name · specs".
 import raw from '../../config/attribute-schemas.json' with { type: 'json' };
 import { compact, inRun, prep, QUANTITY, tokens, UNIT } from '../names/text.js';
@@ -17,15 +15,13 @@ export type IdentitySpec = {
   type: 'text' | 'enum' | 'number';
   /** number specs: the attribute's fixed unit (GB, inch, ml, items, ...) */
   unit?: string;
-  /** a missing value counts as this one when comparing (never shown) */
-  default?: number | string;
 };
 export type IdentityConfig = Record<string, IdentitySpec[]>;
 
 /** Keys that are variant options, never identity. */
 const VARIANT_KEYS = new Set(['colour', 'size', 'sizes']);
 
-type RawEntry = string | { key?: unknown; default?: unknown };
+type RawEntry = string | { key?: unknown };
 type RawFile = { categories?: Record<string, Record<string, unknown>> };
 
 /** The identity lists of every category, checked against the category's attribute keys. */
@@ -43,7 +39,6 @@ export function parseIdentity(file: unknown): IdentityConfig {
       const type = spec.type === 'number' || spec.type === 'enum' ? spec.type : 'text';
       const s: IdentitySpec = { key, type };
       if (type === 'number' && spec.unit) s.unit = spec.unit;
-      if (typeof entry === 'object' && (typeof entry.default === 'number' || typeof entry.default === 'string')) s.default = entry.default;
       return s;
     });
   }
@@ -51,9 +46,6 @@ export function parseIdentity(file: unknown): IdentityConfig {
 }
 
 export const IDENTITY: IdentityConfig = parseIdentity(raw);
-
-/** The shared colour list of the attribute schemas (lists.colours). */
-export const COLOURS: string[] = ((raw as { lists?: { colours?: string[] } }).lists?.colours ?? []).slice();
 
 /** A quantity token in one spelling ("512ssd" and "512.0gb" are "512gb"); other tokens unchanged. */
 function unitForm(t: string): string {
@@ -80,46 +72,7 @@ export function nameKey(name: string): string {
   return out;
 }
 
-/** Maker words dropped from a text spec, so "Intel Core i5" = "Core i5" and "NVIDIA GeForce RTX 4060" = "RTX 4060". */
-const VENDOR_WORDS = new Set(['intel', 'core', 'amd', 'nvidia', 'geforce', 'radeon', 'apple', 'qualcomm', 'mediatek', 'samsung', 'processor', 'cpu', 'gpu', 'graphics']);
-
 const finite = (v: unknown): v is number => typeof v === 'number' && Number.isFinite(v);
-
-function textValue(v: string): string {
-  return tokens(prep(v))
-    .filter((t) => !VENDOR_WORDS.has(t))
-    .join('');
-}
-
-function compareValue(spec: IdentitySpec, v: unknown): string | null {
-  if (Array.isArray(v)) {
-    const parts = [...new Set(v.map((x) => compareValue(spec, x)).filter((x): x is string => x !== null && x !== ''))].sort();
-    return parts.length > 0 ? parts.join(',') : null;
-  }
-  if (spec.type === 'number') return finite(v) ? String(Math.round(v * 100) / 100) : null;
-  if (typeof v !== 'string') return null;
-  const t = spec.type === 'enum' ? compact(v) : textValue(v);
-  return t === '' ? null : t;
-}
-
-/** The category's identity specs of a listing, as comparable strings (defaults filled in). */
-export function identityValues(category: string | null, attrs: Record<string, unknown> | null, cfg: IdentityConfig = IDENTITY): Record<string, string> {
-  const out: Record<string, string> = {};
-  if (category === null || !Object.hasOwn(cfg, category)) return out;
-  for (const spec of cfg[category]) {
-    const v = attrs && Object.hasOwn(attrs, spec.key) ? compareValue(spec, attrs[spec.key]) : null;
-    const value = v ?? (spec.default !== undefined ? compareValue(spec, spec.default) : null);
-    if (value !== null) out[spec.key] = value;
-  }
-  return out;
-}
-
-/** Every spec present on both sides is equal. */
-export function sameIdentity(a: Record<string, string>, b: Record<string, string>): boolean {
-  for (const [k, v] of Object.entries(a)) if (Object.hasOwn(b, k) && b[k] !== v) return false;
-  return true;
-}
-
 const num = (n: number) => String(Math.round(n * 100) / 100);
 
 /** How a number spec is written, and the name tokens that mean the name already has it. */

@@ -11,6 +11,8 @@ export type StoredResult = {
   variantLabel: string | null;
   attrs: Record<string, unknown>;
   reason: string | null;
+  /** the checked canonical name (src/names/canonical.ts), null without one */
+  canonicalName?: string | null;
 };
 
 export type RunTotals = {
@@ -47,9 +49,21 @@ export async function finishRun(sql: postgres.Sql, runId: number, t: RunTotals):
     where id = ${runId}`;
 }
 
-/** Upserts one batch of results into product_names. */
+/** Whether product_names has canonical_name yet (migration 012), asked once per connection. */
+const hasCanonical = new WeakMap<postgres.Sql, Promise<boolean>>();
+function canonicalColumn(sql: postgres.Sql): Promise<boolean> {
+  let p = hasCanonical.get(sql);
+  if (!p) {
+    p = sql`select 1 from information_schema.columns where table_name = 'product_names' and column_name = 'canonical_name'`.then((r) => r.length > 0);
+    hasCanonical.set(sql, p);
+  }
+  return p;
+}
+
+/** Upserts one batch of results into product_names (with canonical_name once migration 012 has run). */
 export async function saveResults(sql: postgres.Sql, runId: number, model: string, results: StoredResult[]): Promise<void> {
   if (results.length === 0) return;
+  const withCanonical = await canonicalColumn(sql);
   const col = <T>(f: (r: StoredResult) => T) => results.map(f);
   await sql`
     insert into product_names (shop_id, group_key, source_title, title_hash, category, display_name, variant_label, attrs,
@@ -67,6 +81,12 @@ export async function saveResults(sql: postgres.Sql, runId: number, model: strin
       display_name = excluded.display_name, variant_label = excluded.variant_label, attrs = excluded.attrs,
       status = excluded.status, reject_reason = excluded.reject_reason, model = excluded.model, run_id = excluded.run_id,
       normalised_at = excluded.normalised_at`;
+  if (!withCanonical) return;
+  await sql`
+    update product_names pn set canonical_name = t.canonical_name
+    from unnest(${col((r) => r.group.shopId)}::int[], ${col((r) => r.group.groupKey)}::text[], ${col((r) => (r.status === 'ok' ? (r.canonicalName ?? null) : null))}::text[])
+      as t(shop_id, group_key, canonical_name)
+    where pn.shop_id = t.shop_id and pn.group_key = t.group_key`;
 }
 
 /** The names stored as ok (for --recheck-stored). */
@@ -83,6 +103,7 @@ export async function markRejected(sql: postgres.Sql, rows: { shopId: number; gr
   const res = await sql`
     update product_names pn set status = 'rejected', reject_reason = 'recheck: ' || t.reason, display_name = null,
       variant_label = null, attrs = '{}'::jsonb, normalised_at = now()
+      ${(await canonicalColumn(sql)) ? sql`, canonical_name = null` : sql``}
     from unnest(${rows.map((r) => r.shopId)}::int[], ${rows.map((r) => r.groupKey)}::text[], ${rows.map((r) => r.reason)}::text[])
       as t(shop_id, group_key, reason)
     where pn.shop_id = t.shop_id and pn.group_key = t.group_key and pn.status = 'ok'`;

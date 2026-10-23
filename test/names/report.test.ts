@@ -51,9 +51,9 @@ describe('writeReport', () => {
     expect(html).not.toContain('\u2014');
 
     const csv = await readFile(files.csv, 'utf8');
-    expect(csv.split('\r\n')[0].replace(/^\uFEFF/, '')).toBe('category,shop,source_title,clean_name,variant_label,attributes,dropped_attributes,status,reason,shop_id,group_key,brand,brand_status');
+    expect(csv.split('\r\n')[0].replace(/^\uFEFF/, '')).toBe('category,shop,source_title,clean_name,variant_label,attributes,dropped_attributes,status,reason,shop_id,group_key,brand,brand_status,canonical_name,canonical_reason');
     // the group ids let a later run pick exactly these groups (--sample-from)
-    expect(csv.split('\r\n')[1]).toMatch(/,7,g-1,Lenovo,reliable$/);
+    expect(csv.split('\r\n')[1]).toMatch(/,7,g-1,Lenovo,reliable,,$/);
   });
 });
 

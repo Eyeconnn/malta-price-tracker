@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import raw from '../../config/attribute-schemas.json' with { type: 'json' };
 import { loadAttributeSchemas } from '../../src/names/schema.js';
-import { IDENTITY, identityValues, nameKey, parseIdentity, sameIdentity, specsSummary, withSpecs } from '../../src/site/identity.js';
+import { IDENTITY, nameKey, parseIdentity, specsSummary, withSpecs } from '../../src/site/identity.js';
 
 describe('identity specs per category (config/attribute-schemas.json)', () => {
   it('lists the key specs of each category, never colour or size', () => {
@@ -9,7 +9,7 @@ describe('identity specs per category (config/attribute-schemas.json)', () => {
     expect(IDENTITY.phones.map((s) => s.key)).toEqual(['storage_gb', 'ram_gb', 'screen_in', 'network']);
     expect(IDENTITY['tv-audio'].map((s) => s.key)).toContain('screen_in');
     expect(IDENTITY.toys.map((s) => s.key)).toEqual(['model', 'pieces']);
-    expect(IDENTITY.drinks.find((s) => s.key === 'pack_count')).toMatchObject({ type: 'number', unit: 'items', default: 1 });
+    expect(IDENTITY.drinks.find((s) => s.key === 'pack_count')).toMatchObject({ type: 'number', unit: 'items' });
     for (const specs of Object.values(IDENTITY)) for (const s of specs) expect(['colour', 'size', 'sizes']).not.toContain(s.key);
   });
 
@@ -51,35 +51,6 @@ describe('nameKey', () => {
 
   it('is empty for a name without letters or digits', () => {
     expect(nameKey(' -- ')).toBe('');
-  });
-});
-
-describe('identityValues and sameIdentity', () => {
-  const phone = (attrs: Record<string, unknown>) => identityValues('phones', attrs);
-
-  it('reads the category specs, normalised', () => {
-    expect(phone({ storage_gb: 256, ram_gb: 12, colour: ['black'], brand: 'Samsung' })).toEqual({ storage_gb: '256', ram_gb: '12' });
-    expect(identityValues('laptops', { cpu: 'Intel Core i5', screen_in: 15.6 })).toEqual({ cpu: 'i5', screen_in: '15.6' });
-    expect(identityValues('drinks', { volume_ml: 330 })).toEqual({ volume_ml: '330', pack_count: '1' });
-    expect(identityValues('nope', { storage_gb: 1 })).toEqual({});
-    // values that are not of the spec's type are left out
-    expect(phone({ storage_gb: 'lots', ram_gb: Number.NaN })).toEqual({});
-  });
-
-  it('a spec both sides have must be equal; one side only does not block', () => {
-    expect(sameIdentity(phone({ storage_gb: 256 }), phone({ storage_gb: 256, ram_gb: 12 }))).toBe(true);
-    expect(sameIdentity(phone({ storage_gb: 256 }), phone({ storage_gb: 512 }))).toBe(false);
-    expect(sameIdentity(phone({}), phone({ storage_gb: 512 }))).toBe(true);
-    expect(sameIdentity(identityValues('laptops', { cpu: 'Intel Core i5' }), identityValues('laptops', { cpu: 'Core i5' }))).toBe(true);
-    expect(sameIdentity(identityValues('laptops', { cpu: 'AMD Ryzen AI 7' }), identityValues('laptops', { cpu: 'AMD Ryzen 7' }))).toBe(false);
-    expect(sameIdentity(identityValues('laptops', { gpu: 'NVIDIA GeForce RTX 4060' }), identityValues('laptops', { gpu: 'RTX 4060' }))).toBe(true);
-  });
-
-  it('counts a drink without a pack count as one bottle', () => {
-    const drink = (attrs: Record<string, unknown>) => identityValues('drinks', attrs);
-    expect(sameIdentity(drink({ volume_ml: 330, pack_count: 6 }), drink({ volume_ml: 330, pack_count: 12 }))).toBe(false);
-    expect(sameIdentity(drink({ volume_ml: 330 }), drink({ volume_ml: 330, pack_count: 6 }))).toBe(false);
-    expect(sameIdentity(drink({ volume_ml: 330 }), drink({ volume_ml: 330, pack_count: 1 }))).toBe(true);
   });
 });
 

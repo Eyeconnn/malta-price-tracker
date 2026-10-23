@@ -1,6 +1,8 @@
 // pnpm normalise-names --model haiku [--effort low] [--pilot] [--limit 500] [--sample-from out/names/<run>.csv]
 //   [--category laptops ...] [--batch-size 40] [--parallel 2] [--max-batches N] [--max-cost 5] [--dry-run] [--seed pilot]
-//   [--timeout 300] [--save-raw] [--retry-rejected] [--recheck-stored]
+//   [--timeout 300] [--save-raw] [--retry-rejected] [--recheck-stored] [--backfill-canonical]
+// --backfill-canonical sends only the groups stored as ok that have no canonical name yet (names saved before
+// migration 012), whether their title changed or not; it is bounded like any run (--pilot, --max-batches, --max-cost).
 // --retry-rejected also sends groups stored as rejected whose titles did not change. --recheck-stored makes no model
 // call: it runs today's checks over the names stored as ok and marks the failing ones rejected (only reports them with
 // --dry-run). A run stops after 5 failed batches in a row, and at once on a login or usage-limit error; the report and
@@ -53,6 +55,7 @@ const { values } = parseArgs({
     'save-raw': { type: 'boolean', default: false },
     'retry-rejected': { type: 'boolean', default: false },
     'recheck-stored': { type: 'boolean', default: false },
+    'backfill-canonical': { type: 'boolean', default: false },
   },
 });
 
@@ -119,7 +122,7 @@ async function main() {
       stored = await loadStoredOk(ro);
       if (stored.length > 0) brandCtx = await loadBrandContext(ro);
     } else {
-      candidates = changedGroups(groupsAll, { retryRejected: values['retry-rejected'] });
+      candidates = changedGroups(groupsAll, { retryRejected: values['retry-rejected'], backfillCanonical: values['backfill-canonical'] });
       chosen = pickChosen();
       // the brand statistic reads every fresh group; skip it when there is nothing to name
       if (chosen.length > 0) brandCtx = await loadBrandContext(ro);
@@ -258,13 +261,14 @@ async function main() {
       rows.push({
         category: batch.category, shop: r.item.group.shopSlug, sourceTitle: r.item.group.title, name: r.proposedName,
         variantLabel: r.status === 'ok' ? r.variantLabel : r.proposedLabel, attrs: r.attrs, dropped: r.dropped, status: r.status, reason: r.reason,
+        canonicalName: r.canonicalName, canonicalReason: r.canonicalReason,
         ...ids(r.item.group),
       });
     }
     if (rw) {
       await saveResults(rw, Number(runId), model!, results.map((r) => ({
         group: r.item.group, category: batch.category, status: r.status, displayName: r.displayName,
-        variantLabel: r.variantLabel, attrs: r.attrs, reason: r.reason,
+        variantLabel: r.variantLabel, attrs: r.attrs, reason: r.reason, canonicalName: r.canonicalName,
       })));
     }
     const extra = unknownKeys.length > 0 ? `, ignored unknown keys ${unknownKeys.join(' ')}` : '';

@@ -31,6 +31,14 @@ describe('changedGroups', () => {
     const fresh = group({ groupKey: 'new', title: 'C' });
     expect(changedGroups([same, changed, fresh]).map((g) => g.groupKey)).toEqual(['changed', 'new']);
   });
+
+  it('--backfill-canonical: only groups stored ok without a canonical name, title changed or not', () => {
+    const lacking = group({ groupKey: 'lacking', title: 'A', storedHash: titleHash('A', []), storedStatus: 'ok', storedCanonical: false });
+    const has = group({ groupKey: 'has', title: 'B', storedHash: titleHash('B', []), storedStatus: 'ok', storedCanonical: true });
+    const rejected = group({ groupKey: 'rejected', title: 'C', storedHash: titleHash('C', []), storedStatus: 'rejected', storedCanonical: false });
+    const fresh = group({ groupKey: 'new', title: 'D' });
+    expect(changedGroups([lacking, has, rejected, fresh], { backfillCanonical: true }).map((g) => g.groupKey)).toEqual(['lacking']);
+  });
 });
 
 describe('pilotSample', () => {

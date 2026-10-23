@@ -92,14 +92,16 @@ describe.skipIf(!process.env.SITE_BUILD_TEST_DB)('name normaliser on PGlite', ()
     const groups = await loadGroups(sql, { categories: ['laptops'] });
     const g = groups[0];
     await saveResults(sql, runId, 'haiku', [
-      { group: g, category: 'laptops', status: 'ok', displayName: 'Lenovo IdeaPad Slim 5', variantLabel: null, attrs: { ram_gb: [8, 16] }, reason: null },
+      { group: g, category: 'laptops', status: 'ok', displayName: 'Lenovo IdeaPad Slim 5', variantLabel: null, attrs: { ram_gb: [8, 16] }, reason: null, canonicalName: 'lenovo ideapadslim5' },
     ]);
+    expect((await loadGroups(sql, { categories: ['laptops'] }))[0].storedCanonical).toBe(true);
     await finishRun(sql, runId, {
       batches: 1, items: 1, accepted: 1, rejected: 0, failedBatches: 0,
       inputTokens: 10, outputTokens: 5, cacheReadTokens: 0, cacheWriteTokens: 0, costUsd: 0.001, reportPath: 'out/names/x.html',
     });
     const [row] = await sql`select * from product_names`;
     expect(row.display_name).toBe('Lenovo IdeaPad Slim 5');
+    expect(row.canonical_name).toBe('lenovo ideapadslim5');
     expect(row.attrs).toEqual({ ram_gb: [8, 16] });
     expect(row.title_hash).toBe(titleHash('Lenovo IdeaPad Slim 5', ['8GB', '16GB']));
     expect(Number(row.run_id)).toBe(runId); // bigint comes back as a string
@@ -114,8 +116,8 @@ describe.skipIf(!process.env.SITE_BUILD_TEST_DB)('name normaliser on PGlite', ()
     await saveResults(sql, runId, 'sonnet', [
       { group: g, category: 'laptops', status: 'rejected', displayName: null, variantLabel: null, attrs: {}, reason: 'lost tokens: 5' },
     ]);
-    const rows = await sql`select status, reject_reason, model, display_name from product_names`;
-    expect(rows).toEqual([{ status: 'rejected', reject_reason: 'lost tokens: 5', model: 'sonnet', display_name: null }]);
+    const rows = await sql`select status, reject_reason, model, display_name, canonical_name from product_names`;
+    expect(rows).toEqual([{ status: 'rejected', reject_reason: 'lost tokens: 5', model: 'sonnet', display_name: null, canonical_name: null }]);
   });
 
   it('loads the stored status, re-queues rejected groups on request, and lets --recheck-stored retire ok names', async () => {

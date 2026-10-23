@@ -26,6 +26,8 @@ export type GroupInput = {
   storedHash: string | null;
   /** product_names.status of the last normalisation, null when never done */
   storedStatus?: 'ok' | 'rejected' | null;
+  /** the stored name has a canonical name (migration 012; --backfill-canonical runs the ok names without one) */
+  storedCanonical?: boolean;
   /** whether brand names the maker (src/names/brand.ts); set by the CLI, judged from the brand text alone when missing */
   brandStatus?: BrandStatus;
   /** why the brand is unreliable or none */
@@ -48,7 +50,9 @@ export function titleHash(title: string, variantTitles: string[]): string {
 }
 
 /** Groups never normalised or whose title or variant titles changed since. */
-export function changedGroups(groups: GroupInput[], opts: { retryRejected?: boolean } = {}): GroupInput[] {
+export function changedGroups(groups: GroupInput[], opts: { retryRejected?: boolean; backfillCanonical?: boolean } = {}): GroupInput[] {
+  // the catch-up run: names stored as ok before canonical names existed, whether their title changed or not
+  if (opts.backfillCanonical) return groups.filter((g) => g.storedStatus === 'ok' && g.storedCanonical !== true);
   return groups.filter((g) => g.storedHash !== titleHash(g.title, g.variantTitles) || (opts.retryRejected === true && g.storedStatus === 'rejected'));
 }
 
@@ -66,6 +70,7 @@ type GroupRow = {
   mpn: string | null;
   stored_hash: string | null;
   stored_status: 'ok' | 'rejected' | null;
+  stored_canonical: boolean | null;
 };
 
 /**
@@ -80,7 +85,9 @@ export async function loadGroups(sql: postgres.Sql, opts: { categories?: string[
   const settings = await loadSettings(sql);
   const rows = await sql<GroupRow[]>`
     select sp.shop_id, s.slug as shop_slug, sp.group_key, sp.title, sp.brand, coalesce(sp.category, 'other') as category,
-      p.category_path, p.tags, s.category as shop_category, sp.gtin, sp.mpn, pn.title_hash as stored_hash, pn.status as stored_status
+      p.category_path, p.tags, s.category as shop_category, sp.gtin, sp.mpn, pn.title_hash as stored_hash, pn.status as stored_status,
+      -- read through to_jsonb so this works before migration 012 adds the column
+      (to_jsonb(pn) ->> 'canonical_name') is not null as stored_canonical
     from site_products sp
     join shops s on s.id = sp.shop_id
     left join products p on p.id = sp.rep_product_id
@@ -108,6 +115,7 @@ export async function loadGroups(sql: postgres.Sql, opts: { categories?: string[
       variantTitles: [],
       storedHash: r.stored_hash,
       storedStatus: r.stored_status,
+      storedCanonical: r.stored_canonical === true,
     }));
 
   // variant titles, one query per shop (uses the (shop_id, external_id) index prefix)
