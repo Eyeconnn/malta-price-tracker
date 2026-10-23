@@ -376,7 +376,17 @@ describe('product page, Advanced', () => {
     expect(chart.getAttribute('data-lines')).toBe('2');
     expect(chart.getAttribute('role')).toBe('img');
     const legend = screen.getByRole('list', { name: 'Chart lines' });
-    expect(within(legend).getAllByRole('listitem').map((l) => l.textContent)).toEqual(['Beta (black)', 'Alpha (Black)']);
+    expect(within(legend).getAllByRole('listitem').map((l) => l.textContent)).toEqual(['Beta (black)', 'Alpha (Black)', 'Alpha (Black) was price']);
+  });
+
+  it('also draws the was price of each seller that shows one, as its own named line', async () => {
+    await openProduct();
+    const chart = await screen.findByTestId('sellers-chart');
+    // Alpha's readings carry a was price, Beta's never do
+    expect(chart.querySelector('[data-was-lines]')?.getAttribute('data-was-lines')).toBe('1');
+    const legend = screen.getByRole('list', { name: 'Chart lines' });
+    expect(within(legend).getByText('Alpha (Black) was price')).toBeTruthy();
+    expect(within(legend).queryByText(/Beta.*was price/)).toBeNull();
   });
 
   it('never mixes variants: choosing Grey draws Alpha from the Grey readings', async () => {

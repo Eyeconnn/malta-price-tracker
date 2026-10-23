@@ -3,7 +3,7 @@
 import { CartesianGrid, Line, LineChart, Tooltip, XAxis, YAxis } from 'recharts';
 import { formatDay, formatEuro } from '@/lib/format';
 import { type DayRow, rowIndex } from '@/lib/history';
-import { seriesStyle } from '@/lib/sellerSeries';
+import { hasWas, seriesStyle, WAS_DASH } from '@/lib/sellerSeries';
 
 export type SellerLine = { id: number; shop: string; rows: DayRow[] };
 export type SellersChartProps = { lines: SellerLine[]; animate: boolean };
@@ -30,6 +30,7 @@ export default function SellersChart({ lines, animate }: SellersChartProps) {
       const x = rowIndex(r);
       const point = byDay.get(x) ?? { x };
       point[`s${l.id}`] = r.price;
+      point[`w${l.id}`] = typeof r.was === 'number' && r.was > 0 ? r.was : null;
       byDay.set(x, point);
     }
   }
@@ -37,9 +38,10 @@ export default function SellersChart({ lines, animate }: SellersChartProps) {
   if (data.length === 0) return null;
   const first = data[0]!.x as number;
   const last = data.at(-1)!.x as number;
-  const names = new Map(lines.map((l) => [`s${l.id}`, l.shop]));
+  const names = new Map(lines.flatMap((l) => [[`s${l.id}`, l.shop], [`w${l.id}`, `${l.shop}, was price`]] as [string, string][]));
+  const withWas = lines.map((l, i) => ({ l, i })).filter(({ l }) => hasWas(l));
   return (
-    <div data-animate={String(animate)} data-lines={lines.length}>
+    <div data-animate={String(animate)} data-lines={lines.length} data-was-lines={withWas.length}>
       <LineChart responsive data={data} accessibilityLayer={false} margin={{ top: 8, right: 8, bottom: 0, left: 0 }} style={{ width: '100%', height: 240 }}>
         <CartesianGrid stroke="var(--line)" vertical={false} />
         <XAxis
@@ -55,7 +57,7 @@ export default function SellersChart({ lines, animate }: SellersChartProps) {
         <Tooltip
           isAnimationActive={animate}
           labelFormatter={(x) => formatDay(isoDay(Number(x)))}
-          formatter={(v, key) => [typeof v === 'number' && v > 0 ? formatEuro(v) : 'Not shown', names.get(String(key)) ?? '']}
+          formatter={(v, key) => [typeof v === 'number' && v > 0 ? formatEuro(v) : String(key).startsWith('w') ? 'None' : 'Not shown', names.get(String(key)) ?? '']}
           contentStyle={{ background: 'var(--surface)', border: '1px solid var(--line)', borderRadius: 10, color: 'var(--ink)' }}
           labelStyle={{ color: 'var(--ink)' }}
         />
@@ -72,6 +74,24 @@ export default function SellersChart({ lines, animate }: SellersChartProps) {
               strokeDasharray={dash || undefined}
               dot={l.rows.length <= 7 ? { r: 3, fill: stroke } : false}
               connectNulls
+              isAnimationActive={animate}
+            />
+          );
+        })}
+        {withWas.map(({ l, i }) => {
+          const { stroke } = seriesStyle(i);
+          return (
+            <Line
+              key={`w${l.id}`}
+              type="stepAfter"
+              dataKey={`w${l.id}`}
+              name={`w${l.id}`}
+              stroke={stroke}
+              strokeOpacity={0.6}
+              strokeWidth={1.4}
+              strokeDasharray={WAS_DASH}
+              dot={false}
+              connectNulls={false}
               isAnimationActive={animate}
             />
           );

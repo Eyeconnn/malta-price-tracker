@@ -15,7 +15,7 @@ import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group';
 import { ApiError, api, type Card, type ProductPage, type SellerView, type VariantView, useApi } from '@/lib/api';
 import { formatDay, formatEuro, signedPct } from '@/lib/format';
 import { type DayRow, dayRows, lastDays, recentChange } from '@/lib/history';
-import { SERIES_MAX, seriesStyle } from '@/lib/sellerSeries';
+import { hasWas, SERIES_MAX, seriesStyle, WAS_DASH } from '@/lib/sellerSeries';
 import { useMediaQuery } from '@/lib/useMediaQuery';
 import { cn } from '@/lib/utils';
 import { withSpecs } from '../../../src/site/display.js';
@@ -275,7 +275,7 @@ function SellerRow({
       data-verdict={checked ? seller.verdict.label : undefined}
       data-alarm={alarm ? 'true' : undefined}
       data-selected={selected ? 'true' : undefined}
-      className={cn('glass overflow-hidden', cheapest && 'border-2 border-good', selected && 'border-2 border-accent', alarm && 'border-2 border-bad')}
+      className={cn('glass overflow-hidden', cheapest && 'border-2 border-good', selected && 'border-2 border-brand', alarm && 'border-2 border-bad')}
     >
       {alarm && <AlarmBanner card={base} />}
       <div className={cn('relative flex flex-col gap-1.5 p-4', tag && 'pr-24')}>
@@ -296,7 +296,7 @@ function SellerRow({
           </h3>
           {cheapest && <span className="rounded-full border border-good px-2 py-0.5 text-xs font-bold text-good">Cheapest</span>}
         </div>
-        {selected && <p className="text-xs font-semibold text-accent">The listing you came from</p>}
+        {selected && <p className="text-xs font-semibold text-brand">The listing you came from</p>}
         {option && (
           <p data-option className="text-sm font-medium">
             {option}
@@ -351,7 +351,7 @@ function SellerRow({
               href={shopUrl}
               target="_blank"
               rel="noopener noreferrer nofollow"
-              className="inline-flex min-h-11 w-fit items-center gap-1.5 rounded-sm font-semibold text-accent outline-none hover:underline focus-visible:ring-[3px] focus-visible:ring-ring/50"
+              className="inline-flex min-h-11 w-fit items-center gap-1.5 rounded-sm font-semibold text-brand outline-none hover:underline focus-visible:ring-[3px] focus-visible:ring-ring/50"
             >
               View on {seller.shop}
               <ExternalLink className="size-4" aria-hidden="true" />
@@ -486,6 +486,16 @@ function History({
                   </li>
                 );
               })}
+              {lines.map((l, i) =>
+                hasWas(l) ? (
+                  <li key={`w${l.id}`} className="flex items-center gap-1.5">
+                    <svg aria-hidden="true" width="18" height="6" className="flex-none">
+                      <line x1="0" y1="3" x2="18" y2="3" stroke={seriesStyle(i).stroke} strokeOpacity="0.6" strokeWidth="1.4" strokeDasharray={WAS_DASH} />
+                    </svg>
+                    {`${l.legend} was price`}
+                  </li>
+                ) : null,
+              )}
             </ul>
             {sellers.filter((s) => (shownBy.get(s.id)?.variantId ?? null) !== null).length > SERIES_MAX && (
               <p className="text-xs text-muted-foreground">{`The chart shows the first ${SERIES_MAX} shops of the list.`}</p>
