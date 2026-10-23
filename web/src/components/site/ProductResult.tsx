@@ -61,10 +61,11 @@ const PHOTO = /^\/img\/[0-9a-f]{64}\.webp$/;
 
 /**
  * A product photo, our own small copy (at most 480 px). width and height keep its square box (object-contain)
- * so nothing moves when it loads; loaded lazily, decoded off the main thread, alt text the clean product name.
- * Without a photo (or when it does not load) a neutral placeholder of the same size.
+ * so nothing moves when it loads; loaded lazily, decoded off the main thread. alt: the clean product name, or ""
+ * where that name is shown right next to the image (so it is not read twice). Without a photo (or when it does not
+ * load) a neutral placeholder of the same size.
  */
-export function ProductImage({ url, name, size, className }: { url: string | null; name: string; size: number; className?: string }) {
+export function ProductImage({ url, alt, size, className }: { url: string | null; alt: string; size: number; className?: string }) {
   const [failed, setFailed] = useState<string | null>(null);
   if (!url || !PHOTO.test(url) || failed === url) {
     return <span aria-hidden="true" data-photo-placeholder="" className={cn('block flex-none rounded-xl bg-secondary/60', className)} style={{ width: size, height: size }} />;
@@ -72,7 +73,7 @@ export function ProductImage({ url, name, size, className }: { url: string | nul
   return (
     <img
       src={url}
-      alt={name}
+      alt={alt}
       width={size}
       height={size}
       loading="lazy"

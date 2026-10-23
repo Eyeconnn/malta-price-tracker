@@ -22,7 +22,7 @@ function ProductCard({ result }: { result: ProductResult }) {
   const description = [verdictNote(result), result.inStock ? '' : 'out of stock'].filter((x) => x !== '').join(', ');
   return (
     <article aria-labelledby={id} className="glass relative flex min-h-11 items-start gap-3 p-4">
-      <ProductImage url={result.imageUrl} name={result.name} size={64} className="size-16" />
+      <ProductImage url={result.imageUrl} alt="" size={64} className="size-16" />
       <div className="flex min-w-0 flex-1 flex-col gap-1">
         <h2 id={id} className="leading-snug font-semibold break-words">
           <Link

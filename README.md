@@ -73,16 +73,22 @@ To test database writes without Neon, `pnpm dev-db` starts an in-memory Postgres
 - **Alerts** (one email per scrape invocation): run failed or did not finish, products seen more than 30% below
   the shop's 7-day average, more than 5% of fetches failed, flagged rows. Runs left unfinished for 7 hours are
   marked failed.
-- **Daily summary** at 05:30 UTC: shops ok / partial / failed / missing, product counts, and database size against the Neon plan (5 GB on Build, set `DB_LIMIT_MB` to change). Over 80% it says it is time to shrink the data. It also gives the photo copies stored in R2 and their total size against the 10 GB free tier, with a warning from 8 GB.
-- **Images (photos):** off unless `IMAGES_ENABLED=on` (scripts/run-local.ps1 and the scrape workflow set it).
+- **Daily summary** at 05:30 UTC: shops ok / partial / failed / missing, product counts, and database size against the Neon plan (5 GB on Build, set `DB_LIMIT_MB` to change). Over 80% it says it is time to shrink the data. It also gives what R2 holds: the photo copies and the HTML snapshots, their total against the 10 GB free tier, with a warning from 8 GB.
+- **Images (photos):** off until the environment variable `IMAGES_ENABLED` is set to `on` for the scrape. Nothing
+  sets it yet: once this pipeline is merged it goes in `scripts/run-local.ps1` (for the shops scraped on the PC)
+  and in the `env:` of the scrape workflows in `.github/workflows/` (for the others).
   One photo per product group, not per variant: the site row's own picture first, another variant's only when
   that one fails; Black Friday marked groups first, then the most recently seen. Only a small copy is stored:
-  WebP, at most 480 px on the long side, quality 75, no metadata (an SVG is rasterised the same way), as
+  WebP, at most 480 px on the long side, quality 75, no metadata, first frame only, as
   `img/{sha256 of the original}.webp` with its width, height and bytes. Originals are never stored; the same
-  original is stored once. Non-images and files over 15 MB are refused and recorded as failures, which are
-  retried after 7 days. Up to `images_per_run` (300) image requests per shop per night within `images_minutes`
-  (20), so large catalogues fill in over several nights. Image fetches on the shop's own host use the shop's
-  robots.txt and rate limit; allowlisted CDN hosts get one fetcher each with its own delay.
+  original is stored once. SVG, other non-images, files over 15 MB and images over 50 megapixels are refused and
+  recorded as failures, which are retried after 7 days. Up to `images_per_run` (300) image requests per shop per
+  night within `images_minutes` (20), so large catalogues fill in over several nights. Image fetches on the shop's
+  own host go on with the scrape run's own fetcher (its robots.txt, gap and Crawl-delay); allowlisted CDN hosts get
+  one fetcher each with its own delay. A fetcher that gives up (6 failures in a row, such as hotlink 403s on a
+  CDN) stops its images for the rest of that run without marking the remaining URLs as failed.
+  Hard storage cap: no photo is downloaded once photos plus HTML snapshots plus a 100 MB allowance reach 9 GB
+  (`PHOTO_STORAGE_CAP_BYTES` in `src/pipeline/images.ts`); going past it needs the owner's approval.
 
 ## Adapters
 
@@ -371,7 +377,7 @@ Set each one with `pnpm exec wrangler secret put NAME --cwd web` (wrangler asks 
 
 ### Photos
 
-Product photos come from our own small copies in R2 (bucket in `R2_BUCKET`, binding `BUCKET` in `web/wrangler.toml`), never from the shops, so a shop never sees a visitor. The site build copies the stored key of each group's photo into `site_products.image_key` (shown variant, else the representative, else any variant). The API gives `imageUrl: "/img/<sha256>.webp"` or null and no shop image address anywhere; the Worker serves `GET /img/<sha256>.webp` (64 lowercase hex only, else 404) as `image/webp` with `nosniff` and a year of immutable caching, behind the same access check as every page (`private` caching while the site is private). The CSP stays `img-src 'self' data:`. Downloads stay off until `IMAGES_ENABLED=on`. Run `pnpm migrate` (014 adds `image_key`) before deploying the Worker, since the API reads that column. Storage must stay inside the R2 free tier (10 GB) unless the owner approves more: about 190,000 product groups at roughly 20 KB per copy is about 4 GB.
+Product photos come from our own small copies in R2 (bucket in `R2_BUCKET`, binding `BUCKET` in `web/wrangler.toml`), never from the shops, so a shop never sees a visitor. The site build copies the stored key of each group's photo into `site_products.image_key` (shown variant, else the representative, else any variant). The API gives `imageUrl: "/img/<sha256>.webp"` or null and no shop image address anywhere; the Worker serves `GET /img/<sha256>.webp` (64 lowercase hex only, else 404) as `image/webp` with `nosniff` and a year of immutable caching, behind the same access check as every page (`private` caching while the site is private). The CSP stays `img-src 'self' data:`. Downloads stay off until `IMAGES_ENABLED=on` is set for the scrape (see Images above). Run `pnpm migrate` (014 adds `image_key`) before deploying the Worker, since the API reads that column. Storage must stay inside the R2 free tier (10 GB) unless the owner approves more (downloads stop at the 9 GB cap): about 190,000 product groups at roughly 20 KB per copy is about 4 GB.
 
 ### Nightly site-build
 

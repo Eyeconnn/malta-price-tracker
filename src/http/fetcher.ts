@@ -10,6 +10,9 @@ export class DisallowedError extends Error {
 
 export class ShopAbortError extends Error {}
 
+/** The answer is larger than the fetcher's (or the request's) body limit; not retried. */
+export class BodyTooLargeError extends Error {}
+
 export class HttpError extends Error {
   /** retryAfterMs: the answer's Retry-After in ms (null when absent); waitTooLong: it was longer than the backoff cap */
   constructor(
@@ -262,7 +265,8 @@ export class ShopFetcher {
   }
 
   /** GET a URL. Serialised per fetcher: never two requests to a shop at once. */
-  get(url: string, opts: { accept?: string; timeoutMs?: number; allowStatus?: number[]; retries?: number } = {}): Promise<FetchResult> {
+  /** maxBodyBytes: a lower body limit for this request (image downloads); a larger answer fails without a retry */
+  get(url: string, opts: { accept?: string; timeoutMs?: number; allowStatus?: number[]; retries?: number; maxBodyBytes?: number } = {}): Promise<FetchResult> {
     const run = this.queue.then(() => this.doGet(url, opts));
     this.queue = run.catch(() => {});
     return run;
@@ -270,7 +274,7 @@ export class ShopFetcher {
 
   private async doGet(
     startUrl: string,
-    opts: { accept?: string; timeoutMs?: number; allowStatus?: number[]; retries?: number },
+    opts: { accept?: string; timeoutMs?: number; allowStatus?: number[]; retries?: number; maxBodyBytes?: number },
   ): Promise<FetchResult> {
     if (this.aborted) throw new ShopAbortError(this.abortReason ?? 'shop run already abandoned after repeated failures');
     let url = startUrl;
@@ -292,6 +296,7 @@ export class ShopFetcher {
       let status = 0;
       let retryAfterMs: number | null = null;
       let errMsg = '';
+      let tooLarge = false;
       try {
         const res = await this.fetchFollowingRedirects(url, opts);
         status = res.status;
@@ -304,6 +309,8 @@ export class ShopFetcher {
         errMsg = `HTTP ${status}`;
       } catch (e) {
         if (e instanceof DisallowedError) throw e;
+        // fetching a too large answer again would only download it again
+        tooLarge = e instanceof BodyTooLargeError;
         errMsg = (e as Error).name === 'TimeoutError' ? `timeout after ${opts.timeoutMs ?? this.timeoutMs}ms` : (e as Error).message;
       }
       this.lastRequestEnd.set(key, Date.now());
@@ -311,7 +318,7 @@ export class ShopFetcher {
       // a Retry-After longer than the backoff cap is not waited for: the request fails now
       const waitTooLong = retryAfterMs !== null && retryAfterMs > MAX_BACKOFF_MS;
       if (waitTooLong) errMsg = `${errMsg} (asked to wait ${Math.round(retryAfterMs! / 1000)} s)`;
-      const retryable = (status === 0 || RETRYABLE.has(status)) && !waitTooLong;
+      const retryable = (status === 0 || RETRYABLE.has(status)) && !waitTooLong && !tooLarge;
       if (retryable && attempt < (opts.retries ?? this.maxRetries)) {
         this.stats.retries++;
         const backoff = Math.min(Math.max(retryAfterMs ?? 0, 15_000 * 2 ** attempt), MAX_BACKOFF_MS);
@@ -335,7 +342,7 @@ export class ShopFetcher {
 
   private async fetchFollowingRedirects(
     startUrl: string,
-    opts: { accept?: string; timeoutMs?: number },
+    opts: { accept?: string; timeoutMs?: number; maxBodyBytes?: number },
   ): Promise<FetchResult> {
     let url = startUrl;
     const signal = AbortSignal.timeout(opts.timeoutMs ?? this.timeoutMs);
@@ -360,7 +367,7 @@ export class ShopFetcher {
         url = next;
         continue;
       }
-      const body = await readCapped(res, this.maxBodyBytes);
+      const body = await readCapped(res, Math.min(opts.maxBodyBytes ?? this.maxBodyBytes, this.maxBodyBytes));
       return {
         url,
         status: res.status,
@@ -391,14 +398,15 @@ async function readCapped(res: Awaited<ReturnType<typeof safeFetch>>, max: numbe
   const declared = Number(res.headers.get('content-length') ?? 0);
   if (declared > max) {
     await res.body?.cancel();
-    throw new Error(`response too large (${declared} bytes)`);
+    throw new BodyTooLargeError(`response too large (${declared} bytes)`);
   }
   if (!res.body) return Buffer.alloc(0);
   const chunks: Buffer[] = [];
   let size = 0;
   for await (const chunk of res.body) {
     size += chunk.length;
-    if (size > max) throw new Error(`response larger than ${max} bytes`);
+    // leaving the loop cancels the stream
+    if (size > max) throw new BodyTooLargeError(`response larger than ${max} bytes`);
     chunks.push(Buffer.from(chunk));
   }
   return Buffer.concat(chunks);

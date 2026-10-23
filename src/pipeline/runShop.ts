@@ -40,6 +40,8 @@ export interface RunResult {
   durationMs: number;
   /** requests that finally failed with 429 or 5xx, and the last Retry-After (ms) seen on them */
   rateLimited?: { count: number; retryAfterMs: number | null };
+  /** the run's fetcher: the image step goes on with it, keeping the run's request gap and Crawl-delay */
+  fetcher?: ShopFetcher;
 }
 
 export interface RunOptions {
@@ -138,5 +140,5 @@ export async function runShop(shop: Shop, opts: RunOptions = {}): Promise<RunRes
   ctx.log(
     `done: ${status}, ${seen.size} products, ${st.requests} requests (${st.failed} failed), ${errors.length} errors, ${Math.round((Date.now() - t0) / 1000)}s`,
   );
-  return { shop, runId, totals, flagged, sample, durationMs: Date.now() - t0, rateLimited: { count: st.rateLimited, retryAfterMs: st.retryAfterMs } };
+  return { shop, runId, totals, flagged, sample, durationMs: Date.now() - t0, rateLimited: { count: st.rateLimited, retryAfterMs: st.retryAfterMs }, fetcher: ctx.fetcher };
 }

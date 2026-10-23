@@ -2,10 +2,21 @@
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import sharp from 'sharp';
+import { crc32 } from 'node:zlib';
 import { describe, expect, it } from 'vitest';
 import { MAX_IMAGE_BYTES, imageStorageLine, isPhotoKey, makeSmallCopy, photoKey } from '../src/pipeline/photo.js';
 
 const fixture = (name: string) => readFile(path.resolve('test/fixtures/images', name));
+
+/** A PNG whose header claims width x height (the pixel data stays tiny): what a decompression bomb looks like. */
+async function claimSize(png: Buffer, width: number, height: number): Promise<Buffer> {
+  const out = Buffer.from(png);
+  // signature (8), IHDR length (4), 'IHDR' (4), then width and height; the CRC covers type + data (17 bytes)
+  out.writeUInt32BE(width, 16);
+  out.writeUInt32BE(height, 20);
+  out.writeUInt32BE(crc32(out.subarray(12, 29)), 29);
+  return out;
+}
 
 describe('makeSmallCopy', () => {
   it('resizes a PNG to 480 px on the long side as WebP without metadata', async () => {
@@ -36,15 +47,28 @@ describe('makeSmallCopy', () => {
     expect([copy.width, copy.height]).toEqual([360, 480]);
   });
 
-  it('rasterises an SVG to WebP (no SVG and no script is ever stored)', async () => {
-    const svg = await fixture('logo.svg');
-    const copy = await makeSmallCopy(svg);
+  it('refuses SVG (no SVG is ever stored or served)', async () => {
+    await expect(makeSmallCopy(await fixture('logo.svg'))).rejects.toThrow(/not an image/);
+  });
+
+  it('keeps only the first frame of an animated image', async () => {
+    const gif = await fixture('two-frames.gif');
+    expect((await sharp(gif).metadata()).pages).toBe(2);
+    const copy = await makeSmallCopy(gif);
     const meta = await sharp(copy.body).metadata();
     expect(meta.format).toBe('webp');
-    // a vector is drawn at the full 480 px, not scaled up from its 200 px raster
-    expect([copy.width, copy.height]).toEqual([480, 240]);
-    expect(copy.body.includes(Buffer.from('<script'))).toBe(false);
-    expect(copy.body.includes(Buffer.from('<svg'))).toBe(false);
+    expect(meta.pages ?? 1).toBe(1);
+    expect([copy.width, copy.height]).toEqual([40, 40]);
+    // the first frame is red
+    const { data } = await sharp(copy.body).raw().toBuffer({ resolveWithObject: true });
+    expect(data[0]).toBeGreaterThan(150);
+    expect(data[2]).toBeLessThan(80);
+  });
+
+  it('refuses an image whose pixel count is over the limit (decompression bomb)', async () => {
+    const bomb = await claimSize(await sharp({ create: { width: 1, height: 1, channels: 3, background: '#fff' } }).png().toBuffer(), 10_000, 10_000);
+    expect(bomb.length).toBeLessThan(1000);
+    await expect(makeSmallCopy(bomb)).rejects.toThrow(/too many pixels/);
   });
 
   it('rejects data that is not an image', async () => {
@@ -71,11 +95,13 @@ describe('photo keys', () => {
 });
 
 describe('imageStorageLine', () => {
-  it('reports the stored copies and their size against the free tier', () => {
-    expect(imageStorageLine(1234, 46_000_000)).toBe('Photos stored in R2: 1,234 (46 MB of 10 GB free tier).');
+  it('reports the stored copies and the snapshots against the free tier and the download cap', () => {
+    expect(imageStorageLine(1234, 46_000_000, 12_000_000)).toBe(
+      'R2 storage: 1,234 photos (46 MB) and HTML snapshots (12 MB), 58 MB of the 10 GB free tier; photo downloads stop at 9 GB.',
+    );
   });
-  it('warns from 8 GB', () => {
-    expect(imageStorageLine(200_000, 8_100_000_000)).toMatch(/^Photos stored in R2: 200,000 \(8\.1 GB of 10 GB free tier\)\. {2}WARNING: over 8 GB/);
-    expect(imageStorageLine(10, 7_900_000_000)).not.toMatch(/WARNING/);
+  it('warns from 8 GB, photos and snapshots together', () => {
+    expect(imageStorageLine(200_000, 6_100_000_000, 2_000_000_000)).toMatch(/, 8\.1 GB of the 10 GB free tier; .*\. {2}WARNING: over 8 GB/);
+    expect(imageStorageLine(10, 7_900_000_000, 0)).not.toMatch(/WARNING/);
   });
 });

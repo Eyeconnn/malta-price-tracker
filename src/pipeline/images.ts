@@ -3,10 +3,10 @@ import type postgres from 'postgres';
 import sharp from 'sharp';
 import { db } from '../db.js';
 import { userAgent } from '../env.js';
-import { ShopFetcher, scopeHost } from '../http/fetcher.js';
+import { OutOfScopeError, ShopAbortError, ShopFetcher, scopeHost } from '../http/fetcher.js';
 import { r2Configured, r2Writable, putObject } from '../r2.js';
 import type { Shop } from '../types.js';
-import { isPhotoKey, makeSmallCopy, photoKey } from './photo.js';
+import { MAX_IMAGE_BYTES, isPhotoKey, makeSmallCopy, photoKey } from './photo.js';
 
 /** 64-bit difference hash (dHash) as 16 hex chars: 9x8 greyscale, compare horizontal neighbours. */
 export async function dHash(buf: Buffer): Promise<string> {
@@ -34,14 +34,29 @@ function fetcherFor(url: string, shop: Shop, shopFetcher: ShopFetcher): ShopFetc
   if (!allowed.some((h) => host === h || host.endsWith(`.${h}`))) throw new Error(`image host ${host} not in the allowlist`);
   let f = cdnFetchers.get(host);
   if (!f) {
-    f = new ShopFetcher({ userAgent: userAgent(), allowedHosts: [host], minDelayMs: 300, maxDelayMs: 800, maxBodyBytes: 15 * 1024 * 1024 });
+    f = new ShopFetcher({ userAgent: userAgent(), allowedHosts: [host], minDelayMs: 300, maxDelayMs: 800, maxBodyBytes: MAX_IMAGE_BYTES });
     cdnFetchers.set(host, f);
   }
   return f;
 }
 
+/** The fetcher that would fetch url: 'shop' for the shop's own hosts, else the CDN host (one fetcher each). */
+function fetcherName(url: string, shop: Shop): string {
+  const host = new URL(url).hostname;
+  const scope = scopeHost(shop.base_url);
+  return host === scope || host.endsWith(`.${scope}`) ? 'shop' : host;
+}
+
 /** Only variants seen this recently are on the site, so only their groups get a photo. */
 const RECENT_DAYS = 7;
+
+/**
+ * Hard cap on what we keep in R2 (photo copies and HTML snapshots), below the 10 GB free tier: no photo is
+ * downloaded once the stored bytes plus STORAGE_ALLOWANCE_BYTES reach it. Going past it needs the owner's approval.
+ */
+export const PHOTO_STORAGE_CAP_BYTES = 9e9;
+/** Room kept under the cap for one more night of snapshots and the copy being stored. */
+const STORAGE_ALLOWANCE_BYTES = 100e6;
 
 export type ImageDeps = {
   sql: postgres.Sql;
@@ -49,6 +64,8 @@ export type ImageDeps = {
   fetchImage: (url: string) => Promise<{ status: number; body: Buffer }>;
   /** stores one object in R2 */
   put: (key: string, body: Buffer, contentType: string) => Promise<void>;
+  /** the scrape run's own fetcher, so image requests keep the run's gap and Crawl-delay (no request right after the scrape's last) */
+  shopFetcher: ShopFetcher;
 };
 
 /** Points every product of the shop at the stored copy of its image URL; returns how many changed. */
@@ -100,7 +117,7 @@ class StorageError extends Error {}
  * at most once: later products with the same URL are linked to the stored row.
  */
 export async function downloadImagesForShop(shop: Shop, deps: Partial<ImageDeps> = {}): Promise<{ downloaded: number; linked: number }> {
-  // off until switched on (IMAGES_ENABLED=on in scripts/run-local.ps1 and the scrape workflow)
+  // off until IMAGES_ENABLED=on is set for the scrape (to go in scripts/run-local.ps1 and the scrape workflows)
   if (!/^(1|on|true|yes)$/i.test(process.env.IMAGES_ENABLED ?? '')) {
     console.log(`[${shop.slug}] images skipped: IMAGES_ENABLED is not on`);
     return { downloaded: 0, linked: 0 };
@@ -111,19 +128,27 @@ export async function downloadImagesForShop(shop: Shop, deps: Partial<ImageDeps>
   }
   const sql = deps.sql ?? db();
   const put = deps.put ?? putObject;
-  let shopFetcher: ShopFetcher | undefined;
+  let shopFetcher = deps.shopFetcher;
   const fetchImage =
     deps.fetchImage ??
     (async (url: string) => {
       shopFetcher ??= ShopFetcher.fromConfig(shop.config, userAgent(), shop.base_url, () => {});
-      const res = await fetcherFor(url, shop, shopFetcher).get(url, { accept: 'image/avif,image/webp,image/*;q=0.8' });
+      const res = await fetcherFor(url, shop, shopFetcher).get(url, { accept: 'image/avif,image/webp,image/*;q=0.8', maxBodyBytes: MAX_IMAGE_BYTES });
       return { status: res.status, body: res.body };
     });
 
   const linked = await linkProducts(sql, shop.id);
+  const usage = await photoStorage(sql);
+  let stored = usage.bytes + usage.snapshotBytes;
+  const full = () => stored + STORAGE_ALLOWANCE_BYTES >= PHOTO_STORAGE_CAP_BYTES;
+  if (full()) {
+    console.error(`[${shop.slug}] images skipped: R2 holds ${(stored / 1e9).toFixed(2)} GB, the cap is ${PHOTO_STORAGE_CAP_BYTES / 1e9} GB`);
+    return { downloaded: 0, linked };
+  }
   const budget = Number(shop.config.images_per_run ?? 300);
   const deadline = Date.now() + Number(shop.config.images_minutes ?? 20) * 60_000;
-  const groups = await photoCandidates(sql, shop.id, budget);
+  // more groups than requests: a fetcher that gives up leaves its groups for the next run, and others may follow
+  const groups = await photoCandidates(sql, shop.id, budget * 3);
   if (!groups.length) return { downloaded: 0, linked };
 
   /** One URL: fetched, made small, stored (unless the same original is stored already) and recorded. */
@@ -142,6 +167,7 @@ export async function downloadImagesForShop(shop: Shop, deps: Partial<ImageDeps>
       } catch (e) {
         throw new StorageError((e as Error).message);
       }
+      stored += copy.bytes;
       row = { r2_key: key, phash: await dHash(copy.body), width: copy.width, height: copy.height, bytes: copy.bytes };
     }
     await sql`
@@ -157,12 +183,22 @@ export async function downloadImagesForShop(shop: Shop, deps: Partial<ImageDeps>
   let failed = 0;
   // URLs tried in this run (several groups can share a picture): true when stored
   const tried = new Map<string, boolean>();
+  // fetchers that gave up in this run (the shop's, or a CDN's after repeated refusals): their URLs wait for the
+  // next run unmarked, since the URLs themselves did not fail
+  const stopped = new Set<string>();
   run: for (const g of groups) {
     for (const url of new Set(g.urls)) {
       const before = tried.get(url);
       if (before === true) break;
       if (before === false) continue;
-      if (requests >= budget || Date.now() > deadline) break run;
+      let via: string;
+      try {
+        via = fetcherName(url, shop);
+      } catch {
+        via = 'invalid';
+      }
+      if (stopped.has(via)) continue;
+      if (requests >= budget || Date.now() > deadline || full()) break run;
       requests++;
       try {
         await store(url);
@@ -173,6 +209,13 @@ export async function downloadImagesForShop(shop: Shop, deps: Partial<ImageDeps>
         if (e instanceof StorageError) {
           console.error(`[${shop.slug}] R2 upload failed, stopping images for this run: ${e.message}`);
           break run;
+        }
+        if (e instanceof ShopAbortError || e instanceof OutOfScopeError) {
+          // not this URL's failure: no failure mark and no budget spent; the fetcher's other URLs are skipped
+          requests--;
+          stopped.add(via);
+          console.log(`[${shop.slug}] images from ${via === 'shop' ? 'the shop' : via} stopped for this run: ${(e as Error).message}`);
+          continue;
         }
         tried.set(url, false);
         failed++;
@@ -187,10 +230,14 @@ export async function downloadImagesForShop(shop: Shop, deps: Partial<ImageDeps>
   return { downloaded, linked };
 }
 
-/** Our photo copies in R2 for the daily summary: one object per stored key (several image URLs can share one). */
-export async function photoStorage(sql: postgres.Sql): Promise<{ count: number; bytes: number }> {
-  const [row] = await sql<{ count: number; bytes: string | null }[]>`
-    select count(*)::int as count, coalesce(sum(bytes), 0)::text as bytes
+/**
+ * What we keep in R2, for the storage cap and the daily summary: the photo copies (one object per stored key;
+ * several image URLs can share one) and the HTML snapshots.
+ */
+export async function photoStorage(sql: postgres.Sql): Promise<{ count: number; bytes: number; snapshotBytes: number }> {
+  const [row] = await sql<{ count: number; bytes: string; snapshot_bytes: string }[]>`
+    select count(*)::int as count, coalesce(sum(bytes), 0)::text as bytes,
+      (select coalesce(sum(bytes), 0)::text from snapshots where r2_key is not null) as snapshot_bytes
     from (select distinct on (r2_key) r2_key, bytes from images where r2_key like 'img/%') x`;
-  return { count: row?.count ?? 0, bytes: Number(row?.bytes ?? 0) };
+  return { count: row?.count ?? 0, bytes: Number(row?.bytes ?? 0), snapshotBytes: Number(row?.snapshot_bytes ?? 0) };
 }

@@ -593,7 +593,7 @@ function ProductContent({ data, selectedId }: { data: ProductPage; selectedId: n
     <div className="flex flex-col gap-4">
       <article aria-labelledby={titleId} className="glass flex flex-col gap-3 p-4">
         <div className="flex items-start gap-4">
-          <ProductImage url={product.imageUrl} name={product.name} size={96} className="size-24" />
+          <ProductImage url={product.imageUrl} alt="" size={96} className="size-24" />
           <div className="flex min-w-0 flex-col gap-1">
             {product.brand && <p className="text-sm text-muted-foreground">{product.brand}</p>}
             <h1 id={titleId} className="text-xl leading-snug font-bold tracking-tight break-words sm:text-2xl">

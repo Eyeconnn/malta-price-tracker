@@ -161,7 +161,7 @@ function LiveRow({ result, replace }: { result: ProductResult; replace: boolean 
       >
         <span className="sr-only">{resultLabel(result)}</span>
         <span aria-hidden="true" className="flex min-w-0 flex-1 items-center gap-3">
-          <ProductImage url={result.imageUrl} name={result.name} size={40} className="size-10" />
+          <ProductImage url={result.imageUrl} alt="" size={40} className="size-10" />
           <span className="min-w-0 flex-1">
             <span className="block truncate font-medium">{resultTitle(result)}</span>
             <span className="block truncate text-xs text-muted-foreground">

@@ -149,3 +149,26 @@ describe('adapters stop at the request cap', () => {
     expect(r.totals.notes).toMatch(/request cap of 5/);
   });
 });
+
+describe('per-request body limit (image downloads)', () => {
+  it('a larger answer fails at once, without retries', async () => {
+    answers.route = (url) => (url.endsWith('/robots.txt') ? new Response('') : new Response(new Uint8Array(2000)));
+    const f = fast();
+    await expect(f.get('https://shop.example.mt/big.jpg', { maxBodyBytes: 1000 })).rejects.toThrow(/larger than 1000 bytes/);
+    expect(answers.log.filter((l) => l.url.endsWith('/big.jpg'))).toHaveLength(1);
+    expect(f.stats.retries).toBe(0);
+  });
+
+  it('a declared content-length over the limit fails before reading, without retries', async () => {
+    answers.route = (url) => (url.endsWith('/robots.txt') ? new Response('') : new Response('x', { headers: { 'content-length': '5000' } }));
+    const f = fast();
+    await expect(f.get('https://shop.example.mt/big.jpg', { maxBodyBytes: 1000 })).rejects.toThrow(/too large \(5000 bytes\)/);
+    expect(answers.log.filter((l) => l.url.endsWith('/big.jpg'))).toHaveLength(1);
+  });
+
+  it('never raises the fetcher limit', async () => {
+    answers.route = (url) => (url.endsWith('/robots.txt') ? new Response('') : new Response(new Uint8Array(2000)));
+    const f = fast({ maxBodyBytes: 1000 });
+    await expect(f.get('https://shop.example.mt/big.jpg', { maxBodyBytes: 10_000 })).rejects.toThrow(/larger than 1000 bytes/);
+  });
+});
