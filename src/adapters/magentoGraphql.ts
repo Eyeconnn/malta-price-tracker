@@ -60,17 +60,19 @@ export function gqlToRecord(p: GqlProduct, root: string): NormalisedRecord {
   return r;
 }
 
+/** The catalogue query the crawl uses (also sent with pageSize 1 by shop-request detection to prove it works). */
+export function productsQuery(rootCat: string, pageSize: number, page: number): string {
+  return `{ products(filter:{category_id:{eq:"${rootCat}"}}, pageSize:${pageSize}, currentPage:${page}, sort:{name:ASC}) {
+     total_count page_info { total_pages } items { ${FIELDS} } } }`;
+}
+
 export async function* crawlGraphql(ctx: CrawlContext): AsyncGenerator<NormalisedRecord[]> {
   const root = siteRoot(ctx);
   const rootCat = String(ctx.shop.config.graphql_root ?? 2);
   const pageSize = Math.min(Number(ctx.shop.config.page_size ?? 100), 100);
   let produced = 0;
   for (let page = 1; page < 1000; page++) {
-    const data = await query<{ products: { total_count: number; page_info: { total_pages: number }; items: GqlProduct[] } }>(
-      ctx,
-      `{ products(filter:{category_id:{eq:"${rootCat}"}}, pageSize:${pageSize}, currentPage:${page}, sort:{name:ASC}) {
-         total_count page_info { total_pages } items { ${FIELDS} } } }`,
-    );
+    const data = await query<{ products: { total_count: number; page_info: { total_pages: number }; items: GqlProduct[] } }>(ctx, productsQuery(rootCat, pageSize, page));
     const items = data.products.items;
     if (!items.length) break;
     const recs = items.map((p) => gqlToRecord(p, root));

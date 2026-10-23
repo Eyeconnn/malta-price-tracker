@@ -16,10 +16,12 @@ describe('run-names-nightly.ps1', () => {
 });
 
 describe('install-tasks.ps1', () => {
-  it('installs "MTP Name Normaliser" daily at 05:00, hidden, IgnoreNew, 4 hour limit, and the Remove line names it', () => {
-    expect(install).toMatch(/Install 'MTP Name Normaliser' 'run-names-nightly\.ps1' \(New-ScheduledTaskTrigger -Daily -At '05:00'\) \(New-TimeSpan -Hours 4\)/);
-    expect(install).toMatch(/-Hidden/);
-    expect(install).toMatch(/-MultipleInstances IgnoreNew/);
-    expect(install).toMatch(/Remove: Unregister-ScheduledTask -TaskName [^\n]*'MTP Name Normaliser'/);
+  it('installs "MTP Name Normaliser" daily at 05:00, hidden window, no wake, IgnoreNew, 4 hours, next to main\'s tasks', () => {
+    expect(install).toMatch(/Install 'MTP Name Normaliser' 'run-names-nightly\.ps1' \(New-ScheduledTaskTrigger -Daily -At '05:00'\) \(New-TimeSpan -Hours 4\) -Hidden -NoWake/);
+    expect(install).toContain("'-WindowStyle Hidden '");
+    expect(install).toContain("MultipleInstances = 'IgnoreNew'");
+    expect(install).toMatch(/Install 'MTP Shop Requests' 'run-shop-requests\.ps1'/);
+    expect(install).toMatch(/Remove: Unregister-ScheduledTask -TaskName [^\n]*'MTP Shop Requests','MTP Name Normaliser'/);
+    expect(install).toMatch(/-Description \$description/);
   });
 });

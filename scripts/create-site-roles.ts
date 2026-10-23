@@ -1,6 +1,7 @@
 // Creates (or re-passwords) the two least-privilege roles used by the public site Worker, and retires the old site_writer.
 //   site_reporter  insert on reports; select (ip_hash, created_at) on reports for rate limiting. Nothing else.
-//   site_admin     admin panel: read the site tables, edit settings, resolve reports, hide shops, confirm matches.
+//   site_admin     admin panel: read the site tables, edit settings, resolve reports, hide shops, confirm matches,
+//                  add shop requests and change their status (retry, reject).
 // Writes REPORTER_DATABASE_URL and ADMIN_DATABASE_URL to .env (skipped for a local dev database).
 //   pnpm exec tsx scripts/create-site-roles.ts
 import { randomBytes } from 'node:crypto';
@@ -27,6 +28,11 @@ const ROLES = [
       'update (status, admin_note, resolved_at) on reports',
       'update (site_hidden) on shops',
       'update (match_confirmed) on site_products',
+      // Add shop page (migration 009): list, add an address, retry or reject (status only)
+      'select on shop_requests',
+      'insert (origin, display_name, shop_category) on shop_requests',
+      'update (status) on shop_requests',
+      'usage on sequence shop_requests_id_seq',
     ],
   },
 ] as const;
