@@ -186,3 +186,11 @@ export async function downloadImagesForShop(shop: Shop, deps: Partial<ImageDeps>
   console.log(`[${shop.slug}] images: ${downloaded} groups got a photo, ${failed} failed, ${requests} requests`);
   return { downloaded, linked };
 }
+
+/** Our photo copies in R2 for the daily summary: one object per stored key (several image URLs can share one). */
+export async function photoStorage(sql: postgres.Sql): Promise<{ count: number; bytes: number }> {
+  const [row] = await sql<{ count: number; bytes: string | null }[]>`
+    select count(*)::int as count, coalesce(sum(bytes), 0)::text as bytes
+    from (select distinct on (r2_key) r2_key, bytes from images where r2_key like 'img/%') x`;
+  return { count: row?.count ?? 0, bytes: Number(row?.bytes ?? 0) };
+}

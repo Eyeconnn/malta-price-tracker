@@ -10,7 +10,7 @@ This repo holds the collection side (scrapers, database, scheduling, alerts) and
 
 TypeScript on Node 22 (ESM, run with `tsx`), pnpm, Postgres on Neon (`postgres` package), native `fetch`,
 `cheerio`, `zod`, `robots-parser`, Cloudflare R2 through `@aws-sdk/client-s3`, Gmail SMTP (`nodemailer`) for email,
-GitHub Actions cron for scheduling. `sharp` decodes images for the perceptual hash.
+GitHub Actions cron for scheduling. `sharp` makes the small photo copies and the perceptual hash.
 
 ## Setup
 
@@ -73,10 +73,16 @@ To test database writes without Neon, `pnpm dev-db` starts an in-memory Postgres
 - **Alerts** (one email per scrape invocation): run failed or did not finish, products seen more than 30% below
   the shop's 7-day average, more than 5% of fetches failed, flagged rows. Runs left unfinished for 7 hours are
   marked failed.
-- **Daily summary** at 05:30 UTC: shops ok / partial / failed / missing, product counts, and database size against the Neon plan (5 GB on Build, set `DB_LIMIT_MB` to change). Over 80% it says it is time to shrink the data.
-- **Images:** each new `image_url` is downloaded once, stored in R2 as `images/{sha256}.{ext}` with sha256,
-  a 64-bit dHash and dimensions. Up to `images_per_run` (300) images per shop per night, so large catalogues
-  fill in over several nights. Image fetches on the shop's own host use the shop's rate limit.
+- **Daily summary** at 05:30 UTC: shops ok / partial / failed / missing, product counts, and database size against the Neon plan (5 GB on Build, set `DB_LIMIT_MB` to change). Over 80% it says it is time to shrink the data. It also gives the photo copies stored in R2 and their total size against the 10 GB free tier, with a warning from 8 GB.
+- **Images (photos):** off unless `IMAGES_ENABLED=on` (scripts/run-local.ps1 and the scrape workflow set it).
+  One photo per product group, not per variant: the site row's own picture first, another variant's only when
+  that one fails; Black Friday marked groups first, then the most recently seen. Only a small copy is stored:
+  WebP, at most 480 px on the long side, quality 75, no metadata (an SVG is rasterised the same way), as
+  `img/{sha256 of the original}.webp` with its width, height and bytes. Originals are never stored; the same
+  original is stored once. Non-images and files over 15 MB are refused and recorded as failures, which are
+  retried after 7 days. Up to `images_per_run` (300) image requests per shop per night within `images_minutes`
+  (20), so large catalogues fill in over several nights. Image fetches on the shop's own host use the shop's
+  robots.txt and rate limit; allowlisted CDN hosts get one fetcher each with its own delay.
 
 ## Adapters
 
@@ -362,6 +368,10 @@ Set each one with `pnpm exec wrangler secret put NAME --cwd web` (wrangler asks 
 ### Database
 
 `pnpm migrate` applies `db/migrations/*.sql` once each (it includes `006_reports_ip_index.sql`). The two write roles are created, or given new passwords, with `pnpm exec tsx scripts/create-site-roles.ts`, which writes `REPORTER_DATABASE_URL` and `ADMIN_DATABASE_URL` to `.env` (it needs the owner connection in `DATABASE_URL`).
+
+### Photos
+
+Product photos come from our own small copies in R2 (bucket in `R2_BUCKET`, binding `BUCKET` in `web/wrangler.toml`), never from the shops, so a shop never sees a visitor. The site build copies the stored key of each group's photo into `site_products.image_key` (shown variant, else the representative, else any variant). The API gives `imageUrl: "/img/<sha256>.webp"` or null and no shop image address anywhere; the Worker serves `GET /img/<sha256>.webp` (64 lowercase hex only, else 404) as `image/webp` with `nosniff` and a year of immutable caching, behind the same access check as every page (`private` caching while the site is private). The CSP stays `img-src 'self' data:`. Downloads stay off until `IMAGES_ENABLED=on`. Run `pnpm migrate` (014 adds `image_key`) before deploying the Worker, since the API reads that column. Storage must stay inside the R2 free tier (10 GB) unless the owner approves more: about 190,000 product groups at roughly 20 KB per copy is about 4 GB.
 
 ### Nightly site-build
 

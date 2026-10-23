@@ -5,7 +5,7 @@ import path from 'node:path';
 import postgres from 'postgres';
 import sharp from 'sharp';
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
-import { downloadImagesForShop, photoCandidates } from '../../src/pipeline/images.js';
+import { downloadImagesForShop, photoCandidates, photoStorage } from '../../src/pipeline/images.js';
 import type { Shop } from '../../src/types.js';
 
 const PORT = 55481;
@@ -115,6 +115,15 @@ describe.skipIf(!process.env.SITE_BUILD_TEST_DB)('photo downloader on PGlite', (
     expect(keyOf[40]).toBe('img/' + 'c'.repeat(64) + '.webp');
     expect(keyOf[11]).toBeNull();
     expect(keyOf[50]).toBeNull();
+  });
+
+  it('counts each stored copy once for the storage summary', async () => {
+    const { fetchImage, put } = fakes();
+    await downloadImagesForShop(shop, { sql, fetchImage, put });
+    await sql`insert into images (source_url, r2_key, sha256, bytes) select ${u('dup.png')}, r2_key, sha256, bytes from images where source_url = ${u('1a.png')}`;
+    await sql`insert into images (source_url, r2_key, sha256, bytes) values (${u('old.jpg')}, ${'images/' + 'f'.repeat(64) + '.jpg'}, ${'f'.repeat(64)}, 999999)`;
+    const [{ total }] = await sql<{ total: number }[]>`select (sum(distinct bytes))::int as total from images where r2_key like 'img/%'`;
+    expect(await photoStorage(sql)).toEqual({ count: 3, bytes: total });
   });
 
   it('keeps to the per-run request budget', async () => {
