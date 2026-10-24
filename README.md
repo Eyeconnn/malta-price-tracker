@@ -107,7 +107,7 @@ To test database writes without Neon, `pnpm dev-db` starts an in-memory Postgres
   `Organization.logo`; an `apple-touch-icon` or `icon` link of at least 96 px (largest first); `og:image` only as a
   last resort and only when it looks like a logo (square-ish, at most 600 px), else it is skipped. Every picture is
   checked again once decoded: never 1x1, at least 48 px on its long side; header and JSON-LD pictures from 1:4 (tall)
-  to 8:1 (a wide wordmark), and past 4:1 at least 120 px wide (else the icon serves better); icons square-ish (at most
+  to 10:1 (a wide wordmark), and past 4:1 at least 120 px wide (else the icon serves better); icons square-ish (at most
   1.5:1) and at least 96 px in their real pixels whatever their link declared. SVG logos are parsed as XML
   and rebuilt without doctype, scripts, foreignObject, event handlers, any href not starting with "#" (so no external
   file and no embedded data: picture) and url()/@import in styles, then drawn by sharp from memory with a pixel limit

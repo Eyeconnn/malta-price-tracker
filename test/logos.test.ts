@@ -169,7 +169,7 @@ describe('makeLogoCopy', () => {
     expect((await makeLogoCopy(await png(48, 48), { source: 'header' })).width).toBe(48);
   });
 
-  it('keeps header and JSON-LD wordmarks up to 8:1 wide (at least 120 px wide past 4:1), and up to 1:4 tall', async () => {
+  it('keeps header and JSON-LD wordmarks up to 10:1 wide (at least 120 px wide past 4:1), and up to 1:4 tall', async () => {
     for (const [w, h] of [
       [600, 88],
       [2000, 258],
@@ -179,10 +179,10 @@ describe('makeLogoCopy', () => {
       expect((await makeLogoCopy(await png(w!, h!), { source: 'header' })).width, `${w}x${h}`).toBe(256);
     }
     expect((await makeLogoCopy(await png(1191, 285), { source: 'json-ld' })).width).toBe(256);
-    await expect(makeLogoCopy(await png(1000, 100), { source: 'header' })).rejects.toThrow(/1000x100, wider than 8:1/);
-    // Solaris and Squaredeal (about 8.6:1) stay out
-    await expect(makeLogoCopy(await png(2221, 258), { source: 'header' })).rejects.toThrow(/wider than 8:1/);
-    await expect(makeLogoCopy(await png(460, 53), { source: 'header' })).rejects.toThrow(/wider than 8:1/);
+    await expect(makeLogoCopy(await png(1100, 100), { source: 'header' })).rejects.toThrow(/1100x100, wider than 10:1/);
+    // Solaris and Squaredeal (about 8.6:1) are real wordmarks and fit under 10:1
+    expect((await makeLogoCopy(await png(2221, 258), { source: 'header' })).width).toBe(256);
+    expect((await makeLogoCopy(await png(460, 53), { source: 'header' })).width).toBe(256);
     await expect(makeLogoCopy(await png(100, 19), { source: 'json-ld' })).rejects.toThrow(/100x19, a wordmark under 120 px wide/);
     await expect(makeLogoCopy(await png(60, 300), { source: 'json-ld' })).rejects.toThrow(/60x300, taller than 1:4/);
   });
@@ -210,7 +210,7 @@ describe('makeLogoCopy', () => {
     const svg = (w: number, h: number) => Buffer.from(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${w} ${h}"><rect width="${w}" height="${h}"/></svg>`);
     expect((await makeLogoCopy(svg(24, 24), { source: 'icon' })).width).toBe(128);
     expect((await makeLogoCopy(svg(50, 10), { source: 'header' })).width).toBe(256);
-    await expect(makeLogoCopy(svg(90, 10), { source: 'header' })).rejects.toThrow(/wider than 8:1/);
+    await expect(makeLogoCopy(svg(110, 10), { source: 'header' })).rejects.toThrow(/wider than 10:1/);
   });
 
   it('never decodes a picture embedded in an SVG (a data: bomb is dropped first)', async () => {

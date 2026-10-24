@@ -46,7 +46,7 @@ const MIN_ICON_PX = 96;
 /** A logo picture's long side is at least this many pixels (an SVG scales and is exempt). */
 const MIN_LOGO_PX = 48;
 /** Header and JSON-LD logos: at most this much wider than tall (a wordmark) ... */
-const MAX_WIDE_RATIO = 8;
+const MAX_WIDE_RATIO = 10;
 /** ... and at most this much taller than wide. */
 const MAX_TALL_RATIO = 4;
 /** A logo wider than 4:1 is a wordmark and must be at least this wide (else a favicon serves better). */
@@ -360,7 +360,7 @@ function sizeProblem(source: LogoSource | undefined, width: number, height: numb
  * 64 px tall, any other at most 128 px on its long side. An SVG is cleaned (sanitizeSvg) and drawn by sharp from
  * memory, with a pixel limit and a timeout. A raster picture keeps its first frame and is never enlarged. The decoded
  * size is checked against the source (sizeProblem): never 1x1 or under 48 px on the long side; header and JSON-LD
- * pictures from 1:4 to 8:1 (past 4:1 at least 120 px wide); icons square-ish and at least 96 px whatever their link
+ * pictures from 1:4 to 10:1 (past 4:1 at least 120 px wide); icons square-ish and at least 96 px whatever their link
  * declared; og:image square-ish and small.
  */
 export async function makeLogoCopy(original: Buffer, opts: { source?: LogoSource } = {}): Promise<LogoCopy> {
