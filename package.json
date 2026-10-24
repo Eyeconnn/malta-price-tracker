@@ -21,6 +21,7 @@
     "probe": "tsx src/cli/probe.ts",
     "shop-requests": "tsx src/cli/shop-requests.ts",
     "export-shops": "tsx src/cli/export-shops.ts",
+    "fetch-logos": "tsx src/cli/fetch-logos.ts",
     "typecheck": "tsc --noEmit && tsc --noEmit -p web",
     "test": "vitest run",
     "dev-db": "tsx scripts/dev-db.ts",

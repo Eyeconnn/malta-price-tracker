@@ -53,6 +53,12 @@ export interface FetchResult {
   json<T = unknown>(): T;
 }
 
+/** A request cap shared by several fetchers; used counts every request made so far. */
+export interface RequestBudget {
+  max: number;
+  used: number;
+}
+
 export interface FetcherOptions {
   userAgent: string;
   minDelayMs?: number;
@@ -66,6 +72,11 @@ export interface FetcherOptions {
   maxBodyBytes?: number;
   /** hard cap on requests (robots.txt and every attempt included); past it the run stops with ShopAbortError */
   maxRequests?: number;
+  /**
+   * a request cap shared by several fetchers (a shop's own and its image CDN's, for the logo job): every request of
+   * each counts against it, and past it the fetcher stops with ShopAbortError as with maxRequests
+   */
+  budget?: RequestBudget;
   log?: (msg: string) => void;
 }
 
@@ -117,6 +128,7 @@ export class ShopFetcher {
   private allowedHosts?: string[];
   private maxBodyBytes: number;
   private maxRequests?: number;
+  private budget?: RequestBudget;
   private abortReason?: string;
   private log: (msg: string) => void;
   private robots = new Map<string, Promise<RobotsRules>>();
@@ -140,11 +152,18 @@ export class ShopFetcher {
     this.allowedHosts = opts.allowedHosts?.map((h) => h.toLowerCase());
     this.maxBodyBytes = opts.maxBodyBytes ?? 30 * 1024 * 1024;
     this.maxRequests = opts.maxRequests;
+    this.budget = opts.budget;
     this.log = opts.log ?? (() => {});
   }
 
   /** extra: options a caller sets for one run only (e.g. the shop-request test scrape's maxRequests) */
-  static fromConfig(cfg: ShopConfig, userAgent: string, baseUrl: string, log?: (m: string) => void, extra: Pick<FetcherOptions, 'maxRequests'> = {}): ShopFetcher {
+  static fromConfig(
+    cfg: ShopConfig,
+    userAgent: string,
+    baseUrl: string,
+    log?: (m: string) => void,
+    extra: Pick<FetcherOptions, 'maxRequests' | 'budget' | 'maxRetries' | 'minDelayMs' | 'maxDelayMs' | 'maxBodyBytes'> = {},
+  ): ShopFetcher {
     const extraHosts = Array.isArray(cfg.extra_hosts) ? (cfg.extra_hosts as string[]) : [];
     return new ShopFetcher({
       allowedHosts: [scopeHost(baseUrl), ...extraHosts],
@@ -252,6 +271,12 @@ export class ShopFetcher {
       this.abortReason = `request cap of ${this.maxRequests} reached`;
       throw new ShopAbortError(this.abortReason);
     }
+    if (this.budget && this.budget.used >= this.budget.max) {
+      this.aborted = true;
+      this.abortReason = `request cap of ${this.budget.max} reached`;
+      throw new ShopAbortError(this.abortReason);
+    }
+    if (this.budget) this.budget.used++;
     this.stats.requests++;
   }
 

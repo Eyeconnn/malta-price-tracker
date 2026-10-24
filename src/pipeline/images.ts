@@ -21,7 +21,7 @@ export async function dHash(buf: Buffer): Promise<string> {
 }
 
 // Image hosts outside a shop's own domain that we accept. Others need the shop config key image_hosts.
-const IMAGE_CDNS = ['cdn.shopify.com', 'i0.wp.com', 'i1.wp.com', 'i2.wp.com', 'cloudfront.net', 'cloudinary.com', 'imgix.net', 'wixstatic.com'];
+export const IMAGE_CDNS = ['cdn.shopify.com', 'i0.wp.com', 'i1.wp.com', 'i2.wp.com', 'cloudfront.net', 'cloudinary.com', 'imgix.net', 'wixstatic.com'];
 
 // CDN hosts are shared by many shops: one fetcher per host for the whole process.
 const cdnFetchers = new Map<string, ShopFetcher>();
