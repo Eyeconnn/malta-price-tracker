@@ -48,6 +48,7 @@ const shopRow = async (slug: string) =>
 
 let pngLogo: Buffer;
 let banner: Buffer;
+let squareLogo: Buffer;
 
 beforeAll(async () => {
   const { PGlite } = await import('@electric-sql/pglite');
@@ -56,6 +57,7 @@ beforeAll(async () => {
   const dir = path.resolve('db/migrations');
   for (const f of (await readdir(dir)).filter((n) => n.endsWith('.sql')).sort()) await pg.exec(await readFile(path.join(dir, f), 'utf8'));
   pngLogo = await sharp({ create: { width: 300, height: 100, channels: 4, background: { r: 200, g: 0, b: 0, alpha: 0.5 } } }).png().toBuffer();
+  squareLogo = await sharp({ create: { width: 200, height: 200, channels: 4, background: { r: 0, g: 90, b: 0, alpha: 1 } } }).png().toBuffer();
   banner = await sharp({ create: { width: 1200, height: 630, channels: 3, background: '#06c' } }).jpeg().toBuffer();
   await pg.exec(`
     insert into shops (slug, name, base_url, adapter, active, logo_key, logo_checked_at, logo_error) values
@@ -64,7 +66,9 @@ beforeAll(async () => {
       ('closed', 'Closed', 'https://closed.example.mt', 'woo', true, null, null, null),
       ('banner', 'Banner', 'https://banner.example.mt', 'woo', true, null, null, null),
       ('hasone', 'Has One', 'https://hasone.example.mt', 'woo', true, 'img/${'c'.repeat(64)}.webp', now() - interval '90 days', null),
-      ('recent', 'Recent', 'https://recent.example.mt', 'woo', true, null, now() - interval '5 days', 'HTTP 404'),
+      ('recent', 'Recent', 'https://recent.example.mt', 'woo', true, null, now() - interval '5 days', 'no usable logo (header https://recent.example.mt/logo.png: HTTP 404)'),
+      ('capped', 'Capped', 'https://capped.example.mt', 'woo', true, null, now() - interval '2 days', 'home page: request cap of 4 reached'),
+      ('missing', 'Missing', 'https://missing.example.mt', 'woo', true, null, now() - interval '2 days', 'no logo found on the home page'),
       ('stale', 'Stale', 'https://stale.example.mt', 'woo', true, null, now() - interval '40 days', 'HTTP 404'),
       ('sleeping', 'Sleeping', 'https://sleeping.example.mt', 'woo', false, null, null, null);
   `);
@@ -88,7 +92,7 @@ beforeEach(async () => {
     'https://banner.example.mt': { body: '<html><head><meta property="og:image" content="/share.jpg"></head><body></body></html>' },
     'https://banner.example.mt/share.jpg': { body: banner },
     'https://stale.example.mt': { body: await fixture('icons.html') },
-    'https://stale.example.mt/icon-192.png': { body: pngLogo },
+    'https://stale.example.mt/icon-192.png': { body: squareLogo },
     'https://recent.example.mt': { body: await fixture('challenge.html') },
     'https://sleeping.example.mt': { body: (await fixture('lazy-header.html')).replaceAll('lazy.example.mt', 'sleeping.example.mt') },
   };
@@ -116,7 +120,7 @@ describe('fetchLogos', () => {
     const stored = puts.find((p) => p.key === gadget.logo_key)!;
     expect(stored.contentType).toBe('image/webp');
     const meta = await sharp(stored.body).metadata();
-    expect([meta.format, meta.width, meta.height, meta.hasAlpha]).toEqual(['webp', 128, 43, true]);
+    expect([meta.format, meta.width, meta.height, meta.hasAlpha]).toEqual(['webp', 192, 64, true]);
     expect(logs.join('\n')).toMatch(/\[gadget\] logo from the JSON-LD Organization logo https:\/\/www\.gadget\.example\.mt\/media\/org-logo\.png/);
     expect(logs.join('\n')).toMatch(/header .*gadget\.svg: HTTP 404/);
     expect((await shopRow('stale')).logo_key).toMatch(/^img\//);
@@ -139,12 +143,17 @@ describe('fetchLogos', () => {
     expect(logs).toEqual(['logos: nothing to do']);
   });
 
-  it('--retry looks again at checked shops without a logo, never at shops with one', async () => {
+  it('--retry looks again at shops left with no usable logo or at the request cap, never after a 403 or a bot check', async () => {
     const out = await fetchLogos({ retry: true }, deps());
-    expect(out.map((r) => r.slug)).toEqual(['banner', 'closed', 'recent']);
-    // a bot check page means no logo
+    // closed answered 403 and missing had no logo at all: not retried; hasone has a logo
+    expect(out.map((r) => r.slug)).toEqual(['banner', 'capped', 'recent']);
+    // a bot check page means no logo, and from now on --retry leaves it alone too
     expect((await shopRow('recent')).logo_error).toMatch(/bot check/);
     expect(requests.filter((u) => u.includes('recent'))).toEqual(['https://recent.example.mt']);
+    requests = [];
+    const again = await fetchLogos({ retry: true }, deps());
+    // capped's home page answered 404 this time: no longer retried either
+    expect(again.map((r) => r.slug)).toEqual(['banner']);
   });
 
   it('--shop looks at that shop only (inactive too) and says why when it is not looked at', async () => {
@@ -158,7 +167,7 @@ describe('fetchLogos', () => {
     expect(logs[0]).toMatch(/hasone already has a logo/);
     logs = [];
     await fetchLogos({ shop: 'closed' }, deps());
-    expect(logs[0]).toMatch(/closed was checked recently .*--retry/);
+    expect(logs[0]).toMatch(/closed was checked recently .*not retried \(home page: HTTP 403/);
   });
 
   it('reuses a stored product photo of the same picture instead of writing over it', async () => {
@@ -269,6 +278,19 @@ describe('fetchLogos', () => {
     expect(out).toEqual([{ slug: 'toybox', status: 'skipped', reason: 'deadline' }]);
     expect(puts).toEqual([]);
     expect(await shopRow('toybox')).toEqual({ logo_key: null, logo_checked_at: null, logo_error: null });
+  });
+
+  it('prefers a wide header wordmark to the touch icon, and records the stored size', async () => {
+    await pg.exec(`insert into shops (slug, name, base_url, adapter, active) values ('wordmark', 'Wordmark', 'https://wordmark.example.mt', 'woo', true)`);
+    routes['https://wordmark.example.mt'] = {
+      body: '<html><head><link rel="apple-touch-icon" href="/apple-touch-icon.png"></head><body><header><a href="/"><img class="logo" src="/wordmark.png" alt="Wordmark"></a></header></body></html>',
+    };
+    routes['https://wordmark.example.mt/wordmark.png'] = { body: await sharp({ create: { width: 600, height: 88, channels: 4, background: { r: 0, g: 0, b: 0, alpha: 1 } } }).png().toBuffer() };
+    routes['https://wordmark.example.mt/apple-touch-icon.png'] = { body: squareLogo };
+    const out = await fetchLogos({ shop: 'wordmark' }, deps());
+    expect(out).toEqual([expect.objectContaining({ slug: 'wordmark', status: 'found', source: 'header', width: 256, height: 38 })]);
+    expect(requests).toEqual(['https://wordmark.example.mt', 'https://wordmark.example.mt/wordmark.png']);
+    expect((await pg.query('select logo_w, logo_h from shops where slug = $1', ['wordmark'])).rows[0]).toEqual({ logo_w: 256, logo_h: 38 });
   });
 });
 

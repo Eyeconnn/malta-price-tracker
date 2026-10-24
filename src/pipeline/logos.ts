@@ -1,8 +1,8 @@
 // Shop logos (pnpm fetch-logos, migration 016). For each shop without a logo, the home page is read politely and the
 // logo picked in this order: an <img> in the header, nav or home link that is named "logo" (class, id, alt, src or a
 // wrapper's class or id); the JSON-LD Organization logo; an apple-touch-icon or icon link of at least 96 px; og:image
-// only as a last resort and only when it looks like a logo (square-ish and small). Our small copy (WebP, at most
-// 128 px, transparency kept) goes to R2 under img/<sha256 of the original>.webp, as product photos do, and the site
+// only as a last resort and only when it looks like a logo (square-ish and small). Our small copy (WebP, a wordmark
+// at most 256 x 64 px, any other at most 128 px, transparency kept) goes to R2 under img/<sha256 of the original>.webp, as product photos do, and the site
 // serves only that copy: a visitor's browser never contacts a shop.
 // Politeness: every request goes through ShopFetcher (robots.txt and Crawl-delay obeyed, SCRAPER_USER_AGENT, one
 // request at a time, 2 to 5 s apart or the shop's longer gap, backoff on 429 and 5xx, private addresses refused),
@@ -31,18 +31,28 @@ import type { Shop } from '../types.js';
 import { IMAGE_CDNS, PHOTO_STORAGE_CAP_BYTES, photoStorage } from './images.js';
 import { isPhotoKey, photoKey } from './photo.js';
 
-/** Longest side of a stored logo, in pixels. */
+/** Longest side of a stored square-ish logo, in pixels. */
 export const LOGO_MAX_SIDE = 128;
-/** Requests per shop for the logo job, robots.txt and retries included (the shop's and an image CDN's together). */
-export const LOGO_MAX_REQUESTS = 4;
+/** A logo wider than this (width / height) is a wordmark: stored in a WIDE_MAX_W x WIDE_MAX_H box, drawn as a pill. */
+export const WIDE_ASPECT = 1.4;
+const WIDE_MAX_W = 256;
+const WIDE_MAX_H = 64;
+/** Requests to the shop for the logo job, robots.txt, retries and redirect hops included (an image CDN has its own 2). */
+export const LOGO_MAX_REQUESTS = 6;
 /** A shop whose check failed is looked at again after this many days (or at once with --retry). */
 export const LOGO_RECHECK_DAYS = 30;
 /** Icons smaller than this are favicons, not logos (declared in the link, and again in the real pixels). */
 const MIN_ICON_PX = 96;
 /** A logo picture's long side is at least this many pixels (an SVG scales and is exempt). */
 const MIN_LOGO_PX = 48;
-/** Header, JSON-LD and icon logos are at most this much wider than tall (or taller than wide). */
-const MAX_LOGO_RATIO = 4;
+/** Header and JSON-LD logos: at most this much wider than tall (a wordmark) ... */
+const MAX_WIDE_RATIO = 8;
+/** ... and at most this much taller than wide. */
+const MAX_TALL_RATIO = 4;
+/** A logo wider than 4:1 is a wordmark and must be at least this wide (else a favicon serves better). */
+const MIN_WORDMARK_W = 120;
+/** Icons are square-ish: at most this much wider than tall or taller than wide. */
+const MAX_ICON_RATIO = 1.5;
 const LOGO_MAX_BYTES = 5 * 1024 * 1024;
 const PAGE_MAX_BYTES = 10 * 1024 * 1024;
 const SVG_MAX_BYTES = 1024 * 1024;
@@ -336,16 +346,22 @@ function sizeProblem(source: LogoSource | undefined, width: number, height: numb
     const ok = svg ? long / short <= 1.5 : looksLikeLogo(width, height);
     return ok ? null : `picture is ${size}, not logo-like`;
   }
-  if (source && long / short > MAX_LOGO_RATIO) return `picture is ${size}, wider or taller than ${MAX_LOGO_RATIO}:1`;
+  if (source === 'icon') return long / short > MAX_ICON_RATIO ? `icon is ${size}, not square-ish` : null;
+  if (source === 'header' || source === 'json-ld') {
+    if (height / width > MAX_TALL_RATIO) return `picture is ${size}, taller than 1:${MAX_TALL_RATIO}`;
+    if (width / height > MAX_WIDE_RATIO) return `picture is ${size}, wider than ${MAX_WIDE_RATIO}:1`;
+    if (!svg && width / height > MAX_TALL_RATIO && width < MIN_WORDMARK_W) return `picture is ${size}, a wordmark under ${MIN_WORDMARK_W} px wide`;
+  }
   return null;
 }
 
 /**
- * Our stored copy of a logo: WebP, at most 128 px on its long side, transparency kept, no metadata. An SVG is cleaned
- * (sanitizeSvg) and drawn by sharp from memory, with a pixel limit and a timeout. A raster picture keeps its first
- * frame and is never enlarged. The decoded size is checked against the source (sizeProblem): never 1x1 or under
- * 48 px on the long side; header, JSON-LD and icon pictures between 1:4 and 4:1; an icon at least 96 px whatever its
- * link declared; og:image square-ish and small.
+ * Our stored copy of a logo: WebP, transparency kept, no metadata; a wide one (over 1.4:1) at most 256 px wide and
+ * 64 px tall, any other at most 128 px on its long side. An SVG is cleaned (sanitizeSvg) and drawn by sharp from
+ * memory, with a pixel limit and a timeout. A raster picture keeps its first frame and is never enlarged. The decoded
+ * size is checked against the source (sizeProblem): never 1x1 or under 48 px on the long side; header and JSON-LD
+ * pictures from 1:4 to 8:1 (past 4:1 at least 120 px wide); icons square-ish and at least 96 px whatever their link
+ * declared; og:image square-ish and small.
  */
 export async function makeLogoCopy(original: Buffer, opts: { source?: LogoSource } = {}): Promise<LogoCopy> {
   if (original.length > LOGO_MAX_BYTES) throw new Error('picture over 5 MB');
@@ -363,15 +379,16 @@ export async function makeLogoCopy(original: Buffer, opts: { source?: LogoSource
   if (!width || !height || (svg ? meta.format !== 'svg' : !meta.format || !RASTER.has(meta.format))) throw new Error('not an image');
   const problem = sizeProblem(opts.source, width, height, svg);
   if (problem) throw new Error(problem);
+  const box = width / height > WIDE_ASPECT ? { width: WIDE_MAX_W, height: WIDE_MAX_H } : { width: LOGO_MAX_SIDE, height: LOGO_MAX_SIDE };
   if (svg) {
     const density = Math.min(2400, Math.max(1, (72 * SVG_RENDER_SIDE) / Math.max(width, height)));
-    return webp(sharp(input, { density, limitInputPixels: MAX_INPUT_PIXELS }).resize({ width: LOGO_MAX_SIDE, height: LOGO_MAX_SIDE, fit: 'inside' }));
+    return webp(sharp(input, { density, limitInputPixels: MAX_INPUT_PIXELS }).resize({ ...box, fit: 'inside' }));
   }
   if (width * height > MAX_INPUT_PIXELS) throw new Error('picture has too many pixels');
   return webp(
     sharp(original, { limitInputPixels: MAX_INPUT_PIXELS, pages: 1 })
       .rotate()
-      .resize({ width: LOGO_MAX_SIDE, height: LOGO_MAX_SIDE, fit: 'inside', withoutEnlargement: true }),
+      .resize({ ...box, fit: 'inside', withoutEnlargement: true }),
   );
 }
 
@@ -480,7 +497,13 @@ export interface LogoJobDeps {
 
 const SHOP_COLUMNS = 'id, slug, name, base_url, config';
 /** The shops that need a look: no logo, and never checked, or failed over 30 days ago, or any check with retry ($1). */
-const DUE = `logo_key is null and ($1::boolean or logo_checked_at is null
+/**
+ * A last check that --retry may repeat: no usable logo among the candidates, or the request cap; never a 401/403
+ * refusal or a bot check (those are never worked around), and not a page without any logo.
+ */
+const RETRYABLE = `((logo_error like 'no usable logo%' or logo_error like '%request cap%')
+  and logo_error not like '%HTTP 401%' and logo_error not like '%HTTP 403%' and logo_error not like '%bot check%')`;
+const DUE = `logo_key is null and (logo_checked_at is null or ($1::boolean and ${RETRYABLE})
   or (logo_error is not null and logo_checked_at < now() - make_interval(days => ${LOGO_RECHECK_DAYS})))`;
 
 /**
@@ -502,10 +525,17 @@ async function stillDue(q: LogoDb, shopId: number, opts: LogoJobOptions): Promis
 
 /** Why a named shop is not looked at: unknown, has a logo, or checked recently. */
 async function whyNot(q: LogoDb, slug: string): Promise<string> {
-  const [row] = await q.query<{ logo_key: string | null; logo_checked_at: unknown }>('select logo_key, logo_checked_at from shops where slug = $1', [slug]);
+  const [row] = await q.query<{ logo_key: string | null; logo_checked_at: unknown; logo_error: string | null }>(
+    'select logo_key, logo_checked_at, logo_error from shops where slug = $1',
+    [slug],
+  );
   if (!row) return `no shop ${slug}`;
   if (row.logo_key) return `${slug} already has a logo (${row.logo_key})`;
-  return `${slug} was checked recently (${new Date(row.logo_checked_at as string).toISOString()}); run with --retry to look again`;
+  const at = new Date(row.logo_checked_at as string).toISOString();
+  const [retryable] = await q.query(`select 1 from shops where slug = $1 and ${RETRYABLE}`, [slug]);
+  return retryable
+    ? `${slug} was checked recently (${at}); run with --retry to look again`
+    : `${slug} was checked recently (${at}) and is not retried (${String(row.logo_error ?? 'no logo')}); it is looked at again ${LOGO_RECHECK_DAYS} days after its check`;
 }
 
 const clip = (s: string) => (s.length > ERROR_MAX ? `${s.slice(0, ERROR_MAX - 3)}...` : s);
@@ -573,7 +603,13 @@ export async function fetchLogos(opts: LogoJobOptions, deps: LogoJobDeps): Promi
         stop = true;
         return { slug: shop.slug, status: 'skipped', reason: 'deadline' };
       }
-      await q.query('update shops set logo_key = $2, logo_checked_at = now(), logo_error = null where id = $1', [shop.id, key]);
+      // a reused product photo is a larger copy of the same picture: its shape is what the site needs
+      await q.query('update shops set logo_key = $2, logo_w = $3, logo_h = $4, logo_checked_at = now(), logo_error = null where id = $1', [
+        shop.id,
+        key,
+        copy.width,
+        copy.height,
+      ]);
     }
     const passed = found.passedOver.length ? ` (passed over: ${found.passedOver.join('; ')})` : '';
     log(`[${shop.slug}] logo from ${what}${opts.dryRun ? ', dry run: not stored' : ` stored as ${key}`}${passed}`);

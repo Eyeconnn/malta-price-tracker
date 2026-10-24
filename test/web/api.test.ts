@@ -18,6 +18,7 @@ function card(id: number, extra: Partial<Card> = {}): Card {
     shop: 'Scan',
     shopSlug: 'scan',
     logoUrl: null,
+    logoAspect: null,
     priceCents: 10000,
     wasCents: null,
     verdict: 'good',
@@ -82,7 +83,7 @@ function fakeData(overrides: Partial<Data> = {}): Data {
     settings: vi.fn(async () => DEFAULT_SETTINGS),
     deals: vi.fn(async (q) => ({ items: Array.from({ length: q.limit }, (_, i) => card(i + 1, { verdict: q.verdict })), total: 100 })),
     search: vi.fn(async () => []),
-    shops: vi.fn(async () => [{ slug: 'scan', name: 'Scan', grade: null, products: 3, logoUrl: null }]),
+    shops: vi.fn(async () => [{ slug: 'scan', name: 'Scan', grade: null, products: 3, logoUrl: null, logoAspect: null }]),
     shop: vi.fn(async () => null),
     shopChanges: vi.fn(async () => ({ rises: [], drops: [] })),
     product: vi.fn(async () => null),
@@ -227,6 +228,7 @@ describe('GET /api/search', () => {
       shops: 3,
       shop: null,
       logoUrl: null,
+      logoAspect: null,
       bf: true,
       // our own photo only, never a shop's image address
       imageUrl: PHOTO,
@@ -241,17 +243,18 @@ describe('GET /api/search', () => {
   it("gives the one shop's logo for a product only one shop sells, and only our own /img address", async () => {
     const base = { groupTitle: 'x', canonicalId: null, possible: false, inStock: true, displayName: null, variantLabel: null, nameCategory: null, attrs: null, imageUrl: null, groupBf: false, groupGood: 0, groupAvoid: 0, groupLowInStock: 10000, groupLow: 10000 };
     const hits = [
-      { ...card(1, { logoUrl: PHOTO }), ...base, groupKey: 's1', groupShops: 1 },
-      { ...card(2, { logoUrl: 'https://scan.example/logo.png' }), ...base, groupKey: 's2', groupShops: 1 },
-      { ...card(3, { logoUrl: PHOTO }), ...base, groupKey: 'c3', groupShops: 2 },
+      { ...card(1, { logoUrl: PHOTO, logoAspect: 4.5 }), ...base, groupKey: 's1', groupShops: 1 },
+      { ...card(2, { logoUrl: 'https://scan.example/logo.png', logoAspect: 2 }), ...base, groupKey: 's2', groupShops: 1 },
+      { ...card(3, { logoUrl: PHOTO, logoAspect: 1 }), ...base, groupKey: 'c3', groupShops: 2 },
     ];
     const w = setup(fakeData({ search: vi.fn(async () => hits) }));
-    const body = (await (await w.fetch('/api/search?q=s25')).json()) as { results: { key: string; logoUrl: string | null }[] };
-    expect(body.results.map((r) => [r.key, r.logoUrl])).toEqual([
-      ['s1', PHOTO],
-      ['s2', null],
+    const body = (await (await w.fetch('/api/search?q=s25')).json()) as { results: { key: string; logoUrl: string | null; logoAspect: number | null }[] };
+    expect(body.results.map((r) => [r.key, r.logoUrl, r.logoAspect])).toEqual([
+      ['s1', PHOTO, 4.5],
+      // not our address: neither the logo nor its shape
+      ['s2', null, null],
       // several shops: no one shop's logo
-      ['c3', null],
+      ['c3', null, null],
     ]);
   });
 
@@ -516,6 +519,7 @@ function seller(id: number, extra: Partial<Seller> = {}): Seller {
     shop: `Shop ${id}`,
     shopSlug: `shop-${id}`,
     logoUrl: null,
+    logoAspect: null,
     title: `SHOP TITLE ${id}`,
     brand: 'SAMSUNG',
     url: `https://shop${id}.example/p`,
@@ -557,7 +561,7 @@ describe('GET /api/product/:key', () => {
   it('gives the product (clean name, specs, brand, image, attributes) and sellers in stock first, cheapest first', async () => {
     const sellers = [
       seller(1, { priceCents: 90000, inStock: false }),
-      seller(2, { priceCents: 120000, imageUrl: 'https://shop2.example/i.jpg', logoUrl: PHOTO, bf: true, verdict: 'avoid', facts: { raisedFrom: { price: 100000, at: '2026-10-20' } } as never }),
+      seller(2, { priceCents: 120000, imageUrl: 'https://shop2.example/i.jpg', logoUrl: PHOTO, logoAspect: 3, bf: true, verdict: 'avoid', facts: { raisedFrom: { price: 100000, at: '2026-10-20' } } as never }),
       seller(3, { priceCents: 110000, url: 'javascript:alert(1)', logoUrl: 'https://shop3.example/logo.png', attrs: { storage_gb: 256, ram_gb: 12, colour: ['black'] } }),
       seller(4, { priceCents: null, imageUrl: PHOTO }),
     ];
@@ -591,6 +595,7 @@ describe('GET /api/product/:key', () => {
     expect(body.sellers[0].url).toBeNull();
     // the shop's logo: our /img copy only, never a shop's image address
     expect(body.sellers.map((s) => s.logoUrl)).toEqual([null, PHOTO, null, null]);
+    expect(body.sellers.map((s) => s.logoAspect)).toEqual([null, 3, null, null]);
     expect(body.sellers[1]).toMatchObject({
       id: 2,
       productId: 20,
@@ -672,7 +677,7 @@ describe('GET /api/product/:key', () => {
 describe('GET /api/shops and /api/shops/:slug', () => {
   it('lists shops', async () => {
     const w = setup();
-    expect(await (await w.fetch('/api/shops')).json()).toEqual({ shops: [{ slug: 'scan', name: 'Scan', grade: null, products: 3, logoUrl: null }] });
+    expect(await (await w.fetch('/api/shops')).json()).toEqual({ shops: [{ slug: 'scan', name: 'Scan', grade: null, products: 3, logoUrl: null, logoAspect: null }] });
   });
 
   it('returns 404 for an unknown or malformed slug', async () => {
@@ -684,7 +689,7 @@ describe('GET /api/shops and /api/shops/:slug', () => {
 
   it('shows "Not rated yet" without a rating row and 5 cards each', async () => {
     const stats = { products: 3, judged: 0, good: 0, avoid: 0, wasRaised: 0, bfMarked: 1, realDealPct: null };
-    const shop = { id: 9, slug: 'scan', name: 'Scan', url: 'https://scan.example', category: 'electronics', logoUrl: null };
+    const shop = { id: 9, slug: 'scan', name: 'Scan', url: 'https://scan.example', category: 'electronics', logoUrl: null, logoAspect: null };
     const rises = [{ id: 1, title: 'T', fromCents: 100, toCents: 120, pct: 20, fromAt: '2026-10-20T00:00:00.000Z', at: '2026-10-22T00:00:00.000Z' }];
     const w = setup(fakeData({ shop: vi.fn(async () => ({ shop, rating: null, stats })), shopChanges: vi.fn(async () => ({ rises, drops: [] })) }));
     const res = await w.fetch('/api/shops/scan');
@@ -704,7 +709,7 @@ describe('GET /api/shops and /api/shops/:slug', () => {
   });
 
   it('passes a stored raise window to the change lists', async () => {
-    const shop = { id: 9, slug: 'scan', name: 'Scan', url: 'https://scan.example', category: null, logoUrl: null };
+    const shop = { id: 9, slug: 'scan', name: 'Scan', url: 'https://scan.example', category: null, logoUrl: null, logoAspect: null };
     const stats = { products: 0, judged: 0, good: 0, avoid: 0, wasRaised: 0, bfMarked: 0, realDealPct: null };
     const settings = { ...DEFAULT_SETTINGS, thresholds: { ...DEFAULT_SETTINGS.thresholds, raiseWindowDays: 9 } };
     const w = setup(fakeData({ shop: vi.fn(async () => ({ shop, rating: null, stats })), settings: vi.fn(async () => settings) }));
@@ -771,7 +776,7 @@ describe('routing and caching', () => {
   it('marks every read except search public for 10 minutes', async () => {
     const product = vi.fn(async () => detail(79900, []));
     const shop = vi.fn(async () => ({
-      shop: { id: 9, slug: 'scan', name: 'Scan', url: 'https://scan.example', category: null, logoUrl: null },
+      shop: { id: 9, slug: 'scan', name: 'Scan', url: 'https://scan.example', category: null, logoUrl: null, logoAspect: null },
       rating: null,
       stats: { products: 0, judged: 0, good: 0, avoid: 0, wasRaised: 0, bfMarked: 0, realDealPct: null },
     }));

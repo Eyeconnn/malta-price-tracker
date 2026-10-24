@@ -22,7 +22,7 @@ afterAll(async () => {
 describe('migration 016', () => {
   it('adds the logo columns to shops', async () => {
     const cols = await pg.query<{ column_name: string; data_type: string }>(
-      `select column_name, data_type from information_schema.columns where table_name = 'shops' and column_name like 'logo%' order by column_name`,
+      `select column_name, data_type from information_schema.columns where table_name = 'shops' and column_name in ('logo_key', 'logo_checked_at', 'logo_error') order by column_name`,
     );
     expect(cols.rows).toEqual([
       { column_name: 'logo_checked_at', data_type: 'timestamp with time zone' },
@@ -35,5 +35,19 @@ describe('migration 016', () => {
     await pg.exec(`insert into shops (slug, name, base_url, adapter, logo_key) values ('a', 'A', 'https://a.example', 'woo', 'img/${'a'.repeat(64)}.webp')`);
     await pg.exec(await readFile(path.join(dir, await file()), 'utf8'));
     expect((await pg.query<{ logo_key: string }>(`select logo_key from shops where slug = 'a'`)).rows[0]!.logo_key).toBe(`img/${'a'.repeat(64)}.webp`);
+  });
+});
+
+describe('migration 017', () => {
+  it('adds the stored logo size to shops and can run again', async () => {
+    const cols = await pg.query<{ column_name: string; data_type: string }>(
+      `select column_name, data_type from information_schema.columns where table_name = 'shops' and column_name in ('logo_w', 'logo_h') order by column_name`,
+    );
+    expect(cols.rows).toEqual([
+      { column_name: 'logo_h', data_type: 'integer' },
+      { column_name: 'logo_w', data_type: 'integer' },
+    ]);
+    const f = (await readdir(dir)).find((n) => n.startsWith('017'))!;
+    await pg.exec(await readFile(path.join(dir, f), 'utf8'));
   });
 });

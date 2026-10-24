@@ -29,7 +29,7 @@ function ShopRow({ shop }: { shop: ShopSummary }) {
         to={`/shops/${encodeURIComponent(shop.slug)}`}
         className="flex min-h-14 items-center gap-3 px-4 py-2 outline-none hover:bg-secondary focus-visible:ring-[3px] focus-visible:ring-ring/50 focus-visible:ring-inset"
       >
-        <ShopBadge name={shop.name} logoUrl={shop.logoUrl} decorative />
+        <ShopBadge name={shop.name} logoUrl={shop.logoUrl} logoAspect={shop.logoAspect} decorative />
         <span className="min-w-0 flex-1">
           <span className="block truncate font-semibold">{shop.name}</span>
           <span className="block text-xs text-muted-foreground">

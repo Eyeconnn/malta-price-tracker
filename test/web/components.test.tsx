@@ -287,6 +287,38 @@ describe('ShopBadge', () => {
     expect(plain.textContent).toBe('SC');
   });
 
+  it('draws a wide logo as a pill of the same height, at most 4 times as wide, and a square-ish one as a circle', () => {
+    const { container } = render(<ShopBadge name="Telecom" logoUrl={LOGO} logoAspect={7.04} decorative />);
+    const pill = container.firstElementChild as HTMLElement;
+    const img = container.querySelector('img')!;
+    expect(pill.getAttribute('data-shape')).toBe('pill');
+    expect(pill.style.width).toBe('152px');
+    expect(pill.className).toContain('h-[38px]');
+    expect(pill.className).toContain('rounded-full');
+    expect([img.getAttribute('width'), img.getAttribute('height')]).toEqual(['152', '38']);
+    expect(img.className).toContain('object-contain');
+
+    const { container: small } = render(<ShopBadge name="Hudson" logoUrl={LOGO} logoAspect={2} size="sm" />);
+    expect((small.firstElementChild as HTMLElement).style.width).toBe('56px');
+    expect(small.querySelector('img')!.getAttribute('width')).toBe('56');
+
+    for (const aspect of [1.4, 1, null]) {
+      const { container: round } = render(<ShopBadge name="Scan" logoUrl={LOGO} logoAspect={aspect} />);
+      const el = round.firstElementChild as HTMLElement;
+      expect(el.getAttribute('data-shape'), String(aspect)).toBe('circle');
+      expect(el.style.width).toBe('');
+    }
+  });
+
+  it('a wide logo that fails to load falls back to the initials circle', () => {
+    const { container } = render(<ShopBadge name="Digital Zone" logoUrl={LOGO} logoAspect={5} />);
+    fireEvent.error(container.querySelector('img')!);
+    const el = container.firstElementChild as HTMLElement;
+    expect(el.getAttribute('data-shape')).toBe('circle');
+    expect(el.style.width).toBe('');
+    expect(el.textContent).toBe('DZ');
+  });
+
   it('falls back to initials if the logo fails to load', () => {
     const { container } = render(<ShopBadge name="Digital Zone" logoUrl={LOGO} />);
     fireEvent.error(container.querySelector('img')!);

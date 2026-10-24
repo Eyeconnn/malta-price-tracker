@@ -1,5 +1,5 @@
 // The logo job's polite getter (src/pipeline/logos.ts politeLogoGet) over ShopFetcher with a stubbed safeFetch: at
-// most 4 requests to the shop (robots.txt, retries and redirect hops included), 2 to an image CDN host, robots.txt
+// most 6 requests to the shop (robots.txt, retries and redirect hops included), 2 to an image CDN host, robots.txt
 // per host, at least 2 s between requests to a host, one redirect hop, and only allowlisted picture hosts.
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -29,12 +29,12 @@ beforeEach(() => {
 afterEach(() => vi.restoreAllMocks());
 
 describe('politeLogoGet', () => {
-  it('makes at most 4 requests to the shop, keeps 2 s between them and sends our user agent', async () => {
+  it('makes at most 6 requests to the shop, keeps 2 s between them and sends our user agent', async () => {
+    expect(LOGO_MAX_REQUESTS).toBe(6);
     const get = politeLogoGet(shop);
     await get('https://gadget.example.mt/', 'page');
-    await get('https://gadget.example.mt/logo1.png', 'image');
-    await get('https://gadget.example.mt/logo2.png', 'image');
-    await expect(get('https://gadget.example.mt/logo3.png', 'image')).rejects.toThrow(ShopAbortError);
+    for (let i = 1; i <= 4; i++) await get(`https://gadget.example.mt/logo${i}.png`, 'image');
+    await expect(get('https://gadget.example.mt/logo5.png', 'image')).rejects.toThrow(ShopAbortError);
     expect(answers.log).toHaveLength(LOGO_MAX_REQUESTS);
     // the shop's own config asks for no gap; the logo job keeps the 2 s default anyway
     for (let i = 1; i < answers.log.length; i++) expect(answers.log[i]!.at - answers.log[i - 1]!.at, `gap ${i}`).toBeGreaterThanOrEqual(1990);

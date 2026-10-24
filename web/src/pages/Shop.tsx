@@ -182,7 +182,7 @@ function ShopContent({ data, slug }: { data: ShopResponse; slug: string }) {
       <div className="glass flex flex-col gap-4 p-4 md:flex-row md:items-center md:justify-between">
         <div className="flex min-w-0 flex-col gap-3">
           <div className="flex min-w-0 items-center gap-3">
-            <ShopBadge name={shop.name} logoUrl={shop.logoUrl} decorative />
+            <ShopBadge name={shop.name} logoUrl={shop.logoUrl} logoAspect={shop.logoAspect} decorative />
             <h1 className="min-w-0 text-2xl font-bold tracking-tight break-words">{shop.name}</h1>
           </div>
           <RatingScale grade={rating.grade} sentence={rating.sentence} />

@@ -5,7 +5,7 @@
 // pnpm fetch-logos --dry-run       fetch and report only: nothing stored in R2 or recorded (works without a database,
 //                                  from shops.seed.json)
 // Run by scripts/run-local.ps1 after the nightly scrape (a no-op unless a shop is new) and by pnpm shop-requests for
-// a shop it has just activated. Politeness and the logo rules: src/pipeline/logos.ts (at most 4 requests per shop).
+// a shop it has just activated. Politeness and the logo rules: src/pipeline/logos.ts (at most 6 requests per shop).
 import { parseArgs } from 'node:util';
 import { closeDb } from '../db.js';
 import { runLogoJob } from '../pipeline/logos.js';
