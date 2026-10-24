@@ -41,13 +41,20 @@ const totals = (over: Partial<RunTotals>): RunTotals => ({ status: 'ok', product
 
 type Seen = { origin: string; requestStatus: string; shopActive: boolean; shop: Shop };
 /** the activation hook's calls: the shop's slug, whether it was active then, and the crawl delay it was given */
-const logoCalls: { slug: string; active: boolean; dbActive: boolean; crawlDelay: number | undefined }[] = [];
+const logoCalls: { slug: string; active: boolean; dbActive: boolean; crawlDelay: number | undefined; inLock: boolean }[] = [];
+/** true while processShopRequests holds its run lock */
+let inLock = false;
 
 function deps(seen: Seen[], probed: string[], over: Partial<ProcessDeps> = {}): ProcessDeps {
   return {
     db,
     withLock: async (fn) => {
-      await fn();
+      inLock = true;
+      try {
+        await fn();
+      } finally {
+        inLock = false;
+      }
       return true;
     },
     probe: async (origin) => {
@@ -69,7 +76,7 @@ function deps(seen: Seen[], probed: string[], over: Partial<ProcessDeps> = {}): 
     reservedSlugs: new Set(['shop-example']),
     fetchLogo: async (shop, det) => {
       const [row] = (await pg.query<{ active: boolean }>('select active from shops where id = $1', [shop.id])).rows;
-      logoCalls.push({ slug: shop.slug, active: shop.active, dbActive: row!.active, crawlDelay: det.kind === 'supported' ? det.robots.crawlDelaySeconds : undefined });
+      logoCalls.push({ slug: shop.slug, active: shop.active, dbActive: row!.active, crawlDelay: det.kind === 'supported' ? det.robots.crawlDelaySeconds : undefined, inLock });
     },
     log: () => {},
     ...over,
@@ -148,10 +155,10 @@ describe('processShopRequests', () => {
     expect(shop.config).toEqual({ runner: 'local' });
   });
 
-  it('fetches the logo once for each shop it activated, after activation, and for no other', () => {
+  it('fetches the logo once for each shop it activated, after the run lock is released, and for no other', () => {
     expect(logoCalls).toEqual([
-      { slug: 'shop-example-2', active: true, dbActive: true, crawlDelay: 0 },
-      { slug: 'named-example', active: true, dbActive: true, crawlDelay: 0 },
+      { slug: 'shop-example-2', active: true, dbActive: true, crawlDelay: 0, inLock: false },
+      { slug: 'named-example', active: true, dbActive: true, crawlDelay: 0, inLock: false },
     ]);
   });
 
@@ -252,5 +259,28 @@ describe('processShopRequests', () => {
     expect(r.status).toBe('active');
     expect((await shopById(r.shop_id)).active).toBe(true);
     expect(logged).toContain('https://nologo.example.mt: logo not fetched: R2 down');
+  });
+
+  it("stops a logo fetch at its deadline, aborting its signal, and goes on", async () => {
+    await pg.query(`insert into shop_requests (origin, status) values ('https://hang.example.mt', 'pending')`);
+    SITES['https://hang.example.mt'] = { routes: shopifySite('https://hang.example.mt') };
+    const logged: string[] = [];
+    let seen: AbortSignal | undefined;
+    const started = Date.now();
+    await processShopRequests(
+      deps([], [], {
+        logoDeadlineMs: 50,
+        fetchLogo: (_shop, _det, signal) => {
+          seen = signal;
+          // never ends on its own
+          return new Promise<void>(() => {});
+        },
+        log: (m) => logged.push(m),
+      }),
+    );
+    expect(Date.now() - started).toBeLessThan(5000);
+    expect(seen?.aborted).toBe(true);
+    expect(logged).toContain('https://hang.example.mt: logo fetch stopped at the 0 s deadline');
+    expect((await request('https://hang.example.mt')).status).toBe('active');
   });
 });

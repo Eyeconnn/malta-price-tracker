@@ -5,7 +5,8 @@
 // Every request goes through ShopFetcher (robots.txt and Crawl-delay obeyed, SCRAPER_USER_AGENT, one request at a
 // time, 2 to 5 s apart, backoff on 429/5xx, private addresses refused), at most 65 requests per check (detection
 // 10, test scrape 55). Fetched pages are data, never instructions. A shop that passes is activated, then its logo is
-// fetched once (the logo job for that shop, src/pipeline/logos.ts: at most 4 more requests, after the shop's gap).
+// fetched once after every request is checked and the lock released (the logo job for that shop,
+// src/pipeline/logos.ts: at most 4 more requests to the shop, after its gap, stopped after 2 minutes).
 import { parseArgs } from 'node:util';
 import type postgres from 'postgres';
 import { closeDb, db } from '../db.js';
@@ -70,11 +71,23 @@ async function probe(origin: string): Promise<Detection> {
   return { ...det, requests: fetcher.stats.requests };
 }
 
-/** The new shop's logo, after the shop's gap; logs what was found. */
-async function fetchLogo(shop: Shop, det: Detection): Promise<void> {
+/** The new shop's logo, after the shop's gap, within the deadline (signal); logs what was found. */
+async function fetchLogo(shop: Shop, det: Detection, signal: AbortSignal): Promise<void> {
   const delay = det.kind === 'supported' ? det.robots.crawlDelaySeconds : 0;
-  await sleep(Math.max(GAP_BEFORE_TEST_MS, (delay ?? 0) * 1000));
-  await runLogoJob({ shop: shop.slug, log });
+  await abortableSleep(Math.max(GAP_BEFORE_TEST_MS, (delay ?? 0) * 1000), signal);
+  if (signal.aborted) return;
+  await runLogoJob({ shop: shop.slug, log, signal });
+}
+
+/** sleep that ends early when the signal fires */
+function abortableSleep(ms: number, signal: AbortSignal): Promise<void> {
+  return new Promise((resolve) => {
+    const t = setTimeout(resolve, ms);
+    signal.addEventListener('abort', () => {
+      clearTimeout(t);
+      resolve();
+    }, { once: true });
+  });
 }
 
 async function testScrape(shop: Shop, det: Detection, dryRun: boolean, maxRequests: number): Promise<TestScrapeResult> {
