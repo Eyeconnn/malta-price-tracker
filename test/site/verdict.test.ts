@@ -354,3 +354,36 @@ describe('shown was prices (migration 015)', () => {
     expect(v.reason).not.toContain('809');
   });
 });
+
+describe("the shop's own term for its reference price (was_label)", () => {
+  const label = { wasLabel: 'List price' };
+
+  it('names the reference price in the was-above-charged reason', () => {
+    const history = [...days('2026-10-04', 20, 79900, null, true), obs('2026-10-24', 79900, 96900, true)];
+    const v = computeVerdict(history, T, at('2026-10-24', '20:00:00Z'), label);
+    expect(v.reason).toBe('List price €969.00 is higher than any price charged since 4 Oct (highest €799.00).');
+    // the default stays "Was price"
+    expect(computeVerdict(history, T, at('2026-10-24', '20:00:00Z')).reason).toBe(
+      'Was price €969.00 is higher than any price charged since 4 Oct (highest €799.00).',
+    );
+  });
+
+  it('names it in a reference price rise, at the start of the sentence and after "but the"', () => {
+    const rise = [...days('2026-10-01', 15, 79900, 89900, false), ...days('2026-10-16', 3, 79900, 96900, false)];
+    expect(computeVerdict(rise, T, at('2026-10-18', '20:00:00Z'), label).reason).toBe(
+      'List price went from €899.00 on 15 Oct to €969.00 on 16 Oct while the price stayed at €799.00.',
+    );
+    // a 10% drop, but the reference price went up 20 days ago (outside the raise window, inside the 30 days)
+    const good = [...days('2026-09-15', 25, 150000, 130000, true), ...days('2026-10-10', 15, 150000, 140000, true), ...days('2026-10-25', 6, 135000, 140000, true)];
+    expect(computeVerdict(good, T, at('2026-10-30', '20:00:00Z'), label).reason).toBe(
+      'Price €1,350.00 is 10.0% below its lowest price in the 30 days before 25 Oct (€1,500.00), but the list price went from €1,300.00 on 9 Oct to €1,400.00 on 10 Oct.',
+    );
+  });
+
+  it('names it in the context of a price rise', () => {
+    const history = [...days('2026-10-01', 15, 70900, null, false), ...days('2026-10-16', 2, 79900, 96900, false)];
+    expect(computeVerdict(history, T, at('2026-10-17', '20:00:00Z'), label).reason).toBe(
+      'Price went from €709.00 on 15 Oct to €799.00 on 16 Oct while showing a list price of €969.00.',
+    );
+  });
+});

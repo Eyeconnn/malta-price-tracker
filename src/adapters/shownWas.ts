@@ -15,12 +15,15 @@ import { toCents } from '../util/normalise.js';
  *   label_selector   CSS selector of the price's name (".atoz-price__name": "Black Friday", "Cash Price"); recorded
  *                    as the observation's badge text, where the Black Friday marker detection reads it
  *   ignore_selector  removed before anything is read: member or login prices (".atoz-price__teaser", zOnePRICE)
+ *   was_label        the shop's own term for its reference price ("List price"), used instead of "Was price" in
+ *                    verdict reasons and on the product page (1 to 40 characters)
  */
 export interface ShownWasConfig {
   source: 'price_html';
   selector: string;
   label_selector?: string;
   ignore_selector?: string;
+  was_label?: string;
 }
 
 const SOURCES = new Set(['price_html']);
@@ -34,6 +37,9 @@ export function shownWasConfig(cfg: ShopConfig): ShownWasConfig | null {
     throw new Error(`config.shown_was.source must be one of ${[...SOURCES].join(', ')}`);
   }
   if (typeof c.selector !== 'string' || !c.selector.trim()) throw new Error('config.shown_was.selector is required');
+  if (c.was_label !== undefined && (typeof c.was_label !== 'string' || !c.was_label.trim() || c.was_label.length > 40)) {
+    throw new Error('config.shown_was.was_label must be 1 to 40 characters');
+  }
   return c as ShownWasConfig;
 }
 

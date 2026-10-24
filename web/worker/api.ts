@@ -206,6 +206,7 @@ export function productPage(g: ProductGroup, thresholds: { cheaperPct: number; m
       url: webAddress(s.url),
       priceCents: positive(s.priceCents) ? s.priceCents : null,
       wasCents: positive(s.wasCents) ? s.wasCents : null,
+      ...(s.wasLabel ? { wasLabel: s.wasLabel } : {}),
       inStock: s.inStock,
       bf: s.bf,
       verdict: { label: s.verdict, reason: s.reason, facts: s.facts },

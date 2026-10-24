@@ -25,6 +25,8 @@ export type Card = {
   raisedFrom: { priceCents: number; at: string } | null;
   /** avoid only: the was price before a recent was-price rise (facts.wasRaisedFrom), else null */
   wasRaisedFromCents: number | null;
+  /** the shop's own term for its reference price ("List price", config.shown_was.was_label); absent: "Was price" */
+  wasLabel?: string;
 };
 
 /** Ruling R2: Obs with an ISO time, as JSON carries it. */
@@ -131,6 +133,8 @@ export type ProductDetail = { product: ProductInfo; variants: Variant[]; history
  */
 export type Seller = {
   id: number;
+  /** the shop's own term for its reference price ("List price", config.shown_was.was_label); absent: "Was price" */
+  wasLabel?: string;
   productId: number | null;
   groupKey: string;
   shopId: number;
@@ -247,8 +251,14 @@ const NAME_JOIN = `left join product_names pn on pn.shop_id = sp.shop_id and pn.
  */
 const SHOWN_WAS_SQL = `case when s.config ? 'shown_was' and po.was_source is distinct from 'shown' then null else po.was_price_cents end`;
 
+/** The shop's own term for its reference price (config.shown_was.was_label), null when it has none. Needs shops s. */
+const WAS_LABEL_SQL = `s.config -> 'shown_was' ->> 'was_label'`;
+/** { wasLabel } when the row's shop has its own term, else nothing (so the answer stays as before for every other shop) */
+const wasLabelOf = (v: unknown): { wasLabel?: string } => (typeof v === 'string' && v.trim() !== '' ? { wasLabel: v.trim() } : {});
+
 const CARD_COLUMNS = `sp.id, sp.title, s.name as shop, s.slug as shop_slug, sp.price_cents, sp.was_price_cents, sp.verdict,
-  sp.reason, sp.bf_status, sp.category, sp.facts -> 'raisedFrom' as raised_from, sp.facts ->> 'wasRaisedFrom' as was_raised_from`;
+  sp.reason, sp.bf_status, sp.category, sp.facts -> 'raisedFrom' as raised_from, sp.facts ->> 'wasRaisedFrom' as was_raised_from,
+  ${WAS_LABEL_SQL} as was_label`;
 
 /** word_similarity threshold for `<%`, as in the dashboard search. */
 const WORD_SIMILARITY = '0.5';
@@ -318,6 +328,7 @@ function toCard(r: Row): Card {
     category: strOrNull(r.category),
     raisedFrom: avoid ? raisedFromOrNull(r.raised_from) : null,
     wasRaisedFromCents: avoid ? priceOrNull(r.was_raised_from) : null,
+    ...wasLabelOf(r.was_label),
   };
 }
 
@@ -376,7 +387,7 @@ export function createData(db: SqlRunner, opts: DataOptions = {}): Data {
       const sellerRows = await db.query(
         `select sp.id, sp.rep_product_id, sp.group_key, sp.shop_id, s.name as shop, s.slug as shop_slug, sp.title, sp.brand, sp.url,
           sp.image_key, sp.category, sp.price_cents, sp.was_price_cents, sp.in_stock, sp.bf_status, sp.match_method, sp.verdict,
-          sp.reason, sp.facts, pn.display_name, pn.variant_label, pn.category as name_category, pn.attrs
+          sp.reason, sp.facts, pn.display_name, pn.variant_label, pn.category as name_category, pn.attrs, ${WAS_LABEL_SQL} as was_label
         from site_products sp join shops s on s.id = sp.shop_id
         ${NAME_JOIN}
         where ${VISIBLE}
@@ -421,6 +432,7 @@ export function createData(db: SqlRunner, opts: DataOptions = {}): Data {
         variantLabel: strOrNull(r.variant_label),
         nameCategory: strOrNull(r.name_category),
         attrs: objOrNull(r.attrs),
+        ...wasLabelOf(r.was_label),
       }));
 
       // per seller the same index range scans as the single-shop product page (shop_id, group key)

@@ -26,7 +26,8 @@
           "source": "price_html",
           "selector": ".atoz-price__list",
           "label_selector": ".atoz-price__name",
-          "ignore_selector": ".atoz-price__teaser"
+          "ignore_selector": ".atoz-price__teaser",
+          "was_label": "List price"
         }
       },
       "notes": "~5,250 products; very slow server. SKUs often real UPC/EAN barcodes. Refuses GitHub Actions (datacenter) IPs with 202/403 (tested 20 Oct): runs from the local machine."

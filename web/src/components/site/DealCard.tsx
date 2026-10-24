@@ -8,6 +8,7 @@ import type { Card } from '@/lib/api';
 import { listingPath } from '@/lib/links';
 import { formatDay, formatEuro } from '@/lib/format';
 import { cn } from '@/lib/utils';
+import { wasTerms } from '../../../../src/site/verdict.js';
 
 export const NO_PRICE = 'Price not shown by the shop';
 
@@ -25,22 +26,30 @@ export function avoidKind(c: Card): AvoidKind {
   return 'other';
 }
 
-const AVOID_WHAT: Record<AvoidKind, string> = {
-  price: 'price raised',
-  was: 'was price raised',
-  'was-high': 'was price above its recent prices',
-  other: 'deal to avoid',
-};
+/** What an avoid card is about, in lower case; the reference price goes by the shop's own term (wasLabel) when it has one. */
+function avoidWhat(c: Card): string {
+  const was = wasTerms(c.wasLabel).inner;
+  switch (avoidKind(c)) {
+    case 'price':
+      return 'price raised';
+    case 'was':
+      return `${was} raised`;
+    case 'was-high':
+      return `${was} above its recent prices`;
+    default:
+      return 'deal to avoid';
+  }
+}
 
 /** What an avoid card is about, as a short label: "Price raised", "Was price raised", ... */
 export function avoidSummary(c: Card): string {
-  const what = AVOID_WHAT[avoidKind(c)];
+  const what = avoidWhat(c);
   return what.charAt(0).toUpperCase() + what.slice(1);
 }
 
 /** The banner line of a Black Friday avoid card, e.g. "Marked Black Friday, price raised". */
 export function alarmText(c: Card): string {
-  return `Marked Black Friday, ${AVOID_WHAT[avoidKind(c)]}`;
+  return `Marked Black Friday, ${avoidWhat(c)}`;
 }
 
 /** One short fact about what changed, shown in Simple mode too; null when the card has no such fact. */
@@ -49,9 +58,9 @@ export function avoidFact(c: Card): string | null {
     case 'price':
       return `Price on ${formatDay(c.raisedFrom!.at)}: ${formatEuro(c.raisedFrom!.priceCents)}`;
     case 'was':
-      return `Was price raised from ${formatEuro(c.wasRaisedFromCents!)} to ${formatEuro(c.wasCents!)}`;
+      return `${wasTerms(c.wasLabel).start} raised from ${formatEuro(c.wasRaisedFromCents!)} to ${formatEuro(c.wasCents!)}`;
     case 'was-high':
-      return `Was price ${formatEuro(c.wasCents!)} is above its recent prices`;
+      return `${wasTerms(c.wasLabel).start} ${formatEuro(c.wasCents!)} is above its recent prices`;
     default:
       return null;
   }
@@ -71,16 +80,20 @@ export function tagProps(c: Card): PriceTagProps | null {
   }
 }
 
-/** Price now and the shop's was price (only when above it), or "Price not shown by the shop". */
+/**
+ * Price now and the shop's was price (only when above it), or "Price not shown by the shop". A shop with its own term
+ * for the reference price (wasLabel, e.g. "List price") gets that term shown before it.
+ */
 export function PriceLine({ card, className }: { card: Card; className?: string }) {
   const { priceCents: price, wasCents: was } = card;
   if (price === null) return <p className={cn('text-sm font-medium text-muted-foreground', className)}>{NO_PRICE}</p>;
   return (
     <p className={cn('flex flex-wrap items-baseline gap-x-2', className)}>
       <span className="text-xl font-bold tracking-tight tabular-nums">{formatEuro(price)}</span>
+      {was !== null && was > price && card.wasLabel && <span className="text-sm text-muted-foreground">{card.wasLabel}</span>}
       {was !== null && was > price && (
         <s className="text-sm text-muted-foreground tabular-nums">
-          <span className="sr-only">Shop's was price </span>
+          {!card.wasLabel && <span className="sr-only">Shop's was price </span>}
           {formatEuro(was)}
         </s>
       )}

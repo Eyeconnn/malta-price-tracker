@@ -5,7 +5,8 @@ import { formatDay, formatEuro } from '@/lib/format';
 import { type DayRow, rowIndex } from '@/lib/history';
 import { hasWas, seriesStyle, WAS_DASH } from '@/lib/sellerSeries';
 
-export type SellerLine = { id: number; shop: string; rows: DayRow[] };
+/** wasName: the shop's own term for its reference price, in lower case ("list price"); absent: "was price" */
+export type SellerLine = { id: number; shop: string; rows: DayRow[]; wasName?: string };
 export type SellersChartProps = { lines: SellerLine[]; animate: boolean };
 
 const DAY_MS = 86_400_000;
@@ -38,7 +39,7 @@ export default function SellersChart({ lines, animate }: SellersChartProps) {
   if (data.length === 0) return null;
   const first = data[0]!.x as number;
   const last = data.at(-1)!.x as number;
-  const names = new Map(lines.flatMap((l) => [[`s${l.id}`, l.shop], [`w${l.id}`, `${l.shop}, was price`]] as [string, string][]));
+  const names = new Map(lines.flatMap((l) => [[`s${l.id}`, l.shop], [`w${l.id}`, `${l.shop}, ${l.wasName ?? 'was price'}`]] as [string, string][]));
   const withWas = lines.map((l, i) => ({ l, i })).filter(({ l }) => hasWas(l));
   return (
     <div data-animate={String(animate)} data-lines={lines.length} data-was-lines={withWas.length}>

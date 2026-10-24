@@ -198,7 +198,7 @@ AtoZ's Store API gave `regular_price` 809.00 for the Lenovo V15 G5 IRL while its
 struck through (and a zOnePRICE for logged-in members, never used). For such a shop:
 
 ```json
-"shown_was": { "source": "price_html", "selector": ".atoz-price__list", "label_selector": ".atoz-price__name", "ignore_selector": ".atoz-price__teaser" }
+"shown_was": { "source": "price_html", "selector": ".atoz-price__list", "label_selector": ".atoz-price__name", "ignore_selector": ".atoz-price__teaser", "was_label": "List price" }
 ```
 
 - `source: price_html` reads the Woo Store API's `price_html` field, the markup the shop prints on its product pages
@@ -207,6 +207,9 @@ struck through (and a zOnePRICE for logged-in members, never used). For such a s
 - `selector` finds the struck-through price; `ignore_selector` is removed first (member and login prices);
   `label_selector` is the price's name ("Black Friday", "Cash Price"), stored as the night's `badge_text`, where the
   Black Friday marker detection reads it.
+- `was_label` is the shop's own term for its reference price. A struck-through list price counts as a discount claim
+  and is judged (owner decision 24 Oct); verdict reasons and the product page then say "List price €969.00 is higher
+  than any price charged since ..." and "List price €969.00" instead of "Was price" for that shop.
 - When the selector finds nothing, the feed's regular price is used only if the markup strikes exactly that price
   through; otherwise the was price is null (unknown), never a value shoppers did not see.
 - `price_observations.was_source` says where a was price came from (`shown`, `feed`, null before 015) and

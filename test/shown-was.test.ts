@@ -21,13 +21,21 @@ const CFG = shownWasConfig(atoz.config)!;
 
 describe('shownWasConfig', () => {
   it("reads AtoZ's config from shops.seed.json", () => {
-    expect(CFG).toEqual({ source: 'price_html', selector: '.atoz-price__list', label_selector: '.atoz-price__name', ignore_selector: '.atoz-price__teaser' });
+    expect(CFG).toEqual({
+      source: 'price_html',
+      selector: '.atoz-price__list',
+      label_selector: '.atoz-price__name',
+      ignore_selector: '.atoz-price__teaser',
+      was_label: 'List price',
+    });
   });
 
   it('is null without a config and throws on a malformed one', () => {
     expect(shownWasConfig({})).toBeNull();
     expect(() => shownWasConfig({ shown_was: { source: 'product_html', selector: '.x' } })).toThrow(/source/);
     expect(() => shownWasConfig({ shown_was: { source: 'price_html' } })).toThrow(/selector/);
+    expect(() => shownWasConfig({ shown_was: { source: 'price_html', selector: '.x', was_label: '' } })).toThrow(/was_label/);
+    expect(() => shownWasConfig({ shown_was: { source: 'price_html', selector: '.x', was_label: 'x'.repeat(41) } })).toThrow(/was_label/);
   });
 });
 

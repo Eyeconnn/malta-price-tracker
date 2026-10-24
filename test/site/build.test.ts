@@ -497,7 +497,7 @@ describe.skipIf(!process.env.SITE_BUILD_TEST_DB)('site-build on PGlite', () => {
   }, 60_000);
 
   it('counts only shown was prices for a shop with shown_was; its feed was prices are unknown (migration 015)', async () => {
-    const config = { shown_was: { source: 'price_html', selector: '.atoz-price__list' } };
+    const config = { shown_was: { source: 'price_html', selector: '.atoz-price__list', was_label: 'List price' } };
     const [{ id: shopId }] = await sql<{ id: number }[]>`
       insert into shops (slug, name, base_url, category, adapter, config)
       values ('shownshop', 'shownshop', 'https://shown.test', 'electronics', 'woo', ${sql.json(config)}) returning id`;
@@ -527,7 +527,8 @@ describe.skipIf(!process.env.SITE_BUILD_TEST_DB)('site-build on PGlite', () => {
       ['FEED', 'none', 79900, null],
       ['SHOWN', 'avoid', 79900, 96900],
     ]);
-    expect(rows[1].reason).toBe('Was price €969.00 is higher than any price charged since 5 Oct (highest €799.00).');
+    // the reason uses the shop's own term for its reference price (config.shown_was.was_label)
+    expect(rows[1].reason).toBe('List price €969.00 is higher than any price charged since 5 Oct (highest €799.00).');
     // the feed's 809.00 never counts, so the shown 969.00 is not a was price "raised" from it
     expect(rows[1].facts?.wasRaisedFrom).toBeUndefined();
   }, 60_000);

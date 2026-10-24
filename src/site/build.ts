@@ -48,8 +48,11 @@ export type ObsRow = {
 
 export type VariantResult = { product: ProductRow; latest: Obs | null; verdict: Verdict };
 
-/** shown_was: the shop's config has shown_was, so only was prices read from its shown price markup count (migration 015) */
-export type Shop = { id: number; slug: string; category: string | null; shown_was?: boolean };
+/**
+ * shown_was: the shop's config has shown_was, so only was prices read from its shown price markup count (migration 015).
+ * was_label: the shop's own term for its reference price (config.shown_was.was_label), used in its verdict reasons.
+ */
+export type Shop = { id: number; slug: string; category: string | null; shown_was?: boolean; was_label?: string | null };
 
 type GroupRow = {
   group_key: string;
@@ -287,7 +290,7 @@ export async function buildShop(sql: postgres.Sql, shop: Shop, settings: SiteSet
         const obs = (obsByProduct.get(p.id) ?? []).map((o) => toObs(o, p.bf_status, shop.shown_was === true));
         let latest: Obs | null = null;
         for (const o of obs) if (latest === null || o.at > latest.at) latest = o;
-        return { product: p, latest, verdict: computeVerdict(obs, t, now) };
+        return { product: p, latest, verdict: computeVerdict(obs, t, now, { wasLabel: shop.was_label }) };
       });
       return buildGroup(key, variants, shop, settings);
     });
@@ -544,7 +547,7 @@ export async function buildSiteProducts(
   await sql`delete from site_products where shop_id in (select id from shops where site_hidden or not active)`;
 
   const shops = await sql<Shop[]>`
-    select id, slug, category, (config ? 'shown_was') as shown_was from shops
+    select id, slug, category, (config ? 'shown_was') as shown_was, config -> 'shown_was' ->> 'was_label' as was_label from shops
     where active and not site_hidden ${opts.shop === undefined ? sql`` : sql`and slug = ${opts.shop}`}
     order by slug`;
   if (opts.shop !== undefined && shops.length === 0) throw new Error(`No active, visible shop with slug ${opts.shop}`);
