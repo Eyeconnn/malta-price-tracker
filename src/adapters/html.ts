@@ -72,6 +72,23 @@ function abs(href: string | undefined, pageUrl: string): string | null {
   }
 }
 
+/**
+ * The address relative links on a page resolve against: its <base href> when that is an http(s) address on the
+ * page's own site (Telecom writes image paths relative to <base href="https://www.telecom.com.mt/">), else the page.
+ */
+export function documentBase($: cheerio.CheerioAPI, pageUrl: string): string {
+  const href = $('base[href]').first().attr('href');
+  if (!href) return pageUrl;
+  try {
+    const page = new URL(pageUrl);
+    const base = new URL(href, pageUrl);
+    if ((base.protocol !== 'https:' && base.protocol !== 'http:') || base.hostname !== page.hostname) return pageUrl;
+    return base.toString();
+  } catch {
+    return pageUrl;
+  }
+}
+
 function text($: cheerio.CheerioAPI, scope: cheerio.Cheerio<never>, sel: string | undefined, own = false): string | null {
   if (!sel) return null;
   const el = scope.find(sel).first();
@@ -110,9 +127,10 @@ function lastPage($: cheerio.CheerioAPI, c: HtmlConfig): number {
 export function parseTiles($: cheerio.CheerioAPI, page: string, c: HtmlConfig): NormalisedRecord[] {
   const own = new Set(c.own_text ?? []);
   const out: NormalisedRecord[] = [];
+  const base = documentBase($, page);
   $(c.tile).each((_, el) => {
     const t = $(el) as unknown as cheerio.Cheerio<never>;
-    const url = abs(t.find(c.link).first().attr('href'), page);
+    const url = abs(t.find(c.link).first().attr('href'), base);
     if (!url) return;
     let id: string | null = null;
     if (c.id?.attr) id = t.attr(c.id.attr) ?? t.find(`[${c.id.attr}]`).first().attr(c.id.attr) ?? null;
@@ -128,7 +146,7 @@ export function parseTiles($: cheerio.CheerioAPI, page: string, c: HtmlConfig): 
     r.on_sale = r.was_price_cents !== null;
     r.in_stock = stockFrom(text($, t, c.stock, own.has('stock')), c);
     const img = t.find('img').first();
-    r.image_url = abs(img.attr('data-src') ?? img.attr('data-lazysrc') ?? (img.attr('src')?.startsWith('data:') ? undefined : img.attr('src')), page);
+    r.image_url = abs(img.attr('data-src') ?? img.attr('data-lazysrc') ?? (img.attr('src')?.startsWith('data:') ? undefined : img.attr('src')), base);
     out.push(r);
   });
   return out;
@@ -154,7 +172,7 @@ export function parseProduct(html: string, url: string, c: HtmlConfig): Normalis
   r.was_price_cents = old && r.price_cents !== null && old > r.price_cents ? old : null;
   r.on_sale = r.was_price_cents !== null;
   r.in_stock = stockFrom(text($, body, p.stock), c) ?? ld?.in_stock ?? null;
-  r.image_url = ld?.image ?? $('meta[property="og:image"]').attr('content') ?? null;
+  r.image_url = abs(ld?.image ?? $('meta[property="og:image"]').attr('content'), documentBase($, url));
   return r.price_cents === null && !ld ? null : r;
 }
 
@@ -173,7 +191,7 @@ export const html: Adapter = {
       if (res.status !== 200) throw new Error(`start page ${start} returned HTTP ${res.status}`);
       const $ = cheerio.load(res.text());
       $(c.category_links).each((_, a) => {
-        let u = abs($(a).attr('href'), res.url);
+        let u = abs($(a).attr('href'), documentBase($, res.url));
         if (!u) return;
         if (c.normalise) u = u.replace(new RegExp(c.normalise[0]), c.normalise[1]);
         const noQuery = u.split('?')[0]!;
