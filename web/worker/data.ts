@@ -240,6 +240,13 @@ const TRUSTED = `(sp.canonical_id is not null and (sp.match_method in ('gtin', '
 const NAME_JOIN = `left join product_names pn on pn.shop_id = sp.shop_id and pn.group_key = sp.group_key
   and pn.status = 'ok' and pn.display_name is not null and pn.source_title = sp.title`;
 
+/**
+ * A history row's was price. For a shop with config.shown_was only prices read from what the shop shows struck
+ * through count (was_source 'shown', migration 015); its older feed values are unknown, as in the verdicts
+ * (src/site/build.ts toObs). Needs shops s and price_observations po.
+ */
+const SHOWN_WAS_SQL = `case when s.config ? 'shown_was' and po.was_source is distinct from 'shown' then null else po.was_price_cents end`;
+
 const CARD_COLUMNS = `sp.id, sp.title, s.name as shop, s.slug as shop_slug, sp.price_cents, sp.was_price_cents, sp.verdict,
   sp.reason, sp.bf_status, sp.category, sp.facts -> 'raisedFrom' as raised_from, sp.facts ->> 'wasRaisedFrom' as was_raised_from`;
 
@@ -443,9 +450,9 @@ export function createData(db: SqlRunner, opts: DataOptions = {}): Data {
         db.query(
           `select g.seller_id, h.* from unnest($1::bigint[], $2::int[], $3::text[], $4::bigint[]) as g(seller_id, shop_id, group_key, rep_id)
           cross join lateral (
-            (select po.product_id, po.observed_at, po.price_cents, po.was_price_cents, po.in_stock,
+            (select po.product_id, po.observed_at, po.price_cents, ${SHOWN_WAS_SQL} as was_price_cents, po.in_stock,
               coalesce(po.bf_marked, coalesce(p.bf_status = 'marked', false)) as bf
-            from products p join price_observations po on po.product_id = p.id
+            from products p join shops s on s.id = p.shop_id join price_observations po on po.product_id = p.id
             where p.shop_id = g.shop_id and coalesce(p.parent_external_id, p.external_id) = g.group_key
               and po.observed_at > now() - interval '${HISTORY_DAYS} days'
               -- unchecked 70% jumps are left out, as the verdicts leave them out (Ruling R55)
@@ -453,9 +460,9 @@ export function createData(db: SqlRunner, opts: DataOptions = {}): Data {
             order by po.observed_at desc, po.product_id desc
             limit $5)
             union
-            (select po.product_id, po.observed_at, po.price_cents, po.was_price_cents, po.in_stock,
+            (select po.product_id, po.observed_at, po.price_cents, ${SHOWN_WAS_SQL} as was_price_cents, po.in_stock,
               coalesce(po.bf_marked, coalesce(p.bf_status = 'marked', false)) as bf
-            from products p join price_observations po on po.product_id = p.id
+            from products p join shops s on s.id = p.shop_id join price_observations po on po.product_id = p.id
             where p.id = g.rep_id and p.shop_id = g.shop_id
               and po.observed_at > now() - interval '${KEEP_DAYS} days'
               and (po.review_flag is null or po.review_flag <> 'jump_70pct'))
@@ -747,9 +754,9 @@ export function createData(db: SqlRunner, opts: DataOptions = {}): Data {
         // a wide group can exceed the cap: keep the newest points, then return them oldest first
         db.query(
           `select * from (
-            select po.product_id, po.observed_at, po.price_cents, po.was_price_cents, po.in_stock,
+            select po.product_id, po.observed_at, po.price_cents, ${SHOWN_WAS_SQL} as was_price_cents, po.in_stock,
               coalesce(po.bf_marked, coalesce(p.bf_status = 'marked', false)) as bf
-            from products p join price_observations po on po.product_id = p.id
+            from products p join shops s on s.id = p.shop_id join price_observations po on po.product_id = p.id
             where p.shop_id = $1 and coalesce(p.parent_external_id, p.external_id) = $2
               and po.observed_at > now() - interval '${HISTORY_DAYS} days'
               -- unchecked 70% jumps are left out, as the verdicts leave them out (Ruling R55)

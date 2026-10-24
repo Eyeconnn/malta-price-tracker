@@ -40,13 +40,16 @@ export type ObsRow = {
   observed_at: Date;
   price_cents: number | null;
   was_price_cents: number | null;
+  /** 'feed', 'shown' or null (migration 015); absent in older callers */
+  was_source?: string | null;
   in_stock: boolean | null;
   bf_marked: boolean | null;
 };
 
 export type VariantResult = { product: ProductRow; latest: Obs | null; verdict: Verdict };
 
-export type Shop = { id: number; slug: string; category: string | null };
+/** shown_was: the shop's config has shown_was, so only was prices read from its shown price markup count (migration 015) */
+export type Shop = { id: number; slug: string; category: string | null; shown_was?: boolean };
 
 type GroupRow = {
   group_key: string;
@@ -69,12 +72,17 @@ type GroupRow = {
   facts: Verdict['facts'];
 };
 
-/** Observation for the verdict engine. bf: the night's bf_marked; older rows without it use the product's bf_status. */
-export function toObs(row: Omit<ObsRow, 'product_id'>, productBfStatus: string | null): Obs {
+/**
+ * Observation for the verdict engine. bf: the night's bf_marked; older rows without it use the product's bf_status.
+ * shownWas: the shop has config.shown_was (its feed's regular price differs from the struck-through price it shows).
+ * Its was prices count only on rows read from the shown price (was_source 'shown'); on every other row (the feed
+ * values from before migration 015) the was price is unknown, so no verdict or page rests on a price shoppers never saw.
+ */
+export function toObs(row: Omit<ObsRow, 'product_id'>, productBfStatus: string | null, shownWas = false): Obs {
   return {
     at: row.observed_at,
     price: row.price_cents,
-    was: row.was_price_cents,
+    was: shownWas && row.was_source !== 'shown' ? null : row.was_price_cents,
     inStock: row.in_stock,
     bf: row.bf_marked ?? productBfStatus === 'marked',
   };
@@ -262,7 +270,7 @@ export async function buildShop(sql: postgres.Sql, shop: Shop, settings: SiteSet
     const batchKeys = keys.slice(i, i + GROUP_BATCH);
     const ids = batchKeys.flatMap((k) => groups.get(k)!.map((p) => p.id));
     const obsRows = await sql<ObsRow[]>`
-      select product_id, observed_at, price_cents, was_price_cents, in_stock, bf_marked
+      select product_id, observed_at, price_cents, was_price_cents, was_source, in_stock, bf_marked
       from price_observations
       where product_id = any(${ids}::bigint[]) and observed_at > ${obsSince} and observed_at <= ${now}
         -- readings the scraper flagged as a 70% jump are unchecked glitches: never a verdict input (Ruling R55)
@@ -276,7 +284,7 @@ export async function buildShop(sql: postgres.Sql, shop: Shop, settings: SiteSet
 
     const rows = batchKeys.map((key) => {
       const variants = groups.get(key)!.map((p): VariantResult => {
-        const obs = (obsByProduct.get(p.id) ?? []).map((o) => toObs(o, p.bf_status));
+        const obs = (obsByProduct.get(p.id) ?? []).map((o) => toObs(o, p.bf_status, shop.shown_was === true));
         let latest: Obs | null = null;
         for (const o of obs) if (latest === null || o.at > latest.at) latest = o;
         return { product: p, latest, verdict: computeVerdict(obs, t, now) };
@@ -536,7 +544,7 @@ export async function buildSiteProducts(
   await sql`delete from site_products where shop_id in (select id from shops where site_hidden or not active)`;
 
   const shops = await sql<Shop[]>`
-    select id, slug, category from shops
+    select id, slug, category, (config ? 'shown_was') as shown_was from shops
     where active and not site_hidden ${opts.shop === undefined ? sql`` : sql`and slug = ${opts.shop}`}
     order by slug`;
   if (opts.shop !== undefined && shops.length === 0) throw new Error(`No active, visible shop with slug ${opts.shop}`);

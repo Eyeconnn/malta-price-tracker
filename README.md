@@ -188,6 +188,32 @@ they can be committed if wanted.
 | `images_per_run`, `images_minutes` | image download budget per night |
 | `sitemap_fallback_max` | Shopify: max products read one by one when paging misses some |
 | `runner` | `cloud` (default, GitHub Actions) or `local` (only `pnpm scrape --runner local` on your machine) |
+| `shown_was` | Woo: record the was price the shop shows struck through instead of the feed's regular price (below) |
+
+### Shown was prices (`shown_was`, migration 015)
+
+The site tests the was price a shopper sees struck through, so that is the price recorded. Most shops' feeds give
+the same price their pages strike through; a survey on 24 Oct (one product page per active shop) found one exception:
+AtoZ's Store API gave `regular_price` 809.00 for the Lenovo V15 G5 IRL while its page showed "List Price" 969.00
+struck through (and a zOnePRICE for logged-in members, never used). For such a shop:
+
+```json
+"shown_was": { "source": "price_html", "selector": ".atoz-price__list", "label_selector": ".atoz-price__name", "ignore_selector": ".atoz-price__teaser" }
+```
+
+- `source: price_html` reads the Woo Store API's `price_html` field, the markup the shop prints on its product pages
+  and listing cards. It comes with every listing page and single-product read, so it costs no extra request and every
+  product is covered every night.
+- `selector` finds the struck-through price; `ignore_selector` is removed first (member and login prices);
+  `label_selector` is the price's name ("Black Friday", "Cash Price"), stored as the night's `badge_text`, where the
+  Black Friday marker detection reads it.
+- When the selector finds nothing, the feed's regular price is used only if the markup strikes exactly that price
+  through; otherwise the was price is null (unknown), never a value shoppers did not see.
+- `price_observations.was_source` says where a was price came from (`shown`, `feed`, null before 015) and
+  `feed_was_price_cents` keeps the feed's regular price on shown rows for audit. Migration 015 labels AtoZ's earlier
+  rows `feed`. For a shop with `shown_was`, verdicts, site rows and the price history treat every was price not read
+  from the shown price as unknown (`toObs` in `src/site/build.ts`, `SHOWN_WAS_SQL` in `web/worker/data.ts`); no
+  data is deleted. Run migration 015 before deploying the web Worker or the scraper with this change.
 
 ## Schedule (GitHub Actions)
 

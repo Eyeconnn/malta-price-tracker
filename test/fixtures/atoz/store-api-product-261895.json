@@ -1,0 +1,57 @@
+{
+  "id": 261895,
+  "name": "LENOVO V15 G5 IRL 15.6&#8221; Intel Core i5 Office Notebook, 16GB, 512GB SSD",
+  "parent": 0,
+  "type": "simple",
+  "variation": "",
+  "permalink": "https://atoz.com.mt/lenovo-v15-g5-irl-15-6-intel-core-i5-office-notebook-2/",
+  "sku": "199271997192",
+  "on_sale": true,
+  "prices": {
+    "price": "79900",
+    "regular_price": "80900",
+    "sale_price": "79900",
+    "price_range": null,
+    "currency_code": "EUR",
+    "currency_symbol": "€",
+    "currency_minor_unit": 2,
+    "currency_decimal_separator": ".",
+    "currency_thousand_separator": ",",
+    "currency_prefix": "€",
+    "currency_suffix": ""
+  },
+  "price_html": "<span class=\"atoz-price atoz-price--sale\"><span class=\"atoz-price__main\"><span class=\"woocommerce-Price-amount amount\"><span class=\"woocommerce-Price-currencySymbol\" dir=\"auto\">&euro;</span>799.00</span> <small class=\"atoz-price__suffix\">inc. VAT</small></span><span class=\"atoz-price__name\">Black Friday</span><span class=\"atoz-price__refs\">List Price <del class=\"atoz-price__list\"><span class=\"woocommerce-Price-amount amount\"><span class=\"woocommerce-Price-currencySymbol\" dir=\"auto\">&euro;</span>969.00</span></del></span><span class=\"atoz-price__teaser\">zOnePRICE <span class=\"woocommerce-Price-amount amount\"><span class=\"woocommerce-Price-currencySymbol\" dir=\"auto\">&euro;</span>797.00</span> <a href=\"https://atoz.com.mt/my-account/\">Log in or register</a></span></span>",
+  "images": [
+    {
+      "src": "https://atoz.com.mt/wp-content/uploads/199271997192-1.jpg"
+    }
+  ],
+  "categories": [
+    {
+      "id": 330,
+      "name": "Laptops",
+      "slug": "laptops"
+    }
+  ],
+  "tags": [
+    {
+      "id": 1285,
+      "name": "Black Friday",
+      "slug": "black-friday"
+    },
+    {
+      "id": 820,
+      "name": "LENOVO",
+      "slug": "lenovo"
+    }
+  ],
+  "brands": [
+    {
+      "id": 4098,
+      "name": "LENOVO",
+      "slug": "lenovo"
+    }
+  ],
+  "is_in_stock": true,
+  "variations": []
+}

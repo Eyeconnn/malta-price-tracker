@@ -170,6 +170,8 @@ export async function saveBatch(
       product_id: pid,
       price_cents: r.price_cents,
       was_price_cents: r.was_price_cents && r.was_price_cents > 0 ? r.was_price_cents : null,
+      was_source: r.was_source ?? null,
+      feed_was_price_cents: r.feed_was_price_cents && r.feed_was_price_cents > 0 ? r.feed_was_price_cents : null,
       shop_30d_low_cents: r.shop_30d_low_cents,
       in_stock: r.in_stock,
       on_sale: r.on_sale,
@@ -181,13 +183,14 @@ export async function saveBatch(
   });
 
   await sql`
-    insert into price_observations (product_id, observed_at, run_id, price_cents, was_price_cents,
-      shop_30d_low_cents, in_stock, on_sale, badge_text, raw_hash, review_flag, bf_marked)
-    select x.product_id, ${observedAt}, ${runId}, x.price_cents, x.was_price_cents, x.shop_30d_low_cents,
-      x.in_stock, x.on_sale, x.badge_text, x.raw_hash, x.review_flag, x.bf_marked
+    insert into price_observations (product_id, observed_at, run_id, price_cents, was_price_cents, was_source,
+      feed_was_price_cents, shop_30d_low_cents, in_stock, on_sale, badge_text, raw_hash, review_flag, bf_marked)
+    select x.product_id, ${observedAt}, ${runId}, x.price_cents, x.was_price_cents, x.was_source, x.feed_was_price_cents,
+      x.shop_30d_low_cents, x.in_stock, x.on_sale, x.badge_text, x.raw_hash, x.review_flag, x.bf_marked
     from jsonb_to_recordset(${sql.json(obsRows as never)}) as x(
-      product_id bigint, price_cents integer, was_price_cents integer, shop_30d_low_cents integer,
-      in_stock boolean, on_sale boolean, badge_text text, raw_hash text, review_flag text, bf_marked boolean)
+      product_id bigint, price_cents integer, was_price_cents integer, was_source text, feed_was_price_cents integer,
+      shop_30d_low_cents integer, in_stock boolean, on_sale boolean, badge_text text, raw_hash text, review_flag text,
+      bf_marked boolean)
     on conflict (product_id, observed_at) do nothing`;
 
   return { saved: obsRows.length, flagged };

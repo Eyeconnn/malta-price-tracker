@@ -19,6 +19,13 @@ export interface NormalisedRecord {
   shop_created_at: string | null;
   price_cents: number | null;
   was_price_cents: number | null;
+  /**
+   * where was_price_cents came from (migration 015): 'feed' the feed's regular / compare-at price, 'shown' the price
+   * the shop shows struck through (config.shown_was). Unset: the adapter does not say.
+   */
+  was_source?: 'feed' | 'shown';
+  /** with was_source 'shown': the feed's own regular price above the price, for audit */
+  feed_was_price_cents?: number | null;
   shop_30d_low_cents: number | null;
   in_stock: boolean | null;
   on_sale: boolean | null;

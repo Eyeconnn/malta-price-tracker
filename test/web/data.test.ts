@@ -554,3 +554,28 @@ describe('data.ts products by clean name (design Part 3)', () => {
     expect((await data.product(1))?.product.key).toBe('c100');
   });
 });
+
+describe('data.ts shown was prices (migration 015)', () => {
+  it("history shows a shown_was shop's was price only where it was read from the shown price", async () => {
+    await pg.exec(`
+      insert into shops (id, slug, name, base_url, adapter, active, site_hidden, category, config) values
+        (7, 'listshop', 'Listshop', 'https://list.example', 'woo', true, false, null,
+         '{"shown_was": {"source": "price_html", "selector": ".atoz-price__list"}}');
+      insert into products (id, shop_id, external_id, title) values (70, 7, 'L1', 'Lenovo V15 G5');
+      insert into price_observations (product_id, observed_at, price_cents, was_price_cents, was_source, feed_was_price_cents, in_stock) values
+        (70, now() - interval '2 days', 79900, 80900, 'feed', 80900, true),
+        (70, now() - interval '1 day', 79900, 80900, null, null, true),
+        (70, now() - interval '2 hours', 79900, 96900, 'shown', 80900, true);
+      insert into site_products (id, shop_id, group_key, title, rep_product_id, price_cents, was_price_cents, in_stock, verdict, updated_at) values
+        (970, 7, 'L1', 'Lenovo V15 G5', 70, 79900, 96900, true, 'avoid', now());
+    `);
+    const d = await data.product(970);
+    expect(d?.history.map((h) => [h.price, h.was])).toEqual([
+      [79900, null],
+      [79900, null],
+      [79900, 96900],
+    ]);
+    // other shops keep their feed was prices (product 10 of shop alpha)
+    expect((await data.product(1))?.history.some((h) => h.was === 90000)).toBe(true);
+  });
+});

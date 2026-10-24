@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { DEFAULT_SETTINGS } from '../../src/site/settings.js';
 import { computeVerdict, formatDay, formatEuro, type Obs } from '../../src/site/verdict.js';
+import { toObs } from '../../src/site/build.js';
 
 const T = DEFAULT_SETTINGS.thresholds;
 
@@ -323,5 +324,33 @@ describe('computeVerdict', () => {
     expect(v.facts.historyDays).toBe(0);
     expect(v.facts.low30).toBeNull();
     expect(v.facts.usual).toBeNull();
+  });
+});
+
+describe('shown was prices (migration 015)', () => {
+  // AtoZ's Lenovo V15 G5 IRL: the Store API said regular 809.00 while the page showed "List Price" 969.00 struck through.
+  const row = (date: string, was: number | null, source: 'feed' | 'shown' | null) => ({
+    observed_at: at(date),
+    price_cents: 79900,
+    was_price_cents: was,
+    was_source: source,
+    in_stock: true,
+    bf_marked: true,
+  });
+  const feedRows = Array.from({ length: 20 }, (_, i) => row(addDays('2026-10-04', i), 80900, 'feed'));
+
+  it('yields an avoid on the shown List Price once it is recorded, ignoring the feed was prices before it', () => {
+    const history = [...feedRows, row('2026-10-24', 96900, 'shown')].map((r) => toObs(r, 'marked', true));
+    const v = computeVerdict(history, T, at('2026-10-24', '20:00:00Z'));
+    expect(v.label).toBe('avoid');
+    expect(v.reason).toBe('Was price €969.00 is higher than any price charged since 4 Oct (highest €799.00).');
+    expect(v.facts.claimedPct).toBe(-17.5);
+    expect(v.facts.wasRaisedFrom).toBeUndefined();
+  });
+
+  it('treats the feed was prices of a shown_was shop as unknown', () => {
+    const v = computeVerdict(feedRows.map((r) => toObs(r, 'marked', true)), T, at('2026-10-23', '20:00:00Z'));
+    expect(v.facts.claimedPct).toBeNull();
+    expect(v.reason).not.toContain('809');
   });
 });

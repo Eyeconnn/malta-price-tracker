@@ -61,6 +61,16 @@ describe('toObs', () => {
     expect(toObs({ ...row, bf_marked: null }, null).bf).toBe(false);
   });
 
+  it('for a shop with shown_was, counts the was price only on rows read from the shown price (migration 015)', () => {
+    const feed = { ...row, was_price_cents: 80900, bf_marked: true };
+    expect(toObs({ ...feed, was_source: 'feed' }, null, true).was).toBeNull();
+    expect(toObs({ ...feed, was_source: null }, null, true).was).toBeNull();
+    expect(toObs({ ...feed, was_price_cents: 96900, was_source: 'shown' }, null, true).was).toBe(96900);
+    // other shops keep their feed was prices
+    expect(toObs({ ...feed, was_source: 'feed' }, null, false).was).toBe(80900);
+    expect(toObs({ ...feed, was_source: null }, null).was).toBe(80900);
+  });
+
   it('maps prices and stock', () => {
     expect(toObs({ ...row, was_price_cents: 200, bf_marked: null }, null)).toEqual({
       at: row.observed_at,
@@ -484,6 +494,42 @@ describe.skipIf(!process.env.SITE_BUILD_TEST_DB)('site-build on PGlite', () => {
       expect(r.reason).toBe('Price has been €100.00 on every day it showed a price since 6 Oct.');
       expect(r.facts?.low30).toBe(10000);
     }
+  }, 60_000);
+
+  it('counts only shown was prices for a shop with shown_was; its feed was prices are unknown (migration 015)', async () => {
+    const config = { shown_was: { source: 'price_html', selector: '.atoz-price__list' } };
+    const [{ id: shopId }] = await sql<{ id: number }[]>`
+      insert into shops (slug, name, base_url, category, adapter, config)
+      values ('shownshop', 'shownshop', 'https://shown.test', 'electronics', 'woo', ${sql.json(config)}) returning id`;
+    const add = async (key: string, shownLast: boolean) => {
+      const [{ id }] = await sql<{ id: string }[]>`
+        insert into products (shop_id, external_id, title, bf_status, last_seen) values (${shopId}, ${key}, ${'Lenovo V15 ' + key}, 'marked', ${new Date(NOW.getTime() - HOUR)}) returning id`;
+      // the AtoZ Lenovo: the feed said regular 809.00 (was_source 'feed', as migration 015 labels the past rows)
+      const rows = Array.from({ length: 17 }, (_, i) => ({
+        product_id: id,
+        observed_at: new Date(`${addDays('2026-10-05', i)}T12:00:00Z`),
+        price_cents: 79900,
+        was_price_cents: 80900,
+        was_source: 'feed' as string | null,
+        feed_was_price_cents: 80900,
+        in_stock: true,
+        bf_marked: true,
+      }));
+      // 22 Oct: read from the shown price markup, List Price 969.00 struck through
+      if (shownLast) rows.push({ ...rows[0], observed_at: new Date('2026-10-22T12:00:00Z'), was_price_cents: 96900, was_source: 'shown' });
+      await sql`insert into price_observations ${sql(rows as never)}`;
+    };
+    await add('SHOWN', true);
+    await add('FEED', false);
+    await buildSiteProducts(sql, DEFAULT_SETTINGS, NOW, { shop: 'shownshop' });
+    const rows = await sql<Row[]>`select * from site_products where shop_id = ${shopId} order by group_key`;
+    expect(rows.map((r) => [r.group_key, r.verdict, r.price_cents, r.was_price_cents])).toEqual([
+      ['FEED', 'none', 79900, null],
+      ['SHOWN', 'avoid', 79900, 96900],
+    ]);
+    expect(rows[1].reason).toBe('Was price €969.00 is higher than any price charged since 5 Oct (highest €799.00).');
+    // the feed's 809.00 never counts, so the shown 969.00 is not a was price "raised" from it
+    expect(rows[1].facts?.wasRaisedFrom).toBeUndefined();
   }, 60_000);
 
   it('rates on every judged product (good, avoid and judged none) refreshed in the last 2 days (R53, R21)', async () => {
