@@ -39,8 +39,19 @@ export interface ProcessDeps {
   testScrape(shop: Shop, detection: Detection, opts: { maxRequests: number }): Promise<TestScrapeResult>;
   /** slugs that belong to shops.seed.json, never given to a new shop */
   reservedSlugs: Set<string>;
+  /**
+   * The logo of a shop this run activated (the logo job for that one shop, src/pipeline/logos.ts, after the shop's
+   * request gap). Called once per activated shop after every request is checked and the lock is released, with a
+   * signal that fires at the deadline; a failure is logged and never undoes the activation.
+   */
+  fetchLogo?(shop: Shop, detection: Detection, signal: AbortSignal): Promise<void>;
+  /** the hard deadline of one shop's logo fetch (default LOGO_DEADLINE_MS) */
+  logoDeadlineMs?: number;
   log?: (msg: string) => void;
 }
+
+/** A new shop's logo fetch is stopped after this long (its gap, at most 4 polite requests and drawing the copy). */
+export const LOGO_DEADLINE_MS = 2 * 60_000;
 
 /** A check that started longer ago than this was interrupted (the PC slept or the run was killed). */
 export const STUCK_AFTER_MINUTES = 60;
@@ -62,6 +73,8 @@ interface Outcome {
   /** pending again: check no sooner than this many ms from now */
   retryInMs?: number;
   rateLimitedCount?: number;
+  /** the shop that is activated when this outcome is stored (status active), for its logo */
+  activates?: { shop: Shop; detection: Detection };
 }
 
 const jsonOrNull = (v: unknown) => (v === undefined || v === null ? null : JSON.stringify(v));
@@ -174,7 +187,8 @@ async function check(d: ProcessDeps, req: Row, log: (m: string) => void): Promis
   if (!verdict.pass && result.rateLimited && result.rateLimited.count > 0) {
     return rateLimited(req, `The test scrape was slowed down by the shop (${result.rateLimited.count} requests answered 429 or a server error).`, result.rateLimited.retryAfterMs, found);
   }
-  return { ...found, status: verdict.pass ? 'active' : 'failed', error: verdict.reason };
+  if (!verdict.pass) return { ...found, status: 'failed', error: verdict.reason };
+  return { ...found, status: 'active', error: verdict.reason, activates: { shop: { ...shop, active: true }, detection: det } };
 }
 
 /** Stores the outcome, and activates the shop in the same statement; a request rejected meanwhile is left as it is. */
@@ -214,6 +228,7 @@ async function finish(db: Db, id: unknown, o: Outcome): Promise<boolean> {
 export async function processShopRequests(d: ProcessDeps): Promise<{ ran: boolean; processed: { id: number; origin: string; status: string }[] }> {
   const log = d.log ?? ((m: string) => console.log(m));
   const processed: { id: number; origin: string; status: string }[] = [];
+  const activated: { origin: string; shop: Shop; detection: Detection }[] = [];
   const ran = await d.withLock(async () => {
     const reset = await resetStuck(d.db);
     if (reset) log(`${reset} request(s) stuck in checking for over an hour set to failed`);
@@ -240,8 +255,37 @@ export async function processShopRequests(d: ProcessDeps): Promise<{ ran: boolea
       const status = stored ? outcome.status : 'rejected meanwhile, left as it is';
       log(`${String(req.origin)}: ${status}${outcome.error ? `: ${outcome.error}` : ''}`);
       processed.push({ id: Number(req.id), origin: String(req.origin), status });
+      if (stored && outcome.status === 'active' && outcome.activates) activated.push({ origin: String(req.origin), ...outcome.activates });
     }
   });
   if (!ran) log('another shop-requests run holds the lock, nothing to do');
+  // logos after the lock is released, one shop at a time, each within its deadline
+  if (d.fetchLogo) for (const a of activated) await logoWithDeadline(d.fetchLogo, a, d.logoDeadlineMs ?? LOGO_DEADLINE_MS, log);
   return { ran, processed };
+}
+
+async function logoWithDeadline(
+  fetchLogo: NonNullable<ProcessDeps['fetchLogo']>,
+  a: { origin: string; shop: Shop; detection: Detection },
+  ms: number,
+  log: (m: string) => void,
+): Promise<void> {
+  const ac = new AbortController();
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const deadline = new Promise<'deadline'>((resolve) => {
+    timer = setTimeout(() => {
+      ac.abort();
+      resolve('deadline');
+    }, ms);
+  });
+  const work = fetchLogo(a.shop, a.detection, ac.signal).then(() => 'done' as const);
+  // a fetch that ends after the deadline must not surface as an unhandled rejection
+  work.catch(() => {});
+  try {
+    if ((await Promise.race([work, deadline])) === 'deadline') log(`${a.origin}: logo fetch stopped at the ${Math.round(ms / 1000)} s deadline`);
+  } catch (e) {
+    log(`${a.origin}: logo not fetched: ${(e as Error).message}`);
+  } finally {
+    clearTimeout(timer);
+  }
 }

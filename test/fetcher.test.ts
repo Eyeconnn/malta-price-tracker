@@ -10,7 +10,7 @@ vi.mock('../src/http/safeNet.js', () => ({
   }),
 }));
 
-const { HttpError, ShopAbortError, ShopFetcher } = await import('../src/http/fetcher.js');
+const { HttpError, RedirectOutOfScopeError, ShopAbortError, ShopFetcher, TooManyRedirectsError } = await import('../src/http/fetcher.js');
 const { runShop } = await import('../src/pipeline/runShop.js');
 
 const UA = 'MTPIndex/1.0 (price index crawler)';
@@ -170,5 +170,60 @@ describe('per-request body limit (image downloads)', () => {
     answers.route = (url) => (url.endsWith('/robots.txt') ? new Response('') : new Response(new Uint8Array(2000)));
     const f = fast({ maxBodyBytes: 1000 });
     await expect(f.get('https://shop.example.mt/big.jpg', { maxBodyBytes: 10_000 })).rejects.toThrow(/larger than 1000 bytes/);
+  });
+});
+
+describe('redirects of a fetcher with a shared budget (the logo job)', () => {
+  const redirect = (to: string) => new Response(null, { status: 301, headers: { location: to } });
+  const budgeted = (over: Record<string, unknown> = {}) =>
+    new ShopFetcher({ userAgent: UA, minDelayMs: 250, maxDelayMs: 250, budget: { max: 10, used: 0 }, ...over });
+
+  it('counts every hop against the budget and keeps the gap (and Crawl-delay) before each hop', async () => {
+    answers.route = (url) =>
+      url.endsWith('/robots.txt') ? new Response('User-agent: *\nCrawl-delay: 1\n') : url.endsWith('/a') ? redirect('/b') : new Response('ok');
+    const budget = { max: 10, used: 0 };
+    const f = budgeted({ budget });
+    const res = await f.get('https://shop.example.mt/a');
+    expect(res.url).toBe('https://shop.example.mt/b');
+    expect(answers.log.map((l) => l.url)).toEqual(['https://shop.example.mt/robots.txt', 'https://shop.example.mt/a', 'https://shop.example.mt/b']);
+    expect(budget.used).toBe(3);
+    expect(answers.log[2]!.at - answers.log[1]!.at).toBeGreaterThanOrEqual(990);
+  });
+
+  it('stops at maxRedirects without fetching the next hop, and does not retry', async () => {
+    answers.route = (url) => (url.endsWith('/robots.txt') ? new Response('') : url.endsWith('/a') ? redirect('/b') : url.endsWith('/b') ? redirect('/c') : new Response('ok'));
+    const f = budgeted({ maxRedirects: 1 });
+    await expect(f.get('https://shop.example.mt/a')).rejects.toThrow(TooManyRedirectsError);
+    expect(answers.log.map((l) => new URL(l.url).pathname)).toEqual(['/robots.txt', '/a', '/b']);
+  });
+
+  it('a hop past the budget stops the fetcher without a request', async () => {
+    answers.route = (url) => (url.endsWith('/robots.txt') ? new Response('') : url.endsWith('/a') ? redirect('/b') : new Response('ok'));
+    const f = budgeted({ budget: { max: 2, used: 0 } });
+    await expect(f.get('https://shop.example.mt/a')).rejects.toThrow(ShopAbortError);
+    expect(answers.log).toHaveLength(2);
+  });
+
+  it('a redirect off the allowed hosts fails at once with its target (no retry)', async () => {
+    answers.route = (url) => (url.endsWith('/robots.txt') ? new Response('') : redirect('https://cdn.shopify.com/s/logo.png'));
+    const f = budgeted({ allowedHosts: ['shop.example.mt'] });
+    const err = await f.get('https://shop.example.mt/logo.png').catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(RedirectOutOfScopeError);
+    expect((err as InstanceType<typeof RedirectOutOfScopeError>).url).toBe('https://cdn.shopify.com/s/logo.png');
+    expect(answers.log).toHaveLength(2);
+  });
+
+  it('an aborted signal stops waits and requests with ShopAbortError', async () => {
+    const ac = new AbortController();
+    const f = new ShopFetcher({ userAgent: UA, minDelayMs: 60_000, maxDelayMs: 60_000, signal: ac.signal });
+    const started = Date.now();
+    // robots.txt first, then the 60 s gap before /a, cut short by the deadline
+    const pending = f.get('https://shop.example.mt/a');
+    setTimeout(() => ac.abort(), 100);
+    await expect(pending).rejects.toThrow(/deadline reached/);
+    expect(Date.now() - started).toBeLessThan(5000);
+    expect(answers.log.map((l) => new URL(l.url).pathname)).toEqual(['/robots.txt']);
+    await expect(f.get('https://shop.example.mt/b')).rejects.toThrow(ShopAbortError);
+    expect(answers.log).toHaveLength(1);
   });
 });

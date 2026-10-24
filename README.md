@@ -47,6 +47,9 @@ pnpm scrape-due                         # re-read warm/hot products whose next_c
 pnpm summary                            # send the daily summary email now
 pnpm snapshot https://www.decathlon.mt/ --shop decathlon   # save a page's HTML to R2
 pnpm sql "select slug, active from shops"                  # ad-hoc query
+pnpm fetch-logos                        # logos of shops that have none yet and were never checked (new shops)
+pnpm fetch-logos --shop atoz --retry    # one shop, looked at again even if checked before
+pnpm fetch-logos --dry-run              # fetch and report only, nothing stored (no database needed)
 pnpm tsx src/cli/verify.ts out/dry-run-....json            # compare a dry-run sample with live product pages
 ```
 
@@ -89,6 +92,37 @@ To test database writes without Neon, `pnpm dev-db` starts an in-memory Postgres
   CDN) stops its images for the rest of that run without marking the remaining URLs as failed.
   Hard storage cap: no photo is downloaded once photos plus HTML snapshots plus a 100 MB allowance reach 9 GB
   (`PHOTO_STORAGE_CAP_BYTES` in `src/pipeline/images.ts`); going past it needs the owner's approval.
+- **Shop logos** (`pnpm fetch-logos`, `src/pipeline/logos.ts`, migration 016): a separate job that runs only for
+  shops that need it. It looks at active shops with no `logo_key` that were never checked (`logo_checked_at` null),
+  or whose check failed (`logo_error`) over 30 days ago; `--retry` looks again at every shop still without a logo,
+  `--shop <slug>` at one shop (an inactive one too), `--dry-run` fetches and reports without storing anything. A shop
+  with a logo is never fetched again. It runs on its own in two places: `pnpm shop-requests` calls it once for each
+  shop it has just activated, after checking every request and releasing its lock (after the shop's gap, stopped after
+  2 minutes), and `scripts/run-local.ps1` runs `pnpm fetch-logos` after the nightly
+  scrape, which does nothing unless a shop is new (or a failure is 30 days old). `pnpm seed` never fetches (it works
+  offline): run `pnpm fetch-logos` after adding shops to `shops.seed.json`, or let the nightly run do it.
+  For each shop it reads the home page and takes the first that works of: an `<img>` inside `header`, `nav` or a
+  link to the home page whose class, id, alt or src (or a wrapper's class or id) contains "logo"; the JSON-LD
+  `Organization.logo`; an `apple-touch-icon` or `icon` link of at least 96 px (largest first); `og:image` only as a
+  last resort and only when it looks like a logo (square-ish, at most 600 px), else it is skipped. Every picture is
+  checked again once decoded: never 1x1, at least 48 px on its long side, header, JSON-LD and icon pictures between
+  1:4 and 4:1, and an icon at least 96 px in its real pixels whatever its link declared. SVG logos are parsed as XML
+  and rebuilt without doctype, scripts, foreignObject, event handlers, any href not starting with "#" (so no external
+  file and no embedded data: picture) and url()/@import in styles, then drawn by sharp from memory with a pixel limit
+  and a 10 s timeout.
+  Only a small copy is stored: WebP, at most 128 px on the long side, transparency kept, as
+  `img/{sha256 of the original}.webp` in R2 (a product photo of the same picture is reused), under the same 9 GB
+  cap. It sets `logo_key` and `logo_checked_at`, or with no logo (none found, nothing usable, a 401, a 403 or a bot
+  check page) `logo_error` and `logo_checked_at`, and prints per shop where the logo came from or why there is none.
+  Rate limiting (429), server errors, timeouts and robots.txt answering server errors record nothing, so the next
+  night looks again. Politeness as for the scrape (robots.txt and Crawl-delay, `SCRAPER_USER_AGENT`, one request at
+  a time, at least 2 to 5 s apart, one retry after a backoff on 429, 5xx or a timeout), at most 4 requests to the
+  shop (robots.txt, retries and redirect hops included, each hop after the gap) and at most one redirect hop per
+  request; a logo on an allowlisted image CDN (named in the page, or the shop's one redirect) costs that host two
+  requests of its own (its robots.txt and the picture). A 401, a 403 or a bot check page means no logo: the initials
+  stay and nothing is tried around it. Each shop is fetched under a Postgres advisory lock, so the nightly run and a
+  new shop's activation never fetch the same shop at once. R2 is checked only when a shop needs a look; without it
+  nothing is fetched or recorded.
 
 ## Adapters
 
@@ -150,6 +184,9 @@ address again before fetching anything, and one check never makes more than 65 r
    have a title and a price above zero and no more than 20% of requests failing: the shop becomes **Active**
    and joins the next nightly local scrape (and shows on the site after the next site-build). Otherwise it is
    **Failed** with the reason and the shop stays inactive.
+5. Once every due request is checked and the lock released, the logo of each shop activated in this run is fetched
+   once (the logo job for that shop, at most 4 more requests to it, after the shop's gap, stopped after 2 minutes;
+   see Shop logos above). A missing logo never undoes the activation: the site shows the initials.
 
 **Rate limiting.** A 429 or a server error (5xx) at any step stops the check at once; no other path is tried.
 The request goes back to **Waiting** and is not checked again before the longer of the shop's Retry-After and
@@ -434,6 +471,8 @@ Set each one with `pnpm exec wrangler secret put NAME --cwd web` (wrangler asks 
 ### Photos
 
 Product photos come from our own small copies in R2 (bucket in `R2_BUCKET`, binding `BUCKET` in `web/wrangler.toml`), never from the shops, so a shop never sees a visitor. The site build copies the stored key of each group's photo into `site_products.image_key` (shown variant, else the representative, else any variant). The API gives `imageUrl: "/img/<sha256>.webp"` or null and no shop image address anywhere; the Worker serves `GET /img/<sha256>.webp` (64 lowercase hex only, else 404) as `image/webp` with `nosniff` and a year of immutable caching, behind the same access check as every page (`private` caching while the site is private). The CSP stays `img-src 'self' data:`. Downloads stay off until `IMAGES_ENABLED=on` is set for the scrape (see Images above). Run `pnpm migrate` (014 adds `image_key`) before deploying the Worker, since the API reads that column. Storage must stay inside the R2 free tier (10 GB) unless the owner approves more (downloads stop at the 9 GB cap): about 190,000 product groups at roughly 20 KB per copy is about 4 GB.
+
+Shop logos are served the same way: the API reads `shops.logo_key` and gives `logoUrl: "/img/<sha256>.webp"` or null on the shops list, the shop page, deal cards, sellers on a product page and search results (the one shop's logo when one shop sells it); never a shop's own image address. `ShopBadge` shows the logo inside its circle (object-contain on a white background) and falls back to the initials when there is none or it fails to load. Run `pnpm migrate` (016 adds the logo columns) before deploying the Worker.
 
 ### Nightly site-build
 

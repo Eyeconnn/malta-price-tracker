@@ -10,6 +10,16 @@ export class DisallowedError extends Error {
 
 export class ShopAbortError extends Error {}
 
+/** A redirect points outside the fetcher's allowed hosts; url is where it pointed. Not retried. */
+export class RedirectOutOfScopeError extends Error {
+  constructor(public url: string) {
+    super(`refusing to follow a redirect to out-of-scope URL ${url}`);
+  }
+}
+
+/** More redirects than the fetcher allows (maxRedirects); the next hop is not fetched. Not retried. */
+export class TooManyRedirectsError extends Error {}
+
 /** The answer is larger than the fetcher's (or the request's) body limit; not retried. */
 export class BodyTooLargeError extends Error {}
 
@@ -53,6 +63,12 @@ export interface FetchResult {
   json<T = unknown>(): T;
 }
 
+/** A request cap shared by several fetchers; used counts every request made so far. */
+export interface RequestBudget {
+  max: number;
+  used: number;
+}
+
 export interface FetcherOptions {
   userAgent: string;
   minDelayMs?: number;
@@ -66,6 +82,15 @@ export interface FetcherOptions {
   maxBodyBytes?: number;
   /** hard cap on requests (robots.txt and every attempt included); past it the run stops with ShopAbortError */
   maxRequests?: number;
+  /**
+   * a request cap shared by several fetchers (a shop's own and its image CDN's, for the logo job): every request of
+   * each counts against it, and past it the fetcher stops with ShopAbortError as with maxRequests
+   */
+  budget?: RequestBudget;
+  /** redirects followed per request (default 5); past it TooManyRedirectsError. With a budget, every hop is a request */
+  maxRedirects?: number;
+  /** a hard stop (a deadline): once aborted, waits and requests end at once with ShopAbortError */
+  signal?: AbortSignal;
   log?: (msg: string) => void;
 }
 
@@ -117,6 +142,9 @@ export class ShopFetcher {
   private allowedHosts?: string[];
   private maxBodyBytes: number;
   private maxRequests?: number;
+  private budget?: RequestBudget;
+  private maxRedirects: number;
+  private signal?: AbortSignal;
   private abortReason?: string;
   private log: (msg: string) => void;
   private robots = new Map<string, Promise<RobotsRules>>();
@@ -140,11 +168,20 @@ export class ShopFetcher {
     this.allowedHosts = opts.allowedHosts?.map((h) => h.toLowerCase());
     this.maxBodyBytes = opts.maxBodyBytes ?? 30 * 1024 * 1024;
     this.maxRequests = opts.maxRequests;
+    this.budget = opts.budget;
+    this.maxRedirects = opts.maxRedirects ?? 5;
+    this.signal = opts.signal;
     this.log = opts.log ?? (() => {});
   }
 
   /** extra: options a caller sets for one run only (e.g. the shop-request test scrape's maxRequests) */
-  static fromConfig(cfg: ShopConfig, userAgent: string, baseUrl: string, log?: (m: string) => void, extra: Pick<FetcherOptions, 'maxRequests'> = {}): ShopFetcher {
+  static fromConfig(
+    cfg: ShopConfig,
+    userAgent: string,
+    baseUrl: string,
+    log?: (m: string) => void,
+    extra: Pick<FetcherOptions, 'maxRequests' | 'budget' | 'maxRetries' | 'minDelayMs' | 'maxDelayMs' | 'maxBodyBytes' | 'maxRedirects' | 'signal'> = {},
+  ): ShopFetcher {
     const extraHosts = Array.isArray(cfg.extra_hosts) ? (cfg.extra_hosts as string[]) : [];
     return new ShopFetcher({
       allowedHosts: [scopeHost(baseUrl), ...extraHosts],
@@ -199,11 +236,13 @@ export class ShopFetcher {
       // outside the try: reaching the request cap stops the run instead of being retried
       this.spend();
       try {
-        const res = await safeFetch(robotsUrl, {
-          headers: { 'user-agent': this.ua, accept: 'text/plain,*/*' },
-          signal: AbortSignal.timeout(Math.min(this.timeoutMs, 60_000)),
-          redirect: 'follow',
-        });
+        const res = await this.fetchRobots(robotsUrl);
+        if (!res) {
+          this.lastRequestEnd.set(key, Date.now());
+          // RFC 9309: robots.txt not reached within the redirects followed counts as unavailable (allow all)
+          this.log(`robots.txt ${origin}: too many or unusable redirects, treating as allow all`);
+          return parseRobots(origin, '', this.ua, 'none');
+        }
         // RFC 9309: crawlers may stop reading after 500 KiB
         const text = await readTruncated(res, ROBOTS_MAX_BYTES);
         this.lastRequestEnd.set(key, Date.now());
@@ -225,9 +264,11 @@ export class ShopFetcher {
         this.log(`robots.txt ${origin}: HTTP ${res.status}${attempt < this.maxRetries ? ', retrying' : ''}`);
       } catch (e) {
         this.lastRequestEnd.set(key, Date.now());
+        if (e instanceof ShopAbortError) throw e;
+        this.checkSignal();
         this.log(`robots.txt ${origin}: ${(e as Error).message}${attempt < this.maxRetries ? ', retrying' : ''}`);
       }
-      if (attempt < this.maxRetries) await sleep(Math.max(retryAfterMs ?? 0, 10_000 * 2 ** attempt));
+      if (attempt < this.maxRetries) await this.pause(Math.max(retryAfterMs ?? 0, 10_000 * 2 ** attempt));
     }
     // RFC 9309: if robots.txt is unreachable because of server errors, assume full disallow.
     this.log(`robots.txt ${origin}: unreachable, treating as disallow all`);
@@ -237,6 +278,74 @@ export class ShopFetcher {
       this.stats.retryAfterMs = retryAfterMs;
     }
     return { ...parseRobots(origin, '', this.ua, 'unreachable'), httpStatus, retryAfterMs };
+  }
+
+  /**
+   * robots.txt, following redirects. Without a budget undici follows them; with one, every hop is a counted request
+   * after the gap, at most maxRedirects hops to public http(s) addresses. null: not reached within those.
+   */
+  private async fetchRobots(robotsUrl: string): Promise<Awaited<ReturnType<typeof safeFetch>> | null> {
+    const init = (redirect: 'follow' | 'manual') => ({
+      headers: { 'user-agent': this.ua, accept: 'text/plain,*/*' },
+      signal: this.requestSignal(Math.min(this.timeoutMs, 60_000)),
+      redirect,
+    });
+    if (!this.budget) return safeFetch(robotsUrl, init('follow'));
+    let url = robotsUrl;
+    for (let hop = 0; ; hop++) {
+      const res = await safeFetch(url, init('manual'));
+      const location = res.headers.get('location');
+      if (res.status < 300 || res.status >= 400 || !location) return res;
+      await res.body?.cancel();
+      this.lastRequestEnd.set(spacingKey(url), Date.now());
+      let next: URL;
+      try {
+        next = new URL(location, url);
+      } catch {
+        return null;
+      }
+      if (hop >= this.maxRedirects || (next.protocol !== 'https:' && next.protocol !== 'http:') || PRIVATE_HOST.test(next.hostname)) return null;
+      await this.waitTurn(spacingKey(next.href), 0);
+      this.spend();
+      url = next.href;
+    }
+  }
+
+  /** Throws ShopAbortError once the fetcher's signal (its deadline) has fired. */
+  private checkSignal() {
+    if (this.signal?.aborted) {
+      this.aborted = true;
+      this.abortReason = 'deadline reached';
+      throw new ShopAbortError(this.abortReason);
+    }
+  }
+
+  /** A request's own timeout, ended early by the fetcher's signal. */
+  private requestSignal(timeoutMs: number): AbortSignal {
+    const t = AbortSignal.timeout(timeoutMs);
+    return this.signal ? AbortSignal.any([t, this.signal]) : t;
+  }
+
+  /** sleep that ends with ShopAbortError when the fetcher's signal fires */
+  private pause(ms: number): Promise<void> {
+    this.checkSignal();
+    const signal = this.signal;
+    if (!signal) return sleep(ms) as Promise<void>;
+    return new Promise<void>((resolve, reject) => {
+      const stop = () => {
+        clearTimeout(t);
+        try {
+          this.checkSignal();
+        } catch (e) {
+          reject(e);
+        }
+      };
+      const t = setTimeout(() => {
+        signal.removeEventListener('abort', stop);
+        resolve();
+      }, ms);
+      signal.addEventListener('abort', stop, { once: true });
+    });
   }
 
   async isAllowed(url: string): Promise<boolean> {
@@ -252,6 +361,12 @@ export class ShopFetcher {
       this.abortReason = `request cap of ${this.maxRequests} reached`;
       throw new ShopAbortError(this.abortReason);
     }
+    if (this.budget && this.budget.used >= this.budget.max) {
+      this.aborted = true;
+      this.abortReason = `request cap of ${this.budget.max} reached`;
+      throw new ShopAbortError(this.abortReason);
+    }
+    if (this.budget) this.budget.used++;
     this.stats.requests++;
   }
 
@@ -261,12 +376,12 @@ export class ShopFetcher {
     if (last === undefined) return;
     const gap = Math.max(crawlDelayMs, this.minDelay + Math.random() * (this.maxDelay - this.minDelay));
     const wait = last + gap - Date.now();
-    if (wait > 0) await sleep(wait);
+    if (wait > 0) await this.pause(wait);
   }
 
   /** GET a URL. Serialised per fetcher: never two requests to a shop at once. */
   /** maxBodyBytes: a lower body limit for this request (image downloads); a larger answer fails without a retry */
-  get(url: string, opts: { accept?: string; timeoutMs?: number; allowStatus?: number[]; retries?: number; maxBodyBytes?: number } = {}): Promise<FetchResult> {
+  get(url: string, opts: { accept?: string; timeoutMs?: number; allowStatus?: number[]; retries?: number; maxBodyBytes?: number; maxRedirects?: number } = {}): Promise<FetchResult> {
     const run = this.queue.then(() => this.doGet(url, opts));
     this.queue = run.catch(() => {});
     return run;
@@ -274,9 +389,10 @@ export class ShopFetcher {
 
   private async doGet(
     startUrl: string,
-    opts: { accept?: string; timeoutMs?: number; allowStatus?: number[]; retries?: number; maxBodyBytes?: number },
+    opts: { accept?: string; timeoutMs?: number; allowStatus?: number[]; retries?: number; maxBodyBytes?: number; maxRedirects?: number },
   ): Promise<FetchResult> {
     if (this.aborted) throw new ShopAbortError(this.abortReason ?? 'shop run already abandoned after repeated failures');
+    this.checkSignal();
     let url = startUrl;
     if (!this.inScope(url)) throw new OutOfScopeError(url);
     if (!(await this.isAllowed(url))) {
@@ -308,7 +424,8 @@ export class ShopFetcher {
         retryAfterMs = parseRetryAfter(res.headers.get('retry-after'));
         errMsg = `HTTP ${status}`;
       } catch (e) {
-        if (e instanceof DisallowedError) throw e;
+        if (e instanceof DisallowedError || e instanceof RedirectOutOfScopeError || e instanceof TooManyRedirectsError || e instanceof ShopAbortError) throw e;
+        this.checkSignal();
         // fetching a too large answer again would only download it again
         tooLarge = e instanceof BodyTooLargeError;
         errMsg = (e as Error).name === 'TimeoutError' ? `timeout after ${opts.timeoutMs ?? this.timeoutMs}ms` : (e as Error).message;
@@ -323,7 +440,7 @@ export class ShopFetcher {
         this.stats.retries++;
         const backoff = Math.min(Math.max(retryAfterMs ?? 0, 15_000 * 2 ** attempt), MAX_BACKOFF_MS);
         this.log(`${errMsg} on ${url}, retry ${attempt + 1}/${opts.retries ?? this.maxRetries} in ${Math.round(backoff / 1000)}s`);
-        await sleep(backoff + Math.random() * 2000);
+        await this.pause(backoff + Math.random() * 2000);
         continue;
       }
       this.stats.failed++;
@@ -342,11 +459,18 @@ export class ShopFetcher {
 
   private async fetchFollowingRedirects(
     startUrl: string,
-    opts: { accept?: string; timeoutMs?: number; maxBodyBytes?: number },
+    opts: { accept?: string; timeoutMs?: number; maxBodyBytes?: number; maxRedirects?: number },
   ): Promise<FetchResult> {
     let url = startUrl;
-    const signal = AbortSignal.timeout(opts.timeoutMs ?? this.timeoutMs);
-    for (let hop = 0; hop < 6; hop++) {
+    // a request may allow fewer redirects than the fetcher, never more
+    const maxRedirects = Math.min(opts.maxRedirects ?? this.maxRedirects, this.maxRedirects);
+    const signal = this.requestSignal(opts.timeoutMs ?? this.timeoutMs);
+    for (let hop = 0; hop <= maxRedirects; hop++) {
+      if (hop > 0 && this.budget) {
+        // with a budget every hop is a request of its own: after the gap (and Crawl-delay) and counted
+        await this.waitTurn(spacingKey(url), (await this.robotsFor(url)).crawlDelayMs);
+        this.spend();
+      }
       const res = await safeFetch(url, {
         headers: {
           'user-agent': this.ua,
@@ -358,8 +482,10 @@ export class ShopFetcher {
       });
       if (res.status >= 300 && res.status < 400 && res.headers.get('location')) {
         await res.body?.cancel();
+        if (this.budget) this.lastRequestEnd.set(spacingKey(url), Date.now());
         const next = new URL(res.headers.get('location')!, url).toString();
-        if (!this.inScope(next)) throw new OutOfScopeError(next);
+        if (!this.inScope(next)) throw new RedirectOutOfScopeError(next);
+        if (hop >= maxRedirects) throw new TooManyRedirectsError(`too many redirects from ${startUrl} (at most ${maxRedirects})`);
         if (!(await this.isAllowed(next))) {
           this.stats.disallowed++;
           throw new DisallowedError(next);
@@ -377,7 +503,7 @@ export class ShopFetcher {
         json: <T>() => parseJsonLenient(body.toString('utf8')) as T,
       };
     }
-    throw new Error(`too many redirects from ${startUrl}`);
+    throw new TooManyRedirectsError(`too many redirects from ${startUrl}`);
   }
 }
 

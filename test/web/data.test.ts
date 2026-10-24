@@ -109,6 +109,7 @@ describe('data.ts on PGlite', () => {
       category: 'laptops',
       raisedFrom: null,
       wasRaisedFromCents: null,
+      logoUrl: null,
     });
   });
 
@@ -196,8 +197,8 @@ describe('data.ts on PGlite', () => {
 
   it('shops lists visible shops with fresh products', async () => {
     expect(await data.shops()).toEqual([
-      { slug: 'alpha', name: 'Alpha', grade: 'B', products: 4 },
-      { slug: 'beta', name: 'Beta', grade: null, products: 5 },
+      { slug: 'alpha', name: 'Alpha', grade: 'B', products: 4, logoUrl: null },
+      { slug: 'beta', name: 'Beta', grade: null, products: 5, logoUrl: null },
     ]);
   });
 
@@ -207,7 +208,7 @@ describe('data.ts on PGlite', () => {
     expect(await data.shop('nope')).toBeNull();
     const alpha = await data.shop('alpha');
     expect(alpha).toEqual({
-      shop: { id: 1, slug: 'alpha', name: 'Alpha', url: 'https://alpha.example', category: 'electronics' },
+      shop: { id: 1, slug: 'alpha', name: 'Alpha', url: 'https://alpha.example', category: 'electronics', logoUrl: null },
       rating: { grade: 'B', sentence: 'Mostly honest. A few deals need a closer look.', judged: 30 },
       stats: { products: 4, judged: 3, good: 1, avoid: 1, wasRaised: 0, bfMarked: 3, realDealPct: 33.3 },
     });
@@ -590,5 +591,31 @@ describe('data.ts shown was prices (migration 015)', () => {
     expect((await data.productGroup('c100'))?.sellers.every((s) => s.wasLabel === undefined)).toBe(true);
     const avoid = await data.deals({ verdict: 'avoid', category: null, shop: 'listshop', minCents: null, maxCents: null, limit: 24, offset: 0 });
     expect(avoid.items.map((c) => [c.id, c.wasLabel])).toEqual([[970, 'List price']]);
+  });
+});
+
+describe('data.ts shop logos (migration 016)', () => {
+  const LOGO = `img/${'d'.repeat(64)}.webp`;
+
+  it("every shop payload carries the shop's logo as our /img address, null without one or for a key that is not ours", async () => {
+    await pg.exec(`update shops set logo_key = '${LOGO}' where slug = 'alpha'; update shops set logo_key = 'https://beta.example/logo.png' where slug = 'beta';`);
+    try {
+      const url = `/${LOGO}`;
+      const ab = <T extends { shopSlug?: string; slug?: string }>(list: T[]) => list.filter((x) => ['alpha', 'beta'].includes(x.shopSlug ?? x.slug ?? ''));
+      expect(ab(await data.shops()).map((s) => [s.slug, s.logoUrl])).toEqual([
+        ['alpha', url],
+        ['beta', null],
+      ]);
+      expect((await data.shop('alpha'))?.shop.logoUrl).toBe(url);
+      expect((await data.shop('beta'))?.shop.logoUrl).toBeNull();
+      const good = await data.deals({ verdict: 'good', category: null, shop: null, minCents: null, maxCents: null, limit: 24, offset: 0 });
+      expect(new Map(ab(good.items).map((c) => [c.shopSlug, c.logoUrl]))).toEqual(new Map([['beta', null], ['alpha', url]]));
+      const hits = await data.search({ text: 'lenovo ideapad', like: '%lenovo ideapad%' }, null);
+      expect(hits.find((h) => h.shopSlug === 'alpha')?.logoUrl).toBe(url);
+      expect(hits.find((h) => h.shopSlug === 'beta')?.logoUrl).toBeNull();
+      expect(new Map(ab((await data.productGroup('c100'))!.sellers).map((s) => [s.shopSlug, s.logoUrl]))).toEqual(new Map([['beta', null], ['alpha', url]]));
+    } finally {
+      await pg.exec(`update shops set logo_key = null`);
+    }
   });
 });

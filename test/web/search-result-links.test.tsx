@@ -26,6 +26,7 @@ const result = (key: string, extra: Partial<ProductResult> = {}): ProductResult 
   inStock: true,
   shops: 1,
   shop: 'AtoZ',
+  logoUrl: null,
   bf: false,
   imageUrl: null,
   good: 1,

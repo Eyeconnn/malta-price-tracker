@@ -258,11 +258,44 @@ describe('ShopBadge', () => {
     expect(initials('!!!')).toBe('?');
   });
 
-  it('shows the logo and falls back to initials if it fails to load', () => {
-    const { container } = render(<ShopBadge name="Digital Zone" logoUrl="https://example.test/dz.png" />);
+  const LOGO = `/img/${'a'.repeat(64)}.webp`;
+
+  it('shows the logo image named after the shop, lazy, sized, contained on a neutral background', () => {
+    const { container } = render(<ShopBadge name="Digital Zone" logoUrl={LOGO} />);
+    const img = screen.getByRole('img', { name: 'Digital Zone' }) as HTMLImageElement;
+    expect(img.tagName).toBe('IMG');
+    expect(img.getAttribute('src')).toBe(LOGO);
+    expect(img.getAttribute('loading')).toBe('lazy');
+    expect([img.getAttribute('width'), img.getAttribute('height')]).toEqual(['38', '38']);
+    expect(img.className).toContain('object-contain');
+    expect(container.firstElementChild!.className).toContain('bg-white');
+    // the circle is not a second image of the same name
+    expect(container.firstElementChild!.getAttribute('role')).toBeNull();
+    expect(container.textContent).toBe('');
+  });
+
+  it('has an empty alt and hides the circle from screen readers when the name is next to it', () => {
+    const { container } = render(<ShopBadge name="Digital Zone" logoUrl={LOGO} size="sm" decorative />);
     const img = container.querySelector('img')!;
     expect(img.getAttribute('alt')).toBe('');
-    fireEvent.error(img);
+    expect([img.getAttribute('width'), img.getAttribute('height')]).toEqual(['28', '28']);
+    expect(container.firstElementChild!.getAttribute('aria-hidden')).toBe('true');
+    expect(screen.queryByRole('img')).toBeNull();
+    // without a logo too: the initials are decorative
+    const { container: plain } = render(<ShopBadge name="Scan" decorative />);
+    expect(plain.firstElementChild!.getAttribute('aria-hidden')).toBe('true');
+    expect(plain.textContent).toBe('SC');
+  });
+
+  it('falls back to initials if the logo fails to load', () => {
+    const { container } = render(<ShopBadge name="Digital Zone" logoUrl={LOGO} />);
+    fireEvent.error(container.querySelector('img')!);
+    expect(container.querySelector('img')).toBeNull();
+    expect(screen.getByRole('img', { name: 'Digital Zone' }).textContent).toBe('DZ');
+  });
+
+  it('shows initials when the logo is null', () => {
+    const { container } = render(<ShopBadge name="Digital Zone" logoUrl={null} />);
     expect(container.querySelector('img')).toBeNull();
     expect(screen.getByRole('img', { name: 'Digital Zone' }).textContent).toBe('DZ');
   });

@@ -29,6 +29,7 @@ function card(id: number, extra: Partial<Card> = {}): Card {
     title: `Product ${id}`,
     shop: 'Alpha Shop',
     shopSlug: 'alpha',
+    logoUrl: null,
     priceCents: 10000 + id,
     wasCents: null,
     verdict: 'good',
@@ -56,7 +57,7 @@ const change = (id: number, extra: Partial<Change> = {}): Change => ({
 
 function shopResponse(extra: Partial<ShopResponse> = {}): ShopResponse {
   return {
-    shop: { id: 1, slug: 'alpha', name: 'Alpha Shop', url: 'https://alpha.example', category: null },
+    shop: { id: 1, slug: 'alpha', name: 'Alpha Shop', url: 'https://alpha.example', category: null, logoUrl: null },
     rating: { grade: 'D', sentence: '23 of 120 judged products were Deals to Avoid (9 with a raised was price).', judged: 120 },
     avoid: [avoid(11), avoid(12)],
     good: [card(1), card(2)],
@@ -112,8 +113,8 @@ afterEach(() => {
 describe('shops list', () => {
   const shops: ShopsResponse = {
     shops: [
-      { slug: 'alpha', name: 'Alpha Shop', grade: 'B', products: 1234 },
-      { slug: 'beta', name: 'Beta <b>Shop</b>', grade: null, products: 5 },
+      { slug: 'alpha', name: 'Alpha Shop', grade: 'B', products: 1234, logoUrl: null },
+      { slug: 'beta', name: 'Beta <b>Shop</b>', grade: null, products: 5, logoUrl: null },
     ],
   };
 
@@ -128,6 +129,18 @@ describe('shops list', () => {
     expect(alpha.getByText('B')).toBeTruthy();
     expect(alpha.getByText(/1,234 products/)).toBeTruthy();
     expect(rows[0]!.textContent).toMatch(/Rating B/);
+  });
+
+  it("shows a shop's logo (our /img copy) in its badge and the initials for a shop without one", async () => {
+    const logo = `/img/${'e'.repeat(64)}.webp`;
+    mockApi({ '/api/shops': () => json({ shops: [{ ...shops.shops[0]!, logoUrl: logo }, shops.shops[1]!] }) });
+    renderAt('/shops');
+    const rows = await screen.findAllByRole('listitem');
+    expect(rows[0]!.querySelector('img')?.getAttribute('src')).toBe(logo);
+    // the name is next to it: the logo is decorative
+    expect(rows[0]!.querySelector('img')?.getAttribute('alt')).toBe('');
+    expect(rows[1]!.querySelector('img')).toBeNull();
+    expect(rows[1]!.textContent).toMatch(/^BB/);
   });
 
   it('shows "Not rated yet" instead of a letter for an unrated shop and renders shop text as text', async () => {

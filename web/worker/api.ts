@@ -67,7 +67,7 @@ function slugParam(url: URL, name: string): string | null | undefined {
  * key: the product page (/product/<key>). name: the clean name the listings agree on, else the best hit's shop
  * title; specs: its identity specs the name does not carry ("256GB"). priceCents: the lowest price of a seller
  * not known to be out of stock, else the lowest price (inStock false), null when no seller shows one (never 0).
- * shop: the one shop when only one sells it. good / avoid: how many sellers have that verdict (verdicts stay per
+ * shop: the one shop when only one sells it, logoUrl: that shop's logo (our /img copy), else null. good / avoid: how many sellers have that verdict (verdicts stay per
  * seller, never merged into one product verdict). option: for a product sold as one listing, its variant option
  * (the colour of a shop that lists each colour on its own), so such listings stay apart; null otherwise.
  */
@@ -79,6 +79,7 @@ export type ProductResult = {
   inStock: boolean;
   shops: number;
   shop: string | null;
+  logoUrl: string | null;
   bf: boolean;
   imageUrl: string | null;
   good: number;
@@ -142,6 +143,7 @@ export function productResults(hits: SearchHit[]): ProductResult[] {
         : { priceCents: first.groupLow, inStock: lowestPrice(g.rows).inStock }),
       shops: Math.max(first.groupShops, shops.size),
       shop: Math.max(first.groupShops, shops.size) === 1 ? first.shop : null,
+      logoUrl: Math.max(first.groupShops, shops.size) === 1 ? sitePhoto(first.logoUrl) : null,
       bf: first.groupBf || g.rows.some((r) => r.bf),
       imageUrl: g.rows.map((r) => sitePhoto(r.imageUrl)).find((u) => u !== null) ?? null,
       good: Math.max(first.groupGood, g.rows.filter((r) => r.verdict === 'good').length),
@@ -202,6 +204,7 @@ export function productPage(g: ProductGroup, thresholds: { cheaperPct: number; m
       productId: s.productId,
       shop: s.shop,
       shopSlug: s.shopSlug,
+      logoUrl: sitePhoto(s.logoUrl),
       title: s.title,
       url: webAddress(s.url),
       priceCents: positive(s.priceCents) ? s.priceCents : null,

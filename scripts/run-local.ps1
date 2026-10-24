@@ -22,6 +22,10 @@ foreach ($w in 'scrape-shopify', 'scrape-woo', 'scrape-magento', 'scrape-html') 
 $env:IMAGES_ENABLED = 'on'
 pnpm scrape --runner local *>> $log
 
+# shop logos (src/pipeline/logos.ts): only shops without one that were never checked, so this fetches nothing
+# unless a shop is new (or a failed check is 30 days old)
+pnpm fetch-logos *>> $log
+
 # Build the public site's tables. The cloud scrapes started above may still be running; the workflow's own
 # cron at 04:55 UTC builds again when any scrape finished after this build began (else it skips).
 gh workflow run site-build --repo Eyeconnn/malta-price-tracker *>> $log
