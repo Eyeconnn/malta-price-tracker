@@ -80,6 +80,8 @@ type GroupRow = {
  * shownWas: the shop has config.shown_was (its feed's regular price differs from the struck-through price it shows).
  * Its was prices count only on rows read from the shown price (was_source 'shown'); on every other row (the feed
  * values from before migration 015) the was price is unknown, so no verdict or page rests on a price shoppers never saw.
+ * The first shown night is a was change (a was price appears), so it starts the verdict's current run: its baseline is
+ * the feed nights before it, whose prices still count (test/site/verdict.test.ts, "shown was prices").
  */
 export function toObs(row: Omit<ObsRow, 'product_id'>, productBfStatus: string | null, shownWas = false): Obs {
   return {
@@ -547,7 +549,9 @@ export async function buildSiteProducts(
   await sql`delete from site_products where shop_id in (select id from shops where site_hidden or not active)`;
 
   const shops = await sql<Shop[]>`
-    select id, slug, category, (config ? 'shown_was') as shown_was, config -> 'shown_was' ->> 'was_label' as was_label from shops
+    select id, slug, category, coalesce(jsonb_typeof(config -> 'shown_was') = 'object', false) as shown_was,
+      case when jsonb_typeof(config -> 'shown_was') = 'object' then config -> 'shown_was' ->> 'was_label' end as was_label
+    from shops
     where active and not site_hidden ${opts.shop === undefined ? sql`` : sql`and slug = ${opts.shop}`}
     order by slug`;
   if (opts.shop !== undefined && shops.length === 0) throw new Error(`No active, visible shop with slug ${opts.shop}`);
@@ -582,8 +586,9 @@ export const FRESH_DAYS = 2;
 /** One shop_ratings row per active, visible shop from its fresh site_products; hidden or inactive shops lose theirs. */
 export async function buildShopRatings(sql: postgres.Sql, settings: SiteSettings, now: Date): Promise<number> {
   const freshSince = new Date(now.getTime() - FRESH_DAYS * DAY_MS);
-  const counts = await sql<{ shop_id: number; judged: number; good: number; avoid: number; was_raised: number }[]>`
+  const counts = await sql<{ shop_id: number; judged: number; good: number; avoid: number; was_raised: number; was_label: string | null }[]>`
     select s.id as shop_id,
+      case when jsonb_typeof(s.config -> 'shown_was') = 'object' then s.config -> 'shown_was' ->> 'was_label' end as was_label,
       count(sp.id) filter (where ${sql.unsafe(JUDGED_SQL)})::int as judged,
       count(sp.id) filter (where sp.verdict = 'good')::int as good,
       count(sp.id) filter (where sp.verdict = 'avoid')::int as avoid,
@@ -591,13 +596,13 @@ export async function buildShopRatings(sql: postgres.Sql, settings: SiteSettings
     from shops s
     left join site_products sp on sp.shop_id = s.id and sp.updated_at > ${freshSince}
     where s.active and not s.site_hidden
-    group by s.id
+    group by s.id, s.config
     order by s.id`;
 
   await sql`delete from shop_ratings where shop_id in (select id from shops where site_hidden or not active)`;
   if (counts.length === 0) return 0;
 
-  const rated = counts.map((c) => ({ ...c, ...computeRating({ judged: c.judged, good: c.good, avoid: c.avoid, wasRaised: c.was_raised }, settings.thresholds) }));
+  const rated = counts.map((c) => ({ ...c, ...computeRating({ judged: c.judged, good: c.good, avoid: c.avoid, wasRaised: c.was_raised }, settings.thresholds, c.was_label) }));
   await sql`
     insert into shop_ratings (shop_id, grade, judged, good, avoid, was_raised, sentence, computed_at)
     select t.shop_id, t.grade, t.judged, t.good, t.avoid, t.was_raised, t.sentence, ${now}

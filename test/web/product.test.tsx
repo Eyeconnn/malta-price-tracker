@@ -672,7 +672,11 @@ describe("product page, the shop's own term for its reference price (was_label)"
       facts: { ...alpha.verdict.facts!, raisedFrom: undefined, raisedTo: undefined, wasRaisedFrom: undefined },
     },
   };
-  const listedHistory = [...daysFrom('2026-09-23', 29).map((d) => obs(REP, d, 79900, null, true)), obs(REP, '2026-10-22', 79900, 96900, true)];
+  // feed nights before 015: their reference price is unknown (wasKnown false)
+  const listedHistory = [
+    ...daysFrom('2026-09-23', 29).map((d) => ({ ...obs(REP, d, 79900, null, true), wasKnown: false as const })),
+    obs(REP, '2026-10-22', 79900, 96900, true),
+  ];
   const listedPage = () =>
     page({ sellers: [beta, listed, gamma], history: [...listedHistory.map((h) => ({ ...h, sellerId: 1 })), ...betaHistory.map((h) => ({ ...h, sellerId: 2 }))] });
 
@@ -695,5 +699,21 @@ describe("product page, the shop's own term for its reference price (was_label)"
     const legend = await screen.findByRole('list', { name: 'Chart lines' });
     expect(within(legend).getByText('Alpha (Black) list price')).toBeTruthy();
     expect(screen.getByText('List price changes')).toBeTruthy();
+    // the day table: the column takes the shop's term, and a night whose reference price was not recorded says so
+    const table = screen.getByRole('table', { name: 'Price by day' });
+    expect(within(table).getByRole('columnheader', { name: 'List price' })).toBeTruthy();
+    expect(within(table).queryByRole('columnheader', { name: 'Was' })).toBeNull();
+    const cells = within(table).getAllByRole('row').slice(1).map((r) => r.querySelectorAll('td')[1]?.textContent);
+    expect(cells[0]).toBe('€969.00');
+    expect(cells[1]).toBe('Not recorded');
+  });
+
+  it('dayRows carries wasKnown, false only for a night whose reference price was not recorded', () => {
+    const rows = dayRows([{ ...obs(REP, '2026-10-21', 79900, null, true), wasKnown: false as const }, obs(REP, '2026-10-22', 79900, 96900, true), obs(REP, '2026-10-23', 79900, null, true)], REP, null);
+    expect(rows.map((r) => [r.day, r.was, r.wasKnown])).toEqual([
+      ['2026-10-21', null, false],
+      ['2026-10-22', 96900, true],
+      ['2026-10-23', null, true],
+    ]);
   });
 });

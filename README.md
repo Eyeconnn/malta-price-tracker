@@ -216,7 +216,11 @@ struck through (and a zOnePRICE for logged-in members, never used). For such a s
   `feed_was_price_cents` keeps the feed's regular price on shown rows for audit. Migration 015 labels AtoZ's earlier
   rows `feed`. For a shop with `shown_was`, verdicts, site rows and the price history treat every was price not read
   from the shown price as unknown (`toObs` in `src/site/build.ts`, `SHOWN_WAS_SQL` in `web/worker/data.ts`); no
-  data is deleted. Run migration 015 before deploying the web Worker or the scraper with this change.
+  data is deleted.
+- A crawl in which the selector finds under half of the struck-through prices (or none) logs an error, so the run is
+  `partial` and the alert mail names it: the shop's price markup probably changed.
+- Deploy order: `pnpm migrate` (015) on Neon, `pnpm seed` (the `shown_was` config), update the local checkout that
+  scrapes AtoZ (`runner: local`), then deploy the web Worker (it reads `was_source`).
 
 ## Schedule (GitHub Actions)
 

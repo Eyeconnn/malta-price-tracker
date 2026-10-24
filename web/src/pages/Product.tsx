@@ -528,7 +528,7 @@ function History({
             {seller ? `No prices tracked at ${seller.shop} in the last 60 days.` : 'No prices tracked.'}
           </p>
         ) : (
-          <DayTable id={tableId} rows={rows} judged={judged} low30={low30} />
+          <DayTable id={tableId} rows={rows} judged={judged} low30={low30} wasLabel={seller?.wasLabel} />
         )}
       </div>
       {seller?.verdict.facts && (

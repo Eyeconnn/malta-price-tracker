@@ -6,6 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { App } from '@/App';
 import { ModeProvider } from '@/components/site/ModeProvider';
 import type { Card } from '@/lib/api';
+import { avoidFact, tagProps } from '@/components/site/DealCard';
 
 function setViewport(width: number): void {
   window.matchMedia = ((query: string) => {
@@ -570,5 +571,14 @@ describe('deals page: empty, error and safety', () => {
     expect(articles().every((a) => a.getAttribute('data-alarm') === 'true')).toBe(true);
     expect(screen.getByText('Price not shown by the shop')).toBeTruthy();
     expect(screen.queryByText(/0\.00/)).toBeNull();
+  });
+});
+
+describe("deal card in the shop's own term (was_label)", () => {
+  it('tags a raised reference price with the term, and states it', () => {
+    const c = card(9, { verdict: 'avoid', priceCents: 79900, wasCents: 96900, wasRaisedFromCents: 88900, wasLabel: 'List price' });
+    expect(tagProps(c)).toEqual({ kind: 'avoid', from: 88900, to: 96900, label: 'LIST PRICE RAISED' });
+    expect(avoidFact(c)).toBe('List price raised from €889.00 to €969.00');
+    expect(tagProps({ ...c, wasLabel: undefined })).toEqual({ kind: 'avoid', from: 88900, to: 96900, label: 'WAS RAISED' });
   });
 });

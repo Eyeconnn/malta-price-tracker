@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { computeRating } from '../../src/site/rating.js';
+import { computeRating, ratingSentence } from '../../src/site/rating.js';
 import { DEFAULT_SETTINGS } from '../../src/site/settings.js';
 
 const T = DEFAULT_SETTINGS.thresholds;
@@ -66,5 +66,14 @@ describe('computeRating', () => {
     }
     expect(computeRating({ judged: 30, good: 30, avoid: 0, wasRaised: 0 }, { ...T, minJudgedForRating: Number.NaN }).grade).toBeNull();
     expect(computeRating({ judged: 30, good: 30, avoid: Number.NaN, wasRaised: 0 }, T).grade).toBeNull();
+  });
+});
+
+describe("rating sentence in the shop's own term (was_label)", () => {
+  it('names a raised reference price by the term', () => {
+    expect(ratingSentence({ judged: 120, avoid: 23, wasRaised: 9 }, 'List price')).toBe(
+      '23 of 120 judged products were Deals to Avoid (9 with a raised list price).',
+    );
+    expect(ratingSentence({ judged: 120, avoid: 23, wasRaised: 9 })).toBe('23 of 120 judged products were Deals to Avoid (9 with a raised was price).');
   });
 });

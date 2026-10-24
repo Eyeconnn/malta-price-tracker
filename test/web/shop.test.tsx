@@ -262,6 +262,15 @@ describe('shop page', () => {
       expect(s.getByText('Marked Black Friday').nextSibling?.textContent).toBe('1,287');
     });
 
+    it("names the raised reference price stat in the shop's own term (was_label)", async () => {
+      const base = shopResponse();
+      mockApi({ '/api/shops/alpha': () => json({ ...base, shop: { ...base.shop, wasLabel: 'List price' } }) });
+      renderAt('/shops/alpha');
+      const stats = await screen.findByRole('region', { name: 'Shop statistics' });
+      expect(within(stats).getByText('List price raised').nextSibling?.textContent).toBe('9');
+      expect(within(stats).queryByText('Was price raised')).toBeNull();
+    });
+
     it('a null real-deal percentage reads "Not enough judged yet", never 0%', async () => {
       const stats = { products: 10, judged: 0, good: 0, avoid: 0, wasRaised: 0, bfMarked: 0, realDealPct: null };
       mockApi({ '/api/shops/alpha': () => json(shopResponse({ stats })) });

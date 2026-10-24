@@ -55,13 +55,36 @@ export interface ShownWas {
    * no_html      the feed carried no price markup
    */
   found: 'selector' | 'struck_feed' | 'none' | 'no_html';
+  /** the markup shows a struck-through price (a <del>, <s> or <strike>, or the configured element): the alarm's base */
+  struck: boolean;
 }
 
-const AMOUNT = /\d[\d.,]*/;
+/** An amount: digits with thousands and decimal separators inside, never a trailing full stop ("€969.00."). */
+const AMOUNT = /\d(?:[\d.,]*\d)?/g;
+const AFTER_CURRENCY = /(?:€|\bEUR\b)\s*(\d(?:[\d.,]*\d)?)/i;
 
+/** The amount right after a currency sign, else the last amount ("RRP 2026 €969.00" is 969.00, never 2026). */
 function amountOf(text: string): number | null {
-  const m = AMOUNT.exec(text.replace(/\s+/g, ' '));
-  return m ? toCents(m[0]) : null;
+  const t = text.replace(/\s+/g, ' ');
+  const sign = AFTER_CURRENCY.exec(t);
+  if (sign) return toCents(sign[1]);
+  const all = t.match(AMOUNT);
+  return all ? toCents(all[all.length - 1]) : null;
+}
+
+/** Per run: products whose markup strikes a price through, and how many of them the configured selector found. */
+export interface ShownWasTally {
+  struck: number;
+  hits: number;
+}
+
+/**
+ * The markup-change alarm: the shop strikes prices through but the selector finds under half of them (or none), so
+ * its theme probably changed and the was prices are going unrecorded. Returns the error line, or null when all is well.
+ */
+export function shownWasAlarm(t: ShownWasTally, cfg: ShownWasConfig): string | null {
+  if (t.struck === 0 || t.hits * 2 >= t.struck) return null;
+  return `shown_was selector ${cfg.selector} found ${t.hits} of ${t.struck} struck-through prices: the shop's price markup may have changed, was prices are not being recorded`;
 }
 
 /**
@@ -76,9 +99,11 @@ export function readShownWas(
   priceCents: number | null,
   feedRegularCents: number | null,
 ): ShownWas {
-  if (!markup || !markup.trim()) return { wasCents: null, label: null, found: 'no_html' };
+  if (!markup || !markup.trim()) return { wasCents: null, label: null, found: 'no_html', struck: false };
   const $ = cheerio.load(markup, null, false);
+  $('script, style, noscript').remove();
   if (cfg.ignore_selector) $(cfg.ignore_selector).remove();
+  const struckEls = $('del, s, strike');
 
   const labelText = cfg.label_selector ? $(cfg.label_selector).first().text().replace(/\s+/g, ' ').trim() : '';
   const label = labelText ? labelText.slice(0, 100) : null;
@@ -89,14 +114,13 @@ export function readShownWas(
     // the first price amount inside the element when the shop marks it up (Woo's .amount), else the element's text
     const amount = el.find('.amount').first();
     const cents = amountOf((amount.length ? amount : el).text());
-    return { wasCents: above(cents), label, found: cents === null ? 'none' : 'selector' };
+    return { wasCents: above(cents), label, found: cents === null ? 'none' : 'selector', struck: true };
   }
 
+  const struck = struckEls.length > 0;
   if (feedRegularCents !== null) {
-    const struck = $('del, s, strike')
-      .toArray()
-      .map((d) => amountOf($(d).text()));
-    if (struck.includes(feedRegularCents)) return { wasCents: above(feedRegularCents), label, found: 'struck_feed' };
+    const amounts = struckEls.toArray().map((d) => amountOf($(d).text()));
+    if (amounts.includes(feedRegularCents)) return { wasCents: above(feedRegularCents), label, found: 'struck_feed', struck };
   }
-  return { wasCents: null, label, found: 'none' };
+  return { wasCents: null, label, found: 'none', struck };
 }

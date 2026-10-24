@@ -531,6 +531,24 @@ describe.skipIf(!process.env.SITE_BUILD_TEST_DB)('site-build on PGlite', () => {
     expect(rows[1].reason).toBe('List price €969.00 is higher than any price charged since 5 Oct (highest €799.00).');
     // the feed's 809.00 never counts, so the shown 969.00 is not a was price "raised" from it
     expect(rows[1].facts?.wasRaisedFrom).toBeUndefined();
+
+    // the rating sentence names the raised reference price in the shop's term
+    await buildShopRatings(sql, { ...DEFAULT_SETTINGS, thresholds: { ...DEFAULT_SETTINGS.thresholds, minJudgedForRating: 1 } }, NOW);
+    const [rating] = await sql<{ sentence: string }[]>`select sentence from shop_ratings where shop_id = ${shopId}`;
+    expect(rating.sentence).toBe('1 of 2 judged products was a Deal to Avoid (0 with a raised list price).');
+  }, 60_000);
+
+  it('a shown_was key that is not an object (e.g. null) does not hide the feed was prices', async () => {
+    const [{ id: shopId }] = await sql<{ id: number }[]>`
+      insert into shops (slug, name, base_url, category, adapter, config)
+      values ('nullshownshop', 'nullshownshop', 'https://nullshown.test', 'electronics', 'woo', ${sql.json({ shown_was: null })}) returning id`;
+    const [{ id }] = await sql<{ id: string }[]>`
+      insert into products (shop_id, external_id, title, last_seen) values (${shopId}, 'N1', 'Kettle', ${new Date(NOW.getTime() - HOUR)}) returning id`;
+    await sql`insert into price_observations (product_id, observed_at, price_cents, was_price_cents, was_source, in_stock)
+      values (${id}, ${new Date('2026-10-22T12:00:00Z')}, 1000, 1200, 'feed', true)`;
+    await buildSiteProducts(sql, DEFAULT_SETTINGS, NOW, { shop: 'nullshownshop' });
+    const [row] = await sql<Row[]>`select * from site_products where shop_id = ${shopId}`;
+    expect(row.was_price_cents).toBe(1200);
   }, 60_000);
 
   it('rates on every judged product (good, avoid and judged none) refreshed in the last 2 days (R53, R21)', async () => {

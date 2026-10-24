@@ -40,12 +40,17 @@ export type VerdictOptions = {
   wasLabel?: string | null;
 };
 
-/** The reference price's name at the start of a sentence and inside one: "List price" / "list price" (an acronym stays). */
+/**
+ * The reference price's name inside a sentence and at its start: "List Price" gives "list price" and "List price".
+ * Capitalised words are lower-cased, acronyms ("RRP") keep their capitals.
+ */
 export function wasTerms(label: string | null | undefined): { start: string; inner: string } {
-  const t = label?.trim() || DEFAULT_WAS_LABEL;
-  const start = t.charAt(0).toUpperCase() + t.slice(1);
-  const inner = /^[A-Z][a-z]/.test(t) ? t.charAt(0).toLowerCase() + t.slice(1) : t;
-  return { start, inner };
+  const t = (label?.trim() || DEFAULT_WAS_LABEL).replace(/\s+/g, ' ');
+  const inner = t
+    .split(' ')
+    .map((w) => (/^[A-Z][a-z]/.test(w) ? w.charAt(0).toLowerCase() + w.slice(1) : w))
+    .join(' ');
+  return { start: inner.charAt(0).toUpperCase() + inner.slice(1), inner };
 }
 
 const TZ = 'Europe/Malta';

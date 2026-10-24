@@ -570,11 +570,19 @@ describe('data.ts shown was prices (migration 015)', () => {
         (970, 7, 'L1', 'Lenovo V15 G5', 70, 79900, 96900, true, 'avoid', now());
     `);
     const d = await data.product(970);
-    expect(d?.history.map((h) => [h.price, h.was])).toEqual([
-      [79900, null],
-      [79900, null],
-      [79900, 96900],
+    expect(d?.history.map((h) => [h.price, h.was, h.wasKnown])).toEqual([
+      [79900, null, false],
+      [79900, null, false],
+      [79900, 96900, undefined],
     ]);
+    const g = await data.productGroup('s970');
+    expect(g?.history.map((h) => [h.was, h.wasKnown])).toEqual([
+      [null, false],
+      [null, false],
+      [96900, undefined],
+    ]);
+    expect((await data.shop('listshop'))?.shop.wasLabel).toBe('List price');
+    expect((await data.shop('alpha'))?.shop.wasLabel).toBeUndefined();
     // other shops keep their feed was prices (product 10 of shop alpha)
     expect((await data.product(1))?.history.some((h) => h.was === 90000)).toBe(true);
     // the shop's own term for its reference price, on the seller and its cards; none elsewhere

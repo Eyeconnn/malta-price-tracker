@@ -74,7 +74,8 @@ export function tagProps(c: Card): PriceTagProps | null {
     case 'price':
       return { kind: 'avoid', from: c.raisedFrom!.priceCents, to: c.priceCents };
     case 'was':
-      return { kind: 'avoid', from: c.wasRaisedFromCents, to: c.wasCents, label: 'WAS RAISED' };
+      // the shop's own term when it has one ("LIST PRICE RAISED"), else the short "WAS RAISED"
+      return { kind: 'avoid', from: c.wasRaisedFromCents, to: c.wasCents, label: c.wasLabel ? `${wasTerms(c.wasLabel).start.toUpperCase()} RAISED` : 'WAS RAISED' };
     default:
       return { kind: 'avoid', to: c.priceCents, label: 'AVOID' };
   }

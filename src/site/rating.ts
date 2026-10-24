@@ -1,6 +1,7 @@
 // Shop rating: the share of a shop's judged products that were Deals to Avoid, plus half the share whose was
 // price was raised. The sentence under the letter states those counts, nothing more (Ruling R54).
 import type { Thresholds } from './settings.js';
+import { wasTerms } from './verdict.js';
 
 export type Grade = 'A' | 'B' | 'C' | 'D' | 'E' | 'F';
 
@@ -24,16 +25,20 @@ export const NOT_RATED_SENTENCE = 'Not rated yet: not enough Black Friday deals 
 
 const count = new Intl.NumberFormat('en-US');
 
-/** "23 of 120 judged products were Deals to Avoid (9 with a raised was price)." with singulars where they belong. */
-export function ratingSentence(c: { judged: number; avoid: number; wasRaised: number }): string {
+/**
+ * "23 of 120 judged products were Deals to Avoid (9 with a raised was price)." with singulars where they belong.
+ * wasLabel: the shop's own term for its reference price (config.shown_was.was_label), e.g. "with a raised list price".
+ */
+export function ratingSentence(c: { judged: number; avoid: number; wasRaised: number }, wasLabel?: string | null): string {
   const products = c.judged === 1 ? 'product' : 'products';
   const verb = c.avoid === 1 ? 'was a Deal to Avoid' : 'were Deals to Avoid';
-  return `${count.format(c.avoid)} of ${count.format(c.judged)} judged ${products} ${verb} (${count.format(c.wasRaised)} with a raised was price).`;
+  return `${count.format(c.avoid)} of ${count.format(c.judged)} judged ${products} ${verb} (${count.format(c.wasRaised)} with a raised ${wasTerms(wasLabel).inner}).`;
 }
 
 export function computeRating(
   c: { judged: number; good: number; avoid: number; wasRaised: number },
   t: Thresholds,
+  wasLabel?: string | null,
 ): { grade: Grade | null; sentence: string } {
   // written as negations so a missing or NaN count (or minimum) also means "not rated", never a letter
   if (!(c.judged > 0) || !(c.judged >= t.minJudgedForRating)) {
@@ -43,5 +48,5 @@ export function computeRating(
   const score = (c.avoid + c.wasRaised * 0.5) / c.judged;
   if (!Number.isFinite(score)) return { grade: null, sentence: NOT_RATED_SENTENCE };
   const band = BANDS.find((b) => score < b.below);
-  return { grade: band ? band.grade : 'F', sentence: ratingSentence(c) };
+  return { grade: band ? band.grade : 'F', sentence: ratingSentence(c, wasLabel) };
 }

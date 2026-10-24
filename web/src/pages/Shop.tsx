@@ -13,6 +13,7 @@ import { ApiError, api, type Card, type Change, type ShopResponse, type ShopStat
 import { formatDay, formatEuro } from '@/lib/format';
 import { listingPath } from '@/lib/links';
 import { cn } from '@/lib/utils';
+import { wasTerms } from '../../../src/site/verdict.js';
 
 /** Cards per list on a shop page. */
 const LIST_MAX = 5;
@@ -66,7 +67,7 @@ function Stat({ label, value, tone }: { label: string; value: string; tone?: 'go
 }
 
 /** Advanced: the four facts behind the rating. A null real-deal share is "Not enough judged yet", never 0%. */
-function StatsBlock({ stats }: { stats: ShopStats }) {
+function StatsBlock({ stats, wasLabel }: { stats: ShopStats; wasLabel?: string }) {
   const id = useId();
   const real = stats.realDealPct;
   return (
@@ -77,7 +78,7 @@ function StatsBlock({ stats }: { stats: ShopStats }) {
       <dl className="m-0 grid grid-cols-2 gap-3 md:grid-cols-4">
         <Stat label="Real deals" value={real === null || !isCount(real) ? 'Not enough judged yet' : percent(real)} />
         <Stat label="Deals to avoid" value={countText(stats.avoid)} tone={isCount(stats.avoid) && stats.avoid > 0 ? 'bad' : undefined} />
-        <Stat label="Was price raised" value={countText(stats.wasRaised)} tone={isCount(stats.wasRaised) && stats.wasRaised > 0 ? 'bad' : undefined} />
+        <Stat label={`${wasTerms(wasLabel).start} raised`} value={countText(stats.wasRaised)} tone={isCount(stats.wasRaised) && stats.wasRaised > 0 ? 'bad' : undefined} />
         <Stat label="Marked Black Friday" value={countText(stats.bfMarked)} />
       </dl>
     </section>
@@ -191,7 +192,7 @@ function ShopContent({ data, slug }: { data: ShopResponse; slug: string }) {
           <LiveSearch shop={slug} placeholder={`Search ${shop.name}`} className="max-w-none" />
         </div>
       </div>
-      {mode === 'advanced' && <StatsBlock stats={data.stats} />}
+      {mode === 'advanced' && <StatsBlock stats={data.stats} wasLabel={data.shop.wasLabel} />}
       <DealSection kind="avoid" cards={data.avoid} slug={slug} />
       <DealSection kind="good" cards={data.good} slug={slug} />
       {mode === 'advanced' && (

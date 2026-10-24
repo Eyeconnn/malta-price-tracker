@@ -1,7 +1,7 @@
 import type { Adapter, CrawlContext, KnownProduct, NormalisedRecord } from '../types.js';
 import { DisallowedError, HttpError, ShopAbortError } from '../http/fetcher.js';
 import { blankRecord, decodeEntities, emptyToNull, minorToCents } from '../util/normalise.js';
-import { readShownWas, shownWasConfig, type ShownWasConfig } from './shownWas.js';
+import { readShownWas, shownWasAlarm, shownWasConfig, type ShownWasConfig, type ShownWasTally } from './shownWas.js';
 
 interface WooPrices {
   price: string;
@@ -47,8 +47,9 @@ function brandOf(p: WooProduct): string | null {
 /**
  * One Store API product as a record. With `shown` (the shop's config.shown_was) the was price is the one the shop
  * shows struck through in its price markup, and the feed's regular price is kept in feed_was_price_cents for audit.
+ * `tally` counts, per run, the products whose markup strikes a price through and how many the selector found.
  */
-export function wooToRecord(p: WooProduct, parent?: WooProduct, shown?: ShownWasConfig | null): NormalisedRecord {
+export function wooToRecord(p: WooProduct, parent?: WooProduct, shown?: ShownWasConfig | null, tally?: ShownWasTally): NormalisedRecord {
   const r = blankRecord(String(p.id));
   const src = parent ?? p;
   const unit = p.prices?.currency_minor_unit ?? 2;
@@ -68,6 +69,10 @@ export function wooToRecord(p: WooProduct, parent?: WooProduct, shown?: ShownWas
   let label: string | null = null;
   if (shown) {
     const s = readShownWas(p.price_html, shown, r.price_cents, regular);
+    if (tally && s.struck) {
+      tally.struck++;
+      if (s.found === 'selector') tally.hits++;
+    }
     r.feed_was_price_cents = r.was_price_cents;
     r.was_price_cents = s.wasCents;
     r.was_source = 'shown';
@@ -106,6 +111,7 @@ export const woo: Adapter = {
     const b = base(ctx);
     const cfg = ctx.shop.config;
     const shown = shownWasConfig(cfg);
+    const tally: ShownWasTally = { struck: 0, hits: 0 };
     const adaptive = Boolean(cfg.adaptive_page_size);
     const maxSize = Math.min(Number(cfg.page_size_max ?? (adaptive ? 50 : 100)), 100);
     let size = Math.min(Number(cfg.page_size ?? 100), 100);
@@ -155,7 +161,7 @@ export const woo: Adapter = {
       const records: NormalisedRecord[] = [];
       for (const p of items) {
         if (p.type === 'variable' && p.variations?.length) variableParents.set(p.id, p);
-        else records.push(wooToRecord(p, undefined, shown));
+        else records.push(wooToRecord(p, undefined, shown, tally));
       }
       fetched += items.length;
       produced += records.length;
@@ -175,7 +181,10 @@ export const woo: Adapter = {
       }
     }
 
-    if (variableParents.size) yield* variationRecords(ctx, b, variableParents, shown);
+    if (variableParents.size) yield* variationRecords(ctx, b, variableParents, shown, tally);
+    // the markup-change alarm: an error makes the run partial, and the run's errors are mailed (pipeline/alerts.ts)
+    const alarm = shown ? shownWasAlarm(tally, shown) : null;
+    if (alarm) ctx.error(alarm);
   },
 
   async fetchOne(ctx: CrawlContext, product: KnownProduct) {
@@ -199,7 +208,13 @@ export const woo: Adapter = {
  * allows it, and record each variation. Parents whose variations we cannot read are recorded
  * themselves, with their minimum price and price range.
  */
-async function* variationRecords(ctx: CrawlContext, b: string, parents: Map<number, WooProduct>, shown: ShownWasConfig | null) {
+async function* variationRecords(
+  ctx: CrawlContext,
+  b: string,
+  parents: Map<number, WooProduct>,
+  shown: ShownWasConfig | null,
+  tally: ShownWasTally,
+) {
   const byParent = new Map<number, WooProduct[]>();
   try {
     if (ctx.limit) {
@@ -226,8 +241,8 @@ async function* variationRecords(ctx: CrawlContext, b: string, parents: Map<numb
   let batch: NormalisedRecord[] = [];
   for (const [id, parent] of parents) {
     const vars = byParent.get(id);
-    if (vars?.length) batch.push(...vars.map((v) => wooToRecord(v, parent, shown)));
-    else batch.push(wooToRecord(parent, undefined, shown));
+    if (vars?.length) batch.push(...vars.map((v) => wooToRecord(v, parent, shown, tally)));
+    else batch.push(wooToRecord(parent, undefined, shown, tally));
     if (batch.length >= 100) {
       yield batch;
       batch = [];

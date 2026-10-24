@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { DEFAULT_SETTINGS } from '../../src/site/settings.js';
-import { computeVerdict, formatDay, formatEuro, type Obs } from '../../src/site/verdict.js';
+import { computeVerdict, formatDay, formatEuro, type Obs, wasTerms } from '../../src/site/verdict.js';
 import { toObs } from '../../src/site/build.js';
 
 const T = DEFAULT_SETTINGS.thresholds;
@@ -346,6 +346,11 @@ describe('shown was prices (migration 015)', () => {
     expect(v.reason).toBe('Was price €969.00 is higher than any price charged since 4 Oct (highest €799.00).');
     expect(v.facts.claimedPct).toBe(-17.5);
     expect(v.facts.wasRaisedFrom).toBeUndefined();
+    // The first shown night starts a new run (a was price appears), so its baseline is the feed nights before it:
+    // their prices still count, only their was prices do not.
+    expect(v.facts.low30).toBe(79900);
+    expect(v.facts.usual).toBe(79900);
+    expect(v.facts.wasChanges).toBe(0);
   });
 
   it('treats the feed was prices of a shown_was shop as unknown', () => {
@@ -385,5 +390,15 @@ describe("the shop's own term for its reference price (was_label)", () => {
     expect(computeVerdict(history, T, at('2026-10-17', '20:00:00Z'), label).reason).toBe(
       'Price went from €709.00 on 15 Oct to €799.00 on 16 Oct while showing a list price of €969.00.',
     );
+  });
+});
+
+describe('wasTerms', () => {
+  it('lower-cases the words of a term inside a sentence, keeps acronyms, and starts a sentence with a capital', () => {
+    expect(wasTerms(null)).toEqual({ start: 'Was price', inner: 'was price' });
+    expect(wasTerms('List price')).toEqual({ start: 'List price', inner: 'list price' });
+    expect(wasTerms('List Price')).toEqual({ start: 'List price', inner: 'list price' });
+    expect(wasTerms('RRP')).toEqual({ start: 'RRP', inner: 'RRP' });
+    expect(wasTerms('Original RRP')).toEqual({ start: 'Original RRP', inner: 'original RRP' });
   });
 });

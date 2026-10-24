@@ -4,7 +4,7 @@
 import { readFileSync } from 'node:fs';
 import * as cheerio from 'cheerio';
 import { describe, expect, it } from 'vitest';
-import { readShownWas, shownWasConfig, type ShownWasConfig } from '../src/adapters/shownWas.js';
+import { readShownWas, shownWasAlarm, shownWasConfig, type ShownWasConfig } from '../src/adapters/shownWas.js';
 import { woo, wooToRecord } from '../src/adapters/woo.js';
 import type { CrawlContext, Shop } from '../src/types.js';
 import { detectBlackFriday } from '../src/util/blackfriday.js';
@@ -42,13 +42,13 @@ describe('shownWasConfig', () => {
 describe('readShownWas', () => {
   it('reads the struck-through List Price and the price name from the Store API price_html (Lenovo 261895)', () => {
     expect(lenovo.prices.regular_price).toBe('80900');
-    expect(readShownWas(lenovo.price_html, CFG, 79900, 80900)).toEqual({ wasCents: 96900, label: 'Black Friday', found: 'selector' });
+    expect(readShownWas(lenovo.price_html, CFG, 79900, 80900)).toEqual({ wasCents: 96900, label: 'Black Friday', found: 'selector', struck: true });
   });
 
   it('reads the same values from the product page price block, so price_html is what shoppers see', () => {
     const $ = cheerio.load(fixture('product-page.html'));
     const block = $('#product-261895 p.price').html()!;
-    expect(readShownWas(block, CFG, 79900, 80900)).toEqual({ wasCents: 96900, label: 'Black Friday', found: 'selector' });
+    expect(readShownWas(block, CFG, 79900, 80900)).toEqual({ wasCents: 96900, label: 'Black Friday', found: 'selector', struck: true });
   });
 
   it('reads listing cards, and never the member price (zOnePRICE)', () => {
@@ -57,8 +57,8 @@ describe('readShownWas', () => {
       .toArray()
       .map((li) => readShownWas($(li).find('span.price').html(), CFG, null, null));
     expect(cards).toEqual([
-      { wasCents: 155900, label: 'Black Friday', found: 'selector' },
-      { wasCents: 179900, label: 'Cash Price', found: 'selector' },
+      { wasCents: 155900, label: 'Black Friday', found: 'selector', struck: true },
+      { wasCents: 179900, label: 'Cash Price', found: 'selector', struck: true },
     ]);
     // without the ignore rule the teaser is still never taken for the list price
     const noIgnore: ShownWasConfig = { ...CFG, ignore_selector: undefined };
@@ -67,11 +67,11 @@ describe('readShownWas', () => {
 
   it('falls back to the feed regular price only when the markup strikes exactly that price through', () => {
     const wooSale = '<del aria-hidden="true"><span class="amount">&euro;809.00</span></del> <ins><span class="amount">&euro;799.00</span></ins>';
-    expect(readShownWas(wooSale, CFG, 79900, 80900)).toEqual({ wasCents: 80900, label: null, found: 'struck_feed' });
+    expect(readShownWas(wooSale, CFG, 79900, 80900)).toEqual({ wasCents: 80900, label: null, found: 'struck_feed', struck: true });
     // a struck price other than the feed's, or none at all: unknown, never the feed value
-    expect(readShownWas(wooSale, CFG, 79900, 82900)).toEqual({ wasCents: null, label: null, found: 'none' });
-    expect(readShownWas('<span class="amount">&euro;799.00</span>', CFG, 79900, 80900)).toEqual({ wasCents: null, label: null, found: 'none' });
-    expect(readShownWas(undefined, CFG, 79900, 80900)).toEqual({ wasCents: null, label: null, found: 'no_html' });
+    expect(readShownWas(wooSale, CFG, 79900, 82900)).toEqual({ wasCents: null, label: null, found: 'none', struck: true });
+    expect(readShownWas('<span class="amount">&euro;799.00</span>', CFG, 79900, 80900)).toEqual({ wasCents: null, label: null, found: 'none', struck: false });
+    expect(readShownWas(undefined, CFG, 79900, 80900)).toEqual({ wasCents: null, label: null, found: 'no_html', struck: false });
   });
 
   it('keeps a shown price at or below the price out of the was price', () => {
@@ -153,5 +153,67 @@ describe('woo adapter with shown_was', () => {
     const [r] = await woo.fetchOne(ctx, { id: 1, external_id: '261895', parent_external_id: null, url: null, meta: {} });
     expect(urls).toHaveLength(1);
     expect([r!.was_price_cents, r!.feed_was_price_cents, r!.was_source]).toEqual([96900, 80900, 'shown']);
+  });
+});
+
+describe('readShownWas amounts', () => {
+  const read = (inner: string) => readShownWas(`<del class="atoz-price__list">${inner}</del>`, CFG, 79900, null).wasCents;
+
+  it('takes the amount right after a currency sign, without the full stop that ends a sentence', () => {
+    expect(read('Original price was: €969.00.')).toBe(96900);
+    expect(read('Original price was: &euro;1,559.00.')).toBe(155900);
+  });
+
+  it('never takes a year or another number before the price', () => {
+    expect(read('RRP 2026 €969.00')).toBe(96900);
+    expect(read('RRP 2026 EUR 969.00')).toBe(96900);
+  });
+
+  it('without a currency sign takes the last amount in the element', () => {
+    expect(read('List 2026: 969.00')).toBe(96900);
+  });
+
+  it('reads the price name without script or style text', () => {
+    const html = '<span class="atoz-price__name">Black Friday<script>var x = 1;</script><style>.a{}</style></span><del class="atoz-price__list">€969.00</del>';
+    expect(readShownWas(html, CFG, 79900, null).label).toBe('Black Friday');
+  });
+});
+
+describe('shown_was markup-change alarm', () => {
+  it('stays quiet while the selector finds the struck price on at least half of the struck-price products', () => {
+    expect(shownWasAlarm({ struck: 0, hits: 0 }, CFG)).toBeNull();
+    expect(shownWasAlarm({ struck: 10, hits: 10 }, CFG)).toBeNull();
+    expect(shownWasAlarm({ struck: 10, hits: 5 }, CFG)).toBeNull();
+  });
+
+  it('alarms when the selector finds none, or under half, of the struck prices (the markup changed)', () => {
+    expect(shownWasAlarm({ struck: 10, hits: 0 }, CFG)).toMatch(/shown_was selector \.atoz-price__list found 0 of 10/);
+    expect(shownWasAlarm({ struck: 10, hits: 4 }, CFG)).toMatch(/found 4 of 10/);
+  });
+
+  function crawlCtx(items: unknown[]) {
+    const errors: string[] = [];
+    const fetcher = {
+      async get(url: string) {
+        return { url, status: 200, headers: new Headers({ 'x-wp-totalpages': '1' }), json: () => items };
+      },
+    };
+    const ctx = { shop: { ...atoz, id: 1 }, fetcher, log: () => {}, error: (m: string) => errors.push(m) } as unknown as CrawlContext;
+    return { ctx, errors };
+  }
+
+  it('a crawl whose struck prices the selector no longer finds calls ctx.error, so the run is partial and alerts', async () => {
+    // the shop's theme changed: plain Woo <del>/<ins> markup, no .atoz-price__list
+    const changed = listing.map((p) => ({ ...p, price_html: '<del><span class="amount">&euro;539.00</span></del> <ins><span class="amount">&euro;429.00</span></ins>' }));
+    const { ctx, errors } = crawlCtx(changed);
+    for await (const batch of woo.crawl(ctx)) void batch;
+    expect(errors).toHaveLength(1);
+    expect(errors[0]).toMatch(/shown_was selector \.atoz-price__list found 0 of 3/);
+  });
+
+  it('a crawl of the usual markup calls no error', async () => {
+    const { ctx, errors } = crawlCtx(listing);
+    for await (const batch of woo.crawl(ctx)) void batch;
+    expect(errors).toEqual([]);
   });
 });
