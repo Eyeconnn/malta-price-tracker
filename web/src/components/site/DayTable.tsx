@@ -46,6 +46,8 @@ export type DayTableProps = {
   judged: boolean;
   /** facts.low30, named in the note under the table */
   low30: number | null;
+  /** the seller's own term for its reference price ("List price"), the Was column's header; absent: "Was" */
+  wasLabel?: string;
   className?: string;
 };
 
@@ -55,7 +57,7 @@ export type DayTableProps = {
  * A day without a price says "Price not shown by the shop" and gets no change. This table is the
  * text alternative of the price chart.
  */
-export function DayTable({ id, rows, judged, low30, className }: DayTableProps) {
+export function DayTable({ id, rows, judged, low30, wasLabel, className }: DayTableProps) {
   const newestFirst = [...rows].reverse();
   return (
     <div className={cn('overflow-x-auto', className)}>
@@ -70,7 +72,7 @@ export function DayTable({ id, rows, judged, low30, className }: DayTableProps) 
               Price
             </th>
             <th scope="col" className="px-2 py-1 text-right font-medium">
-              Was
+              {wasLabel ?? 'Was'}
             </th>
             <th scope="col" className="px-2 py-1 text-right font-medium">
               Change
@@ -96,7 +98,7 @@ export function DayTable({ id, rows, judged, low30, className }: DayTableProps) 
               ) : (
                 <td className="px-2 py-2 text-right tabular-nums">{formatEuro(r.price)}</td>
               )}
-              <td className="px-2 py-2 text-right text-muted-foreground tabular-nums">{r.was === null ? 'None' : formatEuro(r.was)}</td>
+              <td className="px-2 py-2 text-right text-muted-foreground tabular-nums">{r.was !== null ? formatEuro(r.was) : r.wasKnown ? 'None' : 'Not recorded'}</td>
               <ChangeCell row={r} />
               <td className="px-2 py-2">{r.bf ? <span className="font-semibold">Marked</span> : <span className="text-muted-foreground">Not marked</span>}</td>
               {judged && <WorthCell worth={r.worth} />}

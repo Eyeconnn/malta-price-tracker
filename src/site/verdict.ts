@@ -32,6 +32,27 @@ export type VerdictFacts = {
 
 export type Verdict = { label: 'good' | 'avoid' | 'none' | 'insufficient'; reason: string; facts: VerdictFacts };
 
+/** What the shop's reference price is called when the shop has no term of its own (config.shown_was.was_label). */
+export const DEFAULT_WAS_LABEL = 'Was price';
+
+export type VerdictOptions = {
+  /** the shop's own term for its reference price, e.g. "List price"; null or absent: "Was price" */
+  wasLabel?: string | null;
+};
+
+/**
+ * The reference price's name inside a sentence and at its start: "List Price" gives "list price" and "List price".
+ * Capitalised words are lower-cased, acronyms ("RRP") keep their capitals.
+ */
+export function wasTerms(label: string | null | undefined): { start: string; inner: string } {
+  const t = (label?.trim() || DEFAULT_WAS_LABEL).replace(/\s+/g, ' ');
+  const inner = t
+    .split(' ')
+    .map((w) => (/^[A-Z][a-z]/.test(w) ? w.charAt(0).toLowerCase() + w.slice(1) : w))
+    .join(' ');
+  return { start: inner.charAt(0).toUpperCase() + inner.slice(1), inner };
+}
+
 const TZ = 'Europe/Malta';
 const DAY_MS = 86_400_000;
 
@@ -165,11 +186,12 @@ function steadyPrice(days: Day[], from: number, to: number, price: number): bool
   return days.filter((d) => d.idx >= from && d.idx <= to).every((d) => d.readings.every((p) => p === price));
 }
 
-function wasRiseText(r: Rise): string {
-  return `was price went from ${formatEuro(r.base)} on ${formatDay(r.from.day)} to ${formatEuro(r.toValue)} on ${formatDay(r.to.day)}`;
+function wasRiseText(r: Rise, was: string): string {
+  return `${was} went from ${formatEuro(r.base)} on ${formatDay(r.from.day)} to ${formatEuro(r.toValue)} on ${formatDay(r.to.day)}`;
 }
 
-export function computeVerdict(obs: Obs[], t: Thresholds, now: Date): Verdict {
+export function computeVerdict(obs: Obs[], t: Thresholds, now: Date, opts: VerdictOptions = {}): Verdict {
+  const was = wasTerms(opts.wasLabel);
   const days = collapseToDays(obs);
   const latest = days.at(-1);
   const priced = days.filter((d) => positive(d.price));
@@ -243,9 +265,9 @@ export function computeVerdict(obs: Obs[], t: Thresholds, now: Date): Verdict {
     const to = priceRise.to;
     let context: string;
     if (to.bf) context = ' while marked Black Friday';
-    else if (positive(to.was) && to.was > priceRise.toValue) context = ` while showing a was price of ${formatEuro(to.was)}`;
+    else if (positive(to.was) && to.was > priceRise.toValue) context = ` while showing a ${was.inner} of ${formatEuro(to.was)}`;
     else if (latest.bf) context = ', and it is now marked Black Friday';
-    else context = `, and it now shows a was price of ${formatEuro(latestWas as number)}`;
+    else context = `, and it now shows a ${was.inner} of ${formatEuro(latestWas as number)}`;
     return {
       label: 'avoid',
       reason: `Price went from ${formatEuro(priceRise.base)} on ${formatDay(priceRise.from.day)} to ${formatEuro(priceRise.toValue)} on ${formatDay(to.day)}${context}.`,
@@ -259,7 +281,7 @@ export function computeVerdict(obs: Obs[], t: Thresholds, now: Date): Verdict {
     else if (positive(to.price) && to.price === wasRise.from.price && steadyPrice(days, wasRise.from.idx + 1, to.idx, to.price)) {
       context = ` while the price stayed at ${formatEuro(to.price)}`;
     }
-    const text = wasRiseText(wasRise);
+    const text = wasRiseText(wasRise, was.inner);
     return { label: 'avoid', reason: `${text.charAt(0).toUpperCase()}${text.slice(1)}${context}.`, facts };
   }
 
@@ -277,7 +299,7 @@ export function computeVerdict(obs: Obs[], t: Thresholds, now: Date): Verdict {
       const since = days.find((d) => d.idx === sinceIdx) as Day;
       return {
         label: 'avoid',
-        reason: `Was price ${formatEuro(latestWas)} is higher than any price charged since ${formatDay(since.day)} (highest ${formatEuro(highest)}).`,
+        reason: `${was.start} ${formatEuro(latestWas)} is higher than any price charged since ${formatDay(since.day)} (highest ${formatEuro(highest)}).`,
         facts,
       };
     }
@@ -300,7 +322,7 @@ export function computeVerdict(obs: Obs[], t: Thresholds, now: Date): Verdict {
     // Good also needs a was price not raised within the previous baselineDays days (spec 6.7).
     const wasRise30 = netRise(days, (d) => d.was, today - t.baselineDays, latestWas, t.raisePct);
     if (wasRise30) {
-      return { label: 'none', reason: `Price ${formatEuro(latestPrice)} ${rel} ${span}, but the ${wasRiseText(wasRise30)}.`, facts };
+      return { label: 'none', reason: `Price ${formatEuro(latestPrice)} ${rel} ${span}, but the ${wasRiseText(wasRise30, was.inner)}.`, facts };
     }
     return { label: 'good', reason: `${formatEuro(low30 - latestPrice)} below its lowest price ${span}.`, facts };
   }

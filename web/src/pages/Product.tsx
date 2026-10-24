@@ -19,7 +19,7 @@ import { hasWas, SERIES_MAX, seriesStyle, WAS_DASH } from '@/lib/sellerSeries';
 import { useMediaQuery } from '@/lib/useMediaQuery';
 import { cn } from '@/lib/utils';
 import { withSpecs } from '../../../src/site/display.js';
-import { maltaDay, type VerdictFacts } from '../../../src/site/verdict.js';
+import { maltaDay, type VerdictFacts, wasTerms } from '../../../src/site/verdict.js';
 
 // Recharts is only downloaded when an Advanced product page shows the chart.
 const SellersChart = lazy(() => import('@/components/site/SellersChart'));
@@ -55,6 +55,7 @@ export function sellerCard(s: SellerView): Card {
     category: null,
     raisedFrom: avoid && rf && positive(rf.price) && typeof rf.at === 'string' && DAY.test(rf.at) ? { priceCents: rf.price, at: rf.at } : null,
     wasRaisedFromCents: avoid && positive(f?.wasRaisedFrom) ? f.wasRaisedFrom : null,
+    ...(s.wasLabel ? { wasLabel: s.wasLabel } : {}),
   };
 }
 
@@ -134,7 +135,8 @@ function Section({ title, children, className }: { title: string; children: Reac
 }
 
 /** Advanced: every stored fact behind one seller's verdict. "Days worth buying" only for a judged verdict (R44). */
-function NumbersPanel({ title, facts, judged }: { title: string; facts: VerdictFacts; judged: boolean }) {
+function NumbersPanel({ title, facts, judged, wasLabel }: { title: string; facts: VerdictFacts; judged: boolean; wasLabel?: string }) {
+  const was = wasTerms(wasLabel).start;
   const at = (v: { price: number; at: string } | undefined) =>
     v && positive(v.price) && typeof v.at === 'string' && DAY.test(v.at) ? `${formatEuro(v.price)} on ${formatDay(v.at)}` : null;
   const rows: [string, string | null, string?][] = [
@@ -148,10 +150,10 @@ function NumbersPanel({ title, facts, judged }: { title: string; facts: VerdictF
     ],
     ['Price before the rise', at(facts.raisedFrom)],
     ['Price after the rise', at(facts.raisedTo), 'text-bad'],
-    ['Was price before its rise', positive(facts.wasRaisedFrom) ? formatEuro(facts.wasRaisedFrom) : null],
+    [`${was} before its rise`, positive(facts.wasRaisedFrom) ? formatEuro(facts.wasRaisedFrom) : null],
     ['Days tracked', finite(facts.historyDays) ? String(facts.historyDays) : null],
     ['Price changes', finite(facts.priceChanges) ? String(facts.priceChanges) : null],
-    ['Was price changes', finite(facts.wasChanges) ? String(facts.wasChanges) : null],
+    [`${was} changes`, finite(facts.wasChanges) ? String(facts.wasChanges) : null],
     ['Days worth buying', judged && finite(facts.daysWorthBuying) && finite(facts.historyDays) ? `${facts.daysWorthBuying} of ${facts.historyDays}` : null],
   ];
   return (
@@ -417,7 +419,7 @@ function History({
           const rows = variant === null ? [] : lastDays(dayRows(data.history.filter((h) => h.sellerId === s.id), variant, null), RANGES[range]);
           // seller and option, so two listings of one shop (each colour on its own) are told apart
           const label = variant !== null && (options > 1 || (variantsPer.get(s.id) ?? 0) > 1) ? labelOf.get(variant) : null;
-          return { id: s.id, shop: s.shop, legend: label ? `${s.shop} (${label})` : s.shop, rows };
+          return { id: s.id, shop: s.shop, legend: label ? `${s.shop} (${label})` : s.shop, rows, wasName: wasTerms(s.wasLabel).inner };
         })
         .filter((l) => l.rows.length > 0)
         .slice(0, SERIES_MAX),
@@ -492,7 +494,7 @@ function History({
                     <svg aria-hidden="true" width="18" height="6" className="flex-none">
                       <line x1="0" y1="3" x2="18" y2="3" stroke={seriesStyle(i).stroke} strokeOpacity="0.6" strokeWidth="1.4" strokeDasharray={WAS_DASH} />
                     </svg>
-                    {`${l.legend} was price`}
+                    {`${l.legend} ${l.wasName}`}
                   </li>
                 ) : null,
               )}
@@ -526,7 +528,7 @@ function History({
             {seller ? `No prices tracked at ${seller.shop} in the last 60 days.` : 'No prices tracked.'}
           </p>
         ) : (
-          <DayTable id={tableId} rows={rows} judged={judged} low30={low30} />
+          <DayTable id={tableId} rows={rows} judged={judged} low30={low30} wasLabel={seller?.wasLabel} />
         )}
       </div>
       {seller?.verdict.facts && (
@@ -535,6 +537,7 @@ function History({
           title={shown && !shown.checked ? `Numbers at ${seller.shop}, for ${labelOf.get(seller.productId ?? -1) ?? 'another option'}` : `Numbers at ${seller.shop}`}
           facts={seller.verdict.facts}
           judged={seller.verdict.label === 'good' || seller.verdict.label === 'avoid'}
+          wasLabel={seller.wasLabel}
         />
       )}
     </>

@@ -8,6 +8,8 @@ export type DayRow = {
   day: string;
   price: number | null;
   was: number | null;
+  /** false when that night's reference price was not recorded (HistoryObs.wasKnown): a null was is then unknown */
+  wasKnown: boolean;
   bf: boolean;
   /** against the previous tracked day; null when either day has no price */
   change: { cents: number; pct: number } | null;
@@ -52,6 +54,7 @@ export function dayRows(history: readonly HistoryObs[], productId: number, low30
       day,
       price,
       was: positive(h.was) ? h.was : null,
+      wasKnown: h.wasKnown !== false,
       bf: h.bf === true,
       change: price !== null && prev !== null ? { cents: price - prev, pct: pct(prev, price) } : null,
       prevHidden: before !== undefined && prev === null,

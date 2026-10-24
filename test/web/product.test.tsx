@@ -658,3 +658,62 @@ describe('product page, Simple, price changes and facts per seller', () => {
     expect(screen.getByText('at AtoZ')).toBeTruthy();
   });
 });
+
+describe("product page, the shop's own term for its reference price (was_label)", () => {
+  // AtoZ calls its struck-through reference price "List price"
+  const listed: SellerView = {
+    ...alpha,
+    wasLabel: 'List price',
+    priceCents: 79900,
+    wasCents: 96900,
+    verdict: {
+      label: 'avoid',
+      reason: 'List price €969.00 is higher than any price charged since 23 Sep (highest €799.00).',
+      facts: { ...alpha.verdict.facts!, raisedFrom: undefined, raisedTo: undefined, wasRaisedFrom: undefined },
+    },
+  };
+  // feed nights before 015: their reference price is unknown (wasKnown false)
+  const listedHistory = [
+    ...daysFrom('2026-09-23', 29).map((d) => ({ ...obs(REP, d, 79900, null, true), wasKnown: false as const })),
+    obs(REP, '2026-10-22', 79900, 96900, true),
+  ];
+  const listedPage = () =>
+    page({ sellers: [beta, listed, gamma], history: [...listedHistory.map((h) => ({ ...h, sellerId: 1 })), ...betaHistory.map((h) => ({ ...h, sellerId: 2 }))] });
+
+  it("names the seller's reference price with the shop's term in its row and its avoid fact", async () => {
+    await openProduct(listedPage());
+    const a = sellerItem('Alpha');
+    expect(within(a).getByText('List price')).toBeTruthy();
+    expect(within(a).getByText('€969.00')).toBeTruthy();
+    expect(within(a).getByText('List price €969.00 is above its recent prices')).toBeTruthy();
+    expect(within(a).getByText('Marked Black Friday, list price above its recent prices')).toBeTruthy();
+    expect(a.textContent).not.toMatch(/was price/i);
+    // a shop without its own term keeps "was price", unshown
+    expect(within(sellerItem('Beta')).queryByText('List price')).toBeNull();
+  });
+
+  it('names it in the chart legend and the numbers (Advanced)', async () => {
+    localStorage.setItem('mode', 'advanced');
+    // the listing alone, so its numbers are the ones shown
+    await openProduct({ ...listedPage(), sellers: [listed], cheapestId: 1, history: listedHistory.map((h) => ({ ...h, sellerId: 1 })) });
+    const legend = await screen.findByRole('list', { name: 'Chart lines' });
+    expect(within(legend).getByText('Alpha (Black) list price')).toBeTruthy();
+    expect(screen.getByText('List price changes')).toBeTruthy();
+    // the day table: the column takes the shop's term, and a night whose reference price was not recorded says so
+    const table = screen.getByRole('table', { name: 'Price by day' });
+    expect(within(table).getByRole('columnheader', { name: 'List price' })).toBeTruthy();
+    expect(within(table).queryByRole('columnheader', { name: 'Was' })).toBeNull();
+    const cells = within(table).getAllByRole('row').slice(1).map((r) => r.querySelectorAll('td')[1]?.textContent);
+    expect(cells[0]).toBe('€969.00');
+    expect(cells[1]).toBe('Not recorded');
+  });
+
+  it('dayRows carries wasKnown, false only for a night whose reference price was not recorded', () => {
+    const rows = dayRows([{ ...obs(REP, '2026-10-21', 79900, null, true), wasKnown: false as const }, obs(REP, '2026-10-22', 79900, 96900, true), obs(REP, '2026-10-23', 79900, null, true)], REP, null);
+    expect(rows.map((r) => [r.day, r.was, r.wasKnown])).toEqual([
+      ['2026-10-21', null, false],
+      ['2026-10-22', 96900, true],
+      ['2026-10-23', null, true],
+    ]);
+  });
+});

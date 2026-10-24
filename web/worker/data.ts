@@ -25,12 +25,18 @@ export type Card = {
   raisedFrom: { priceCents: number; at: string } | null;
   /** avoid only: the was price before a recent was-price rise (facts.wasRaisedFrom), else null */
   wasRaisedFromCents: number | null;
+  /** the shop's own term for its reference price ("List price", config.shown_was.was_label); absent: "Was price" */
+  wasLabel?: string;
 };
 
 /** Ruling R2: Obs with an ISO time, as JSON carries it. */
 export type ApiObs = Omit<Obs, 'at'> & { at: string };
 /** One history point of one variant (products.id). */
-export type HistoryObs = ApiObs & { productId: number };
+/**
+ * wasKnown: false on a night whose reference price was not recorded (a shop with shown_was, before its shown price
+ * was read, migration 015); absent otherwise. A null was price is then unknown, not "none shown".
+ */
+export type HistoryObs = ApiObs & { productId: number; wasKnown?: false };
 
 /** A search query: plain text for word_similarity, and the same text as an escaped ILIKE pattern. */
 export type SearchPattern = { text: string; like: string };
@@ -68,7 +74,8 @@ export type SearchHit = Card & {
 };
 
 export type ShopSummary = { slug: string; name: string; grade: Grade | null; products: number };
-export type ShopInfo = { id: number; slug: string; name: string; url: string; category: string | null };
+/** wasLabel: the shop's own term for its reference price ("List price", config.shown_was.was_label); absent: "Was price" */
+export type ShopInfo = { id: number; slug: string; name: string; url: string; category: string | null; wasLabel?: string };
 export type ShopRating = { grade: Grade | null; sentence: string; judged: number };
 export type ShopStats = {
   products: number;
@@ -131,6 +138,8 @@ export type ProductDetail = { product: ProductInfo; variants: Variant[]; history
  */
 export type Seller = {
   id: number;
+  /** the shop's own term for its reference price ("List price", config.shown_was.was_label); absent: "Was price" */
+  wasLabel?: string;
   productId: number | null;
   groupKey: string;
   shopId: number;
@@ -240,8 +249,23 @@ const TRUSTED = `(sp.canonical_id is not null and (sp.match_method in ('gtin', '
 const NAME_JOIN = `left join product_names pn on pn.shop_id = sp.shop_id and pn.group_key = sp.group_key
   and pn.status = 'ok' and pn.display_name is not null and pn.source_title = sp.title`;
 
+/**
+ * A history row's was price. For a shop with config.shown_was only prices read from what the shop shows struck
+ * through count (was_source 'shown', migration 015); its older feed values are unknown, as in the verdicts
+ * (src/site/build.ts toObs). Needs shops s and price_observations po.
+ */
+const SHOWN_WAS_SQL = `case when jsonb_typeof(s.config -> 'shown_was') = 'object' and po.was_source is distinct from 'shown' then null else po.was_price_cents end`;
+/** Whether a history row's was price is known: false exactly where SHOWN_WAS_SQL blanks it. Needs shops s and po. */
+const WAS_KNOWN_SQL = `not (coalesce(jsonb_typeof(s.config -> 'shown_was') = 'object', false) and po.was_source is distinct from 'shown')`;
+
+/** The shop's own term for its reference price (config.shown_was.was_label), null when it has none. Needs shops s. */
+const WAS_LABEL_SQL = `case when jsonb_typeof(s.config -> 'shown_was') = 'object' then s.config -> 'shown_was' ->> 'was_label' end`;
+/** { wasLabel } when the row's shop has its own term, else nothing (so the answer stays as before for every other shop) */
+const wasLabelOf = (v: unknown): { wasLabel?: string } => (typeof v === 'string' && v.trim() !== '' ? { wasLabel: v.trim() } : {});
+
 const CARD_COLUMNS = `sp.id, sp.title, s.name as shop, s.slug as shop_slug, sp.price_cents, sp.was_price_cents, sp.verdict,
-  sp.reason, sp.bf_status, sp.category, sp.facts -> 'raisedFrom' as raised_from, sp.facts ->> 'wasRaisedFrom' as was_raised_from`;
+  sp.reason, sp.bf_status, sp.category, sp.facts -> 'raisedFrom' as raised_from, sp.facts ->> 'wasRaisedFrom' as was_raised_from,
+  ${WAS_LABEL_SQL} as was_label`;
 
 /** word_similarity threshold for `<%`, as in the dashboard search. */
 const WORD_SIMILARITY = '0.5';
@@ -311,6 +335,7 @@ function toCard(r: Row): Card {
     category: strOrNull(r.category),
     raisedFrom: avoid ? raisedFromOrNull(r.raised_from) : null,
     wasRaisedFromCents: avoid ? priceOrNull(r.was_raised_from) : null,
+    ...wasLabelOf(r.was_label),
   };
 }
 
@@ -369,7 +394,7 @@ export function createData(db: SqlRunner, opts: DataOptions = {}): Data {
       const sellerRows = await db.query(
         `select sp.id, sp.rep_product_id, sp.group_key, sp.shop_id, s.name as shop, s.slug as shop_slug, sp.title, sp.brand, sp.url,
           sp.image_key, sp.category, sp.price_cents, sp.was_price_cents, sp.in_stock, sp.bf_status, sp.match_method, sp.verdict,
-          sp.reason, sp.facts, pn.display_name, pn.variant_label, pn.category as name_category, pn.attrs
+          sp.reason, sp.facts, pn.display_name, pn.variant_label, pn.category as name_category, pn.attrs, ${WAS_LABEL_SQL} as was_label
         from site_products sp join shops s on s.id = sp.shop_id
         ${NAME_JOIN}
         where ${VISIBLE}
@@ -414,6 +439,7 @@ export function createData(db: SqlRunner, opts: DataOptions = {}): Data {
         variantLabel: strOrNull(r.variant_label),
         nameCategory: strOrNull(r.name_category),
         attrs: objOrNull(r.attrs),
+        ...wasLabelOf(r.was_label),
       }));
 
       // per seller the same index range scans as the single-shop product page (shop_id, group key)
@@ -443,9 +469,9 @@ export function createData(db: SqlRunner, opts: DataOptions = {}): Data {
         db.query(
           `select g.seller_id, h.* from unnest($1::bigint[], $2::int[], $3::text[], $4::bigint[]) as g(seller_id, shop_id, group_key, rep_id)
           cross join lateral (
-            (select po.product_id, po.observed_at, po.price_cents, po.was_price_cents, po.in_stock,
+            (select po.product_id, po.observed_at, po.price_cents, ${SHOWN_WAS_SQL} as was_price_cents, ${WAS_KNOWN_SQL} as was_known, po.in_stock,
               coalesce(po.bf_marked, coalesce(p.bf_status = 'marked', false)) as bf
-            from products p join price_observations po on po.product_id = p.id
+            from products p join shops s on s.id = p.shop_id join price_observations po on po.product_id = p.id
             where p.shop_id = g.shop_id and coalesce(p.parent_external_id, p.external_id) = g.group_key
               and po.observed_at > now() - interval '${HISTORY_DAYS} days'
               -- unchecked 70% jumps are left out, as the verdicts leave them out (Ruling R55)
@@ -453,9 +479,9 @@ export function createData(db: SqlRunner, opts: DataOptions = {}): Data {
             order by po.observed_at desc, po.product_id desc
             limit $5)
             union
-            (select po.product_id, po.observed_at, po.price_cents, po.was_price_cents, po.in_stock,
+            (select po.product_id, po.observed_at, po.price_cents, ${SHOWN_WAS_SQL} as was_price_cents, ${WAS_KNOWN_SQL} as was_known, po.in_stock,
               coalesce(po.bf_marked, coalesce(p.bf_status = 'marked', false)) as bf
-            from products p join price_observations po on po.product_id = p.id
+            from products p join shops s on s.id = p.shop_id join price_observations po on po.product_id = p.id
             where p.id = g.rep_id and p.shop_id = g.shop_id
               and po.observed_at > now() - interval '${KEEP_DAYS} days'
               and (po.review_flag is null or po.review_flag <> 'jump_70pct'))
@@ -484,6 +510,7 @@ export function createData(db: SqlRunner, opts: DataOptions = {}): Data {
           at: iso(h.observed_at),
           price: priceOrNull(h.price_cents),
           was: priceOrNull(h.was_price_cents),
+          ...(h.was_known === false ? { wasKnown: false as const } : {}),
           inStock: boolOrNull(h.in_stock),
           bf: boolOrNull(h.bf),
         })),
@@ -626,7 +653,7 @@ export function createData(db: SqlRunner, opts: DataOptions = {}): Data {
 
     async shop(slug) {
       const rows = await db.query(
-        `select s.id, s.slug, s.name, s.base_url, s.category, r.grade, r.sentence, r.judged as rating_judged, st.*
+        `select s.id, s.slug, s.name, s.base_url, s.category, ${WAS_LABEL_SQL} as was_label, r.grade, r.sentence, r.judged as rating_judged, st.*
         from shops s
         left join shop_ratings r on r.shop_id = s.id
         cross join lateral (
@@ -645,7 +672,7 @@ export function createData(db: SqlRunner, opts: DataOptions = {}): Data {
       if (!r) return null;
       const judged = num(r.judged);
       return {
-        shop: { id: num(r.id), slug: String(r.slug), name: String(r.name), url: String(r.base_url), category: strOrNull(r.category) },
+        shop: { id: num(r.id), slug: String(r.slug), name: String(r.name), url: String(r.base_url), category: strOrNull(r.category), ...wasLabelOf(r.was_label) },
         rating: r.sentence === null || r.sentence === undefined ? null : { grade: (r.grade ?? null) as Grade | null, sentence: String(r.sentence), judged: num(r.rating_judged) },
         stats: {
           products: num(r.products),
@@ -747,9 +774,9 @@ export function createData(db: SqlRunner, opts: DataOptions = {}): Data {
         // a wide group can exceed the cap: keep the newest points, then return them oldest first
         db.query(
           `select * from (
-            select po.product_id, po.observed_at, po.price_cents, po.was_price_cents, po.in_stock,
+            select po.product_id, po.observed_at, po.price_cents, ${SHOWN_WAS_SQL} as was_price_cents, ${WAS_KNOWN_SQL} as was_known, po.in_stock,
               coalesce(po.bf_marked, coalesce(p.bf_status = 'marked', false)) as bf
-            from products p join price_observations po on po.product_id = p.id
+            from products p join shops s on s.id = p.shop_id join price_observations po on po.product_id = p.id
             where p.shop_id = $1 and coalesce(p.parent_external_id, p.external_id) = $2
               and po.observed_at > now() - interval '${HISTORY_DAYS} days'
               -- unchecked 70% jumps are left out, as the verdicts leave them out (Ruling R55)
@@ -787,6 +814,7 @@ export function createData(db: SqlRunner, opts: DataOptions = {}): Data {
           at: iso(h.observed_at),
           price: priceOrNull(h.price_cents),
           was: priceOrNull(h.was_price_cents),
+          ...(h.was_known === false ? { wasKnown: false as const } : {}),
           inStock: boolOrNull(h.in_stock),
           bf: boolOrNull(h.bf),
         })),

@@ -23,6 +23,8 @@ export const recordSchema = z.object({
   shop_created_at: z.string().nullable(),
   price_cents: cents,
   was_price_cents: cents,
+  was_source: z.enum(['feed', 'shown']).optional(),
+  feed_was_price_cents: cents.optional(),
   shop_30d_low_cents: cents,
   in_stock: z.boolean().nullable(),
   on_sale: z.boolean().nullable(),

@@ -554,3 +554,41 @@ describe('data.ts products by clean name (design Part 3)', () => {
     expect((await data.product(1))?.product.key).toBe('c100');
   });
 });
+
+describe('data.ts shown was prices (migration 015)', () => {
+  it("history shows a shown_was shop's was price only where it was read from the shown price", async () => {
+    await pg.exec(`
+      insert into shops (id, slug, name, base_url, adapter, active, site_hidden, category, config) values
+        (7, 'listshop', 'Listshop', 'https://list.example', 'woo', true, false, null,
+         '{"shown_was": {"source": "price_html", "selector": ".atoz-price__list", "was_label": "List price"}}');
+      insert into products (id, shop_id, external_id, title) values (70, 7, 'L1', 'Lenovo V15 G5');
+      insert into price_observations (product_id, observed_at, price_cents, was_price_cents, was_source, feed_was_price_cents, in_stock) values
+        (70, now() - interval '2 days', 79900, 80900, 'feed', 80900, true),
+        (70, now() - interval '1 day', 79900, 80900, null, null, true),
+        (70, now() - interval '2 hours', 79900, 96900, 'shown', 80900, true);
+      insert into site_products (id, shop_id, group_key, title, rep_product_id, price_cents, was_price_cents, in_stock, verdict, updated_at) values
+        (970, 7, 'L1', 'Lenovo V15 G5', 70, 79900, 96900, true, 'avoid', now());
+    `);
+    const d = await data.product(970);
+    expect(d?.history.map((h) => [h.price, h.was, h.wasKnown])).toEqual([
+      [79900, null, false],
+      [79900, null, false],
+      [79900, 96900, undefined],
+    ]);
+    const g = await data.productGroup('s970');
+    expect(g?.history.map((h) => [h.was, h.wasKnown])).toEqual([
+      [null, false],
+      [null, false],
+      [96900, undefined],
+    ]);
+    expect((await data.shop('listshop'))?.shop.wasLabel).toBe('List price');
+    expect((await data.shop('alpha'))?.shop.wasLabel).toBeUndefined();
+    // other shops keep their feed was prices (product 10 of shop alpha)
+    expect((await data.product(1))?.history.some((h) => h.was === 90000)).toBe(true);
+    // the shop's own term for its reference price, on the seller and its cards; none elsewhere
+    expect((await data.productGroup('s970'))?.sellers.map((s) => s.wasLabel)).toEqual(['List price']);
+    expect((await data.productGroup('c100'))?.sellers.every((s) => s.wasLabel === undefined)).toBe(true);
+    const avoid = await data.deals({ verdict: 'avoid', category: null, shop: 'listshop', minCents: null, maxCents: null, limit: 24, offset: 0 });
+    expect(avoid.items.map((c) => [c.id, c.wasLabel])).toEqual([[970, 'List price']]);
+  });
+});
