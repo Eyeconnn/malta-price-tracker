@@ -30,6 +30,7 @@ function card(id: number, extra: Partial<Card> = {}): Card {
     title: `Product ${id}`,
     shop: 'Alpha Shop',
     shopSlug: 'alpha',
+    logoUrl: null,
     priceCents: 10000 + id,
     wasCents: null,
     verdict: 'good',

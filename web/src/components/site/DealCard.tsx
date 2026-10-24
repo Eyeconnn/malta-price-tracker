@@ -149,7 +149,7 @@ export function DealCard({ card, className }: { card: Card; className?: string }
           </div>
         )}
         <p className="relative z-10 flex min-w-0 items-center gap-2 text-xs text-muted-foreground">
-          <ShopBadge name={card.shop} size="sm" />
+          <ShopBadge name={card.shop} logoUrl={card.logoUrl} size="sm" decorative />
           <Link
             to={`/shops/${encodeURIComponent(card.shopSlug)}`}
             className="truncate rounded-sm outline-none hover:text-ink hover:underline focus-visible:ring-[3px] focus-visible:ring-ring/50"

@@ -27,6 +27,8 @@ export type Card = {
   wasRaisedFromCents: number | null;
   /** the shop's own term for its reference price ("List price", config.shown_was.was_label); absent: "Was price" */
   wasLabel?: string;
+  /** our stored copy of the shop's logo, /img/<sha256>.webp (shops.logo_key, migration 016), null when none */
+  logoUrl: string | null;
 };
 
 /** Ruling R2: Obs with an ISO time, as JSON carries it. */
@@ -73,9 +75,10 @@ export type SearchHit = Card & {
   groupLow: number | null;
 };
 
-export type ShopSummary = { slug: string; name: string; grade: Grade | null; products: number };
+/** logoUrl: our stored copy of the shop's logo, /img/<sha256>.webp, null when none (never a shop address) */
+export type ShopSummary = { slug: string; name: string; grade: Grade | null; products: number; logoUrl: string | null };
 /** wasLabel: the shop's own term for its reference price ("List price", config.shown_was.was_label); absent: "Was price" */
-export type ShopInfo = { id: number; slug: string; name: string; url: string; category: string | null; wasLabel?: string };
+export type ShopInfo = { id: number; slug: string; name: string; url: string; category: string | null; logoUrl: string | null; wasLabel?: string };
 export type ShopRating = { grade: Grade | null; sentence: string; judged: number };
 export type ShopStats = {
   products: number;
@@ -145,6 +148,8 @@ export type Seller = {
   shopId: number;
   shop: string;
   shopSlug: string;
+  /** our stored copy of the shop's logo, /img/<sha256>.webp, null when none */
+  logoUrl: string | null;
   /** the shop's own title */
   title: string;
   brand: string | null;
@@ -265,7 +270,7 @@ const wasLabelOf = (v: unknown): { wasLabel?: string } => (typeof v === 'string'
 
 const CARD_COLUMNS = `sp.id, sp.title, s.name as shop, s.slug as shop_slug, sp.price_cents, sp.was_price_cents, sp.verdict,
   sp.reason, sp.bf_status, sp.category, sp.facts -> 'raisedFrom' as raised_from, sp.facts ->> 'wasRaisedFrom' as was_raised_from,
-  ${WAS_LABEL_SQL} as was_label`;
+  ${WAS_LABEL_SQL} as was_label, s.logo_key`;
 
 /** word_similarity threshold for `<%`, as in the dashboard search. */
 const WORD_SIMILARITY = '0.5';
@@ -336,6 +341,7 @@ function toCard(r: Row): Card {
     raisedFrom: avoid ? raisedFromOrNull(r.raised_from) : null,
     wasRaisedFromCents: avoid ? priceOrNull(r.was_raised_from) : null,
     ...wasLabelOf(r.was_label),
+    logoUrl: photoUrl(strOrNull(r.logo_key)),
   };
 }
 
@@ -392,7 +398,7 @@ export function createData(db: SqlRunner, opts: DataOptions = {}): Data {
       }
       // Only trusted members are sellers of one product (R30): a title-only match never joins.
       const sellerRows = await db.query(
-        `select sp.id, sp.rep_product_id, sp.group_key, sp.shop_id, s.name as shop, s.slug as shop_slug, sp.title, sp.brand, sp.url,
+        `select sp.id, sp.rep_product_id, sp.group_key, sp.shop_id, s.name as shop, s.slug as shop_slug, s.logo_key, sp.title, sp.brand, sp.url,
           sp.image_key, sp.category, sp.price_cents, sp.was_price_cents, sp.in_stock, sp.bf_status, sp.match_method, sp.verdict,
           sp.reason, sp.facts, pn.display_name, pn.variant_label, pn.category as name_category, pn.attrs, ${WAS_LABEL_SQL} as was_label
         from site_products sp join shops s on s.id = sp.shop_id
@@ -422,6 +428,7 @@ export function createData(db: SqlRunner, opts: DataOptions = {}): Data {
         shopId: num(r.shop_id),
         shop: String(r.shop),
         shopSlug: String(r.shop_slug),
+        logoUrl: photoUrl(strOrNull(r.logo_key)),
         title: String(r.title),
         brand: strOrNull(r.brand),
         url: strOrNull(r.url),
@@ -639,21 +646,27 @@ export function createData(db: SqlRunner, opts: DataOptions = {}): Data {
 
     async shops() {
       const rows = await db.query(
-        `select s.slug, s.name, r.grade, count(sp.id)::int as products
+        `select s.slug, s.name, s.logo_key, r.grade, count(sp.id)::int as products
         from shops s
         join site_products sp on sp.shop_id = s.id and sp.updated_at > now() - interval '2 days'
         left join shop_ratings r on r.shop_id = s.id
         where s.active and not s.site_hidden
-        group by s.id, s.slug, s.name, r.grade
+        group by s.id, s.slug, s.name, s.logo_key, r.grade
         order by lower(s.name), s.slug`,
         [],
       );
-      return rows.map((r) => ({ slug: String(r.slug), name: String(r.name), grade: (r.grade ?? null) as Grade | null, products: num(r.products) }));
+      return rows.map((r) => ({
+        slug: String(r.slug),
+        name: String(r.name),
+        grade: (r.grade ?? null) as Grade | null,
+        products: num(r.products),
+        logoUrl: photoUrl(strOrNull(r.logo_key)),
+      }));
     },
 
     async shop(slug) {
       const rows = await db.query(
-        `select s.id, s.slug, s.name, s.base_url, s.category, ${WAS_LABEL_SQL} as was_label, r.grade, r.sentence, r.judged as rating_judged, st.*
+        `select s.id, s.slug, s.name, s.base_url, s.category, s.logo_key, ${WAS_LABEL_SQL} as was_label, r.grade, r.sentence, r.judged as rating_judged, st.*
         from shops s
         left join shop_ratings r on r.shop_id = s.id
         cross join lateral (
@@ -672,7 +685,15 @@ export function createData(db: SqlRunner, opts: DataOptions = {}): Data {
       if (!r) return null;
       const judged = num(r.judged);
       return {
-        shop: { id: num(r.id), slug: String(r.slug), name: String(r.name), url: String(r.base_url), category: strOrNull(r.category), ...wasLabelOf(r.was_label) },
+        shop: {
+          id: num(r.id),
+          slug: String(r.slug),
+          name: String(r.name),
+          url: String(r.base_url),
+          category: strOrNull(r.category),
+          logoUrl: photoUrl(strOrNull(r.logo_key)),
+          ...wasLabelOf(r.was_label),
+        },
         rating: r.sentence === null || r.sentence === undefined ? null : { grade: (r.grade ?? null) as Grade | null, sentence: String(r.sentence), judged: num(r.rating_judged) },
         stats: {
           products: num(r.products),

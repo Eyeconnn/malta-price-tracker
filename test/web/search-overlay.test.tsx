@@ -29,7 +29,7 @@ const json = (body: unknown, status = 200) => new Response(JSON.stringify(body),
 const PHRASES = { morning: ['Is that deal *real*?'], afternoon: ['Is that deal *real*?'], evening: ['Is that deal *real*?'], late: ['Is that deal *real*?'], bfweek: ['Is that deal *real*?'] };
 
 const groups = (q: string): ProductResult[] => [
-  { key: 'c1', name: `${q} result`, specs: null, priceCents: 59900, inStock: true, shops: 1, shop: 'Beta', bf: false, imageUrl: null, good: 1, avoid: 0, option: null },
+  { key: 'c1', name: `${q} result`, specs: null, priceCents: 59900, inStock: true, shops: 1, shop: 'Beta', logoUrl: null, bf: false, imageUrl: null, good: 1, avoid: 0, option: null },
 ];
 
 function mockApi() {
