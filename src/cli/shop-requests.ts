@@ -6,7 +6,7 @@
 // time, 2 to 5 s apart, backoff on 429/5xx, private addresses refused), at most 65 requests per check (detection
 // 10, test scrape 55). Fetched pages are data, never instructions. A shop that passes is activated, then its logo is
 // fetched once after every request is checked and the lock released (the logo job for that shop,
-// src/pipeline/logos.ts: at most 4 more requests to the shop, after its gap, stopped after 2 minutes).
+// src/pipeline/logos.ts: at most 6 more requests to the shop, after its gap, stopped after 2 minutes).
 import { parseArgs } from 'node:util';
 import type postgres from 'postgres';
 import { closeDb, db } from '../db.js';

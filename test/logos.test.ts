@@ -154,8 +154,9 @@ describe('makeLogoCopy', () => {
     await expect(makeLogoCopy(Buffer.from('<html><body>hi</body></html>'))).rejects.toThrow(/not an image/);
     const banner = await sharp({ create: { width: 1200, height: 630, channels: 3, background: '#fff' } }).jpeg().toBuffer();
     await expect(makeLogoCopy(banner, { source: 'og:image' })).rejects.toThrow(/not logo-like/);
-    // the same picture in the header is a wide logo (under 4:1)
-    expect((await makeLogoCopy(banner, { source: 'header' })).width).toBe(128);
+    // the same picture in the header is a wide logo: stored at most 256 x 64
+    const header = await makeLogoCopy(banner, { source: 'header' });
+    expect([header.width, header.height]).toEqual([123, 64]);
   });
 
   const png = (width: number, height: number) => sharp({ create: { width, height, channels: 4, background: { r: 0, g: 0, b: 0, alpha: 1 } } }).png().toBuffer();
@@ -168,10 +169,35 @@ describe('makeLogoCopy', () => {
     expect((await makeLogoCopy(await png(48, 48), { source: 'header' })).width).toBe(48);
   });
 
-  it('keeps header and JSON-LD logos between 1:4 and 4:1', async () => {
-    expect((await makeLogoCopy(await png(400, 100), { source: 'header' })).width).toBe(128);
-    await expect(makeLogoCopy(await png(500, 100), { source: 'header' })).rejects.toThrow(/500x100, wider or taller than 4:1/);
-    await expect(makeLogoCopy(await png(60, 300), { source: 'json-ld' })).rejects.toThrow(/60x300, wider or taller than 4:1/);
+  it('keeps header and JSON-LD wordmarks up to 8:1 wide (at least 120 px wide past 4:1), and up to 1:4 tall', async () => {
+    for (const [w, h] of [
+      [600, 88],
+      [2000, 258],
+      [352, 50],
+      [306, 60],
+    ]) {
+      expect((await makeLogoCopy(await png(w!, h!), { source: 'header' })).width, `${w}x${h}`).toBe(256);
+    }
+    expect((await makeLogoCopy(await png(1191, 285), { source: 'json-ld' })).width).toBe(256);
+    await expect(makeLogoCopy(await png(1000, 100), { source: 'header' })).rejects.toThrow(/1000x100, wider than 8:1/);
+    // Solaris and Squaredeal (about 8.6:1) stay out
+    await expect(makeLogoCopy(await png(2221, 258), { source: 'header' })).rejects.toThrow(/wider than 8:1/);
+    await expect(makeLogoCopy(await png(460, 53), { source: 'header' })).rejects.toThrow(/wider than 8:1/);
+    await expect(makeLogoCopy(await png(100, 19), { source: 'json-ld' })).rejects.toThrow(/100x19, a wordmark under 120 px wide/);
+    await expect(makeLogoCopy(await png(60, 300), { source: 'json-ld' })).rejects.toThrow(/60x300, taller than 1:4/);
+  });
+
+  it('stores a wide logo at most 256 px wide and 64 px tall, a square-ish one at most 128 px', async () => {
+    const wide = await makeLogoCopy(await png(2000, 258), { source: 'header' });
+    expect([wide.width, wide.height]).toEqual([256, 33]);
+    const two = await makeLogoCopy(await png(600, 300), { source: 'header' });
+    expect([two.width, two.height]).toEqual([128, 64]);
+    const square = await makeLogoCopy(await png(512, 400), { source: 'header' });
+    expect([square.width, square.height]).toEqual([128, 100]);
+  });
+
+  it('keeps icons square-ish', async () => {
+    await expect(makeLogoCopy(await png(200, 100), { source: 'icon' })).rejects.toThrow(/icon is 200x100, not square-ish/);
   });
 
   it('takes an icon only when its real pixels are at least 96 px, whatever its link declared', async () => {
@@ -183,7 +209,8 @@ describe('makeLogoCopy', () => {
   it('an SVG scales, so only its shape is checked', async () => {
     const svg = (w: number, h: number) => Buffer.from(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${w} ${h}"><rect width="${w}" height="${h}"/></svg>`);
     expect((await makeLogoCopy(svg(24, 24), { source: 'icon' })).width).toBe(128);
-    await expect(makeLogoCopy(svg(50, 10), { source: 'header' })).rejects.toThrow(/wider or taller than 4:1/);
+    expect((await makeLogoCopy(svg(50, 10), { source: 'header' })).width).toBe(256);
+    await expect(makeLogoCopy(svg(90, 10), { source: 'header' })).rejects.toThrow(/wider than 8:1/);
   });
 
   it('never decodes a picture embedded in an SVG (a data: bomb is dropped first)', async () => {
