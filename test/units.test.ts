@@ -19,6 +19,20 @@ describe('prices', () => {
     expect(toCents('€ 1.299,00')).toBe(129900);
     expect(toCents('12,50')).toBe(1250);
     expect(toCents('')).toBeNull();
+    // the price, not stray dots from surrounding words (Telecom cards: "€45.75 (incl. VAT)" was read as 4575.00)
+    expect(toCents('€45.75 (incl. VAT)')).toBe(4575);
+    expect(toCents('\n\t €1,799.00 (incl. VAT)\n')).toBe(179900);
+    expect(toCents('From €9.99 excl. VAT')).toBe(999);
+    expect(toCents('Was: €1.299,00 inkl. MwSt.')).toBe(129900);
+    expect(toCents('€ 47.95')).toBe(4795);
+    expect(toCents('47.95 EUR')).toBe(4795);
+    expect(toCents('no price')).toBeNull();
+    expect(toCents('€19.99 20% off')).toBe(1999);
+    expect(toCents('€1 299,00')).toBe(129900);
+    expect(toCents('1\u00a0299.00 EUR')).toBe(129900);
+    expect(toCents('1 299.00 EUR')).toBe(129900);
+    expect(toCents('1 299.00 EUR')).toBe(129900);
+    expect(toCents('1 299.00 EUR')).toBe(129900);
     expect(minorToCents('3790', 2)).toBe(3790);
     expect(minorToCents('379', 1)).toBe(3790);
   });

@@ -4,7 +4,15 @@ import type { NormalisedRecord, ShopConfig } from '../types.js';
 export function toCents(value: unknown): number | null {
   if (value === null || value === undefined || value === '') return null;
   if (typeof value === 'number') return Number.isFinite(value) ? Math.round(value * 100) : null;
-  let s = String(value).replace(/[^\d.,-]/g, '');
+  // Take one number, not every digit and dot in the text: "€45.75 (incl. VAT)" must not pick up the dot in "incl.".
+  // Prefer the number right after a currency sign or code, else the first number.
+  const raw = String(value);
+  // a space only joins digits as a thousands group ("1 299,00"), never two numbers ("19.99 20% off")
+  const NUM = /\d{1,3}(?:[ \u00a0\u202f]\d{3})+(?:[.,]\d{1,2})?(?!\d)|\d(?:[\d.,]*\d)?/;
+  const afterCurrency = new RegExp(`(?:€|£|\\$|EUR|GBP|USD)\\s*(${NUM.source})`, 'i').exec(raw);
+  const token = afterCurrency?.[1] ?? NUM.exec(raw)?.[0];
+  if (!token) return null;
+  let s = token.replace(/\s/g, '');
   if (!s || !/\d/.test(s)) return null;
   const lastDot = s.lastIndexOf('.');
   const lastComma = s.lastIndexOf(',');
