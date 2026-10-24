@@ -48,6 +48,7 @@ export function sellerCard(s: SellerView): Card {
     shop: s.shop,
     shopSlug: s.shopSlug,
     logoUrl: s.logoUrl,
+    logoAspect: s.logoAspect,
     priceCents: positive(s.priceCents) ? s.priceCents : null,
     wasCents: positive(s.wasCents) ? s.wasCents : null,
     verdict: s.verdict.label,
@@ -288,7 +289,7 @@ function SellerRow({
           </div>
         )}
         <div className="flex min-w-0 flex-wrap items-center gap-2">
-          <ShopBadge name={seller.shop} logoUrl={seller.logoUrl} size="sm" decorative />
+          <ShopBadge name={seller.shop} logoUrl={seller.logoUrl} logoAspect={seller.logoAspect} size="sm" decorative />
           <h3 id={titleId} className="min-w-0 font-semibold break-words">
             <Link
               to={`/shops/${encodeURIComponent(seller.shopSlug)}`}

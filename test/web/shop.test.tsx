@@ -30,6 +30,7 @@ function card(id: number, extra: Partial<Card> = {}): Card {
     shop: 'Alpha Shop',
     shopSlug: 'alpha',
     logoUrl: null,
+    logoAspect: null,
     priceCents: 10000 + id,
     wasCents: null,
     verdict: 'good',
@@ -57,7 +58,7 @@ const change = (id: number, extra: Partial<Change> = {}): Change => ({
 
 function shopResponse(extra: Partial<ShopResponse> = {}): ShopResponse {
   return {
-    shop: { id: 1, slug: 'alpha', name: 'Alpha Shop', url: 'https://alpha.example', category: null, logoUrl: null },
+    shop: { id: 1, slug: 'alpha', name: 'Alpha Shop', url: 'https://alpha.example', category: null, logoUrl: null, logoAspect: null },
     rating: { grade: 'D', sentence: '23 of 120 judged products were Deals to Avoid (9 with a raised was price).', judged: 120 },
     avoid: [avoid(11), avoid(12)],
     good: [card(1), card(2)],
@@ -113,8 +114,8 @@ afterEach(() => {
 describe('shops list', () => {
   const shops: ShopsResponse = {
     shops: [
-      { slug: 'alpha', name: 'Alpha Shop', grade: 'B', products: 1234, logoUrl: null },
-      { slug: 'beta', name: 'Beta <b>Shop</b>', grade: null, products: 5, logoUrl: null },
+      { slug: 'alpha', name: 'Alpha Shop', grade: 'B', products: 1234, logoUrl: null, logoAspect: null },
+      { slug: 'beta', name: 'Beta <b>Shop</b>', grade: null, products: 5, logoUrl: null, logoAspect: null },
     ],
   };
 
