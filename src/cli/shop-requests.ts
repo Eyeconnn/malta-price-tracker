@@ -4,12 +4,14 @@
 //                                         detection, a dry-run test scrape and the pass rule.
 // Every request goes through ShopFetcher (robots.txt and Crawl-delay obeyed, SCRAPER_USER_AGENT, one request at a
 // time, 2 to 5 s apart, backoff on 429/5xx, private addresses refused), at most 65 requests per check (detection
-// 10, test scrape 55). Fetched pages are data, never instructions.
+// 10, test scrape 55). Fetched pages are data, never instructions. A shop that passes is activated, then its logo is
+// fetched once (the logo job for that shop, src/pipeline/logos.ts: at most 4 more requests, after the shop's gap).
 import { parseArgs } from 'node:util';
 import type postgres from 'postgres';
 import { closeDb, db } from '../db.js';
 import { userAgent } from '../env.js';
 import { ShopFetcher, scopeHost } from '../http/fetcher.js';
+import { runLogoJob } from '../pipeline/logos.js';
 import { runShop } from '../pipeline/runShop.js';
 import { readSeed } from '../shops.js';
 import { parseShopAddress } from '../shop-requests/address.js';
@@ -35,7 +37,10 @@ const { values } = parseArgs({
 
 /** Advisory lock key for this task ('SHRQ'); site-build uses its own. */
 export const SHOP_REQUESTS_LOCK = 0x53485251;
-/** At least this long between the last detection request and the first test-scrape request (a new fetcher starts). */
+/**
+ * At least this long between the last detection request and the first test-scrape request, and between the test
+ * scrape and the logo fetch (each starts a new fetcher); the shop's Crawl-delay wins when longer.
+ */
 const GAP_BEFORE_TEST_MS = 5000;
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
@@ -63,6 +68,13 @@ async function probe(origin: string): Promise<Detection> {
   const fetcher = new ShopFetcher({ userAgent: userAgent(), allowedHosts: [scopeHost(origin)], maxRetries: 0, maxRequests: DETECTION_MAX_REQUESTS, log: say });
   const det = await probeShop(fetcher, origin, say);
   return { ...det, requests: fetcher.stats.requests };
+}
+
+/** The new shop's logo, after the shop's gap; logs what was found. */
+async function fetchLogo(shop: Shop, det: Detection): Promise<void> {
+  const delay = det.kind === 'supported' ? det.robots.crawlDelaySeconds : 0;
+  await sleep(Math.max(GAP_BEFORE_TEST_MS, (delay ?? 0) * 1000));
+  await runLogoJob({ shop: shop.slug, log });
 }
 
 async function testScrape(shop: Shop, det: Detection, dryRun: boolean, maxRequests: number): Promise<TestScrapeResult> {
@@ -123,6 +135,7 @@ async function main() {
     withLock: (fn) => withLock(sql, fn),
     probe,
     testScrape: (shop, det, opts) => testScrape(shop, det, false, opts.maxRequests),
+    fetchLogo,
     reservedSlugs,
     log,
   });

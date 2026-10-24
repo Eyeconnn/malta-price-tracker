@@ -39,6 +39,11 @@ export interface ProcessDeps {
   testScrape(shop: Shop, detection: Detection, opts: { maxRequests: number }): Promise<TestScrapeResult>;
   /** slugs that belong to shops.seed.json, never given to a new shop */
   reservedSlugs: Set<string>;
+  /**
+   * Once a shop is activated: fetch its logo (the logo job for that one shop, src/pipeline/logos.ts), after the
+   * shop's request gap. Called once per activation; a failure is logged and never undoes the activation.
+   */
+  fetchLogo?(shop: Shop, detection: Detection): Promise<void>;
   log?: (msg: string) => void;
 }
 
@@ -62,6 +67,8 @@ interface Outcome {
   /** pending again: check no sooner than this many ms from now */
   retryInMs?: number;
   rateLimitedCount?: number;
+  /** the shop that is activated when this outcome is stored (status active), for its logo */
+  activates?: { shop: Shop; detection: Detection };
 }
 
 const jsonOrNull = (v: unknown) => (v === undefined || v === null ? null : JSON.stringify(v));
@@ -174,7 +181,8 @@ async function check(d: ProcessDeps, req: Row, log: (m: string) => void): Promis
   if (!verdict.pass && result.rateLimited && result.rateLimited.count > 0) {
     return rateLimited(req, `The test scrape was slowed down by the shop (${result.rateLimited.count} requests answered 429 or a server error).`, result.rateLimited.retryAfterMs, found);
   }
-  return { ...found, status: verdict.pass ? 'active' : 'failed', error: verdict.reason };
+  if (!verdict.pass) return { ...found, status: 'failed', error: verdict.reason };
+  return { ...found, status: 'active', error: verdict.reason, activates: { shop: { ...shop, active: true }, detection: det } };
 }
 
 /** Stores the outcome, and activates the shop in the same statement; a request rejected meanwhile is left as it is. */
@@ -240,6 +248,13 @@ export async function processShopRequests(d: ProcessDeps): Promise<{ ran: boolea
       const status = stored ? outcome.status : 'rejected meanwhile, left as it is';
       log(`${String(req.origin)}: ${status}${outcome.error ? `: ${outcome.error}` : ''}`);
       processed.push({ id: Number(req.id), origin: String(req.origin), status });
+      if (stored && outcome.status === 'active' && outcome.activates && d.fetchLogo) {
+        try {
+          await d.fetchLogo(outcome.activates.shop, outcome.activates.detection);
+        } catch (e) {
+          log(`${String(req.origin)}: logo not fetched: ${(e as Error).message}`);
+        }
+      }
     }
   });
   if (!ran) log('another shop-requests run holds the lock, nothing to do');
