@@ -98,7 +98,8 @@ describe('Search page results', () => {
     expect(card.className).not.toMatch(/ring|has-\[/);
     expect(card.className).toContain('min-h-11');
     fireEvent.click(link);
-    expect(where()).toBe('/product/s77');
+    // the page change waits for the old page's blocks to slide away
+    await waitFor(() => expect(where()).toBe('/product/s77'));
   });
 
   it('a product at several shops is one row: name, specs after a middle dot, "from" the lowest price at N shops', async () => {

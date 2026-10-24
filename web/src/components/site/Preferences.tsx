@@ -1,27 +1,33 @@
+import { Moon, Sun } from 'lucide-react';
 import { useId } from 'react';
-import { type Theme, useMode } from '@/components/site/ModeProvider';
+import { type Mode, type Theme, useMode } from '@/components/site/ModeProvider';
+import { SegmentedControl } from '@/components/site/SegmentedControl';
 import { Switch } from '@/components/ui/switch';
-import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group';
 import { cn } from '@/lib/utils';
 
-/** The Simple/Advanced switch. The whole row is the touch target. */
+/** The Advanced mode switch (the phone More sheet). The whole row is the touch target. */
 export function ModeSwitch({ className }: { className?: string }) {
   const { mode, setMode } = useMode();
   const id = useId();
   return (
-    <div className={cn('flex min-h-11 items-center gap-3', className)}>
-      <label htmlFor={id} className="flex min-h-11 flex-1 items-center text-sm font-medium">
+    <div className={cn('flex min-h-12 items-center gap-3', className)}>
+      <label htmlFor={id} className="flex min-h-12 flex-1 cursor-pointer items-center font-semibold">
         Advanced mode
       </label>
-      <Switch
-        id={id}
-        checked={mode === 'advanced'}
-        onCheckedChange={(on) => setMode(on ? 'advanced' : 'simple')}
-        // grow the tap area past the small visual switch to 44px
-        className="relative after:absolute after:-inset-x-2 after:-inset-y-3.5 after:content-['']"
-      />
+      <Switch id={id} checked={mode === 'advanced'} onCheckedChange={(on) => setMode(on ? 'advanced' : 'simple')} />
     </div>
   );
+}
+
+const MODES: { value: Mode; label: string }[] = [
+  { value: 'simple', label: 'Simple' },
+  { value: 'advanced', label: 'Advanced' },
+];
+
+/** Simple / Advanced in the top bar: a segmented control on the smoked bar. */
+export function ModeChoice({ className }: { className?: string }) {
+  const { mode, setMode } = useMode();
+  return <SegmentedControl bar size="bar" label="Detail" items={MODES} value={mode} onValueChange={(m) => setMode(m)} className={className} />;
 }
 
 const THEMES: { value: Theme; label: string }[] = [
@@ -30,31 +36,36 @@ const THEMES: { value: Theme; label: string }[] = [
   { value: 'dark', label: 'Dark' },
 ];
 
-/** System / Light / Dark. Arrow keys move between the options. */
+/** System / Light / Dark (the More sheet). Arrow keys move between the options. */
 export function ThemeChoice({ className }: { className?: string }) {
   const { theme, setTheme } = useMode();
   return (
-    <ToggleGroup
-      type="single"
-      role="radiogroup"
-      aria-label="Theme"
-      variant="outline"
+    <SegmentedControl
+      stretch
+      label="Theme"
+      items={THEMES}
       value={theme}
-      // pressing the chosen option again reports '', which keeps the current theme
-      onValueChange={(v) => {
-        if (v === 'system' || v === 'light' || v === 'dark') setTheme(v);
-      }}
-      className={cn('w-full', className)}
+      onValueChange={(t, e) => setTheme(t, e?.currentTarget)}
+      className={className}
+    />
+  );
+}
+
+/** One icon button in the top bar that flips between light and dark. */
+export function ThemeButton({ className }: { className?: string }) {
+  const { resolvedTheme, setTheme } = useMode();
+  const dark = resolvedTheme === 'dark';
+  return (
+    <button
+      type="button"
+      aria-label={dark ? 'Switch to light theme' : 'Switch to dark theme'}
+      onClick={(e) => setTheme(dark ? 'light' : 'dark', e.currentTarget)}
+      className={cn(
+        'inline-flex size-[42px] items-center justify-center rounded-full border border-white/14 bg-white/6 text-white outline-none hover:bg-white/10 focus-visible:ring-[3px] focus-visible:ring-white/70',
+        className,
+      )}
     >
-      {THEMES.map(({ value, label }) => (
-        <ToggleGroupItem
-          key={value}
-          value={value}
-          className="h-11 flex-1 px-4 data-[state=on]:bg-primary data-[state=on]:text-primary-foreground data-[state=on]:hover:bg-primary data-[state=on]:hover:text-primary-foreground"
-        >
-          {label}
-        </ToggleGroupItem>
-      ))}
-    </ToggleGroup>
+      {dark ? <Sun aria-hidden="true" className="size-[18px]" /> : <Moon aria-hidden="true" className="size-[18px]" />}
+    </button>
   );
 }

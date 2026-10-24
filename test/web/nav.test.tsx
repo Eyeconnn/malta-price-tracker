@@ -161,7 +161,8 @@ describe('landmarks and headings', () => {
   it('leaves room under the page for the floating bar and respects the safe area', () => {
     setViewport(375);
     renderSite();
-    expect(screen.getByRole('main').className).toMatch(/pb-\[calc\([^\]]*safe-area-inset-bottom/);
+    // the page column inside main carries the room for the bar
+    expect(screen.getByRole('main').firstElementChild!.className).toMatch(/pb-\[calc\([^\]]*safe-area-inset-bottom/);
     expect(mobileNav()!.className).toContain('safe-area-inset-bottom');
   });
 
@@ -171,7 +172,8 @@ describe('landmarks and headings', () => {
     const bar = mobileNav()!;
     const controls = [...within(bar).getAllByRole('link'), within(bar).getByRole('button', { name: 'Search' }), within(bar).getByRole('button', { name: 'More' })];
     expect(controls).toHaveLength(4);
-    for (const c of controls) expect(c.className).toContain('min-h-11');
+    // 54px tall items, the full width of their quarter of the bar
+    for (const c of controls) expect(c.className).toContain('min-h-[54px]');
   });
 });
 
@@ -275,13 +277,19 @@ describe('More sheet', () => {
 });
 
 describe('top nav controls', () => {
-  it('has the same mode switch and theme choice', () => {
+  it('has a Simple / Advanced control and a theme button', () => {
     setViewport(1024);
     renderSite();
-    const nav = mainNav()!;
-    fireEvent.click(within(nav).getByRole('switch', { name: 'Advanced mode' }));
+    const bar = mainNav()!.closest('header')!;
+    const detail = within(bar).getByRole('radiogroup', { name: 'Detail' });
+    expect(within(detail).getAllByRole('radio').map((r) => r.textContent)).toEqual(['Simple', 'Advanced']);
+    fireEvent.click(within(detail).getByRole('radio', { name: 'Advanced' }));
     expect(probe()).toBe('advanced/system');
-    fireEvent.click(within(nav).getByRole('radio', { name: 'Light' }));
-    expect(probe()).toBe('advanced/light');
+    expect(within(detail).getByRole('radio', { name: 'Advanced' }).getAttribute('aria-checked')).toBe('true');
+    // the device is light here, so the one theme button switches to dark
+    fireEvent.click(within(bar).getByRole('button', { name: 'Switch to dark theme' }));
+    expect(probe()).toBe('advanced/dark');
+    expect(document.documentElement.getAttribute('data-theme')).toBe('dark');
+    expect(within(bar).getByRole('button', { name: 'Switch to light theme' })).toBeTruthy();
   });
 });

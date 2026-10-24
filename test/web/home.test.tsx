@@ -185,7 +185,7 @@ describe('home', () => {
     renderAt('/');
     await screen.findByText('Product 1');
     expect(screen.queryByText(/below its lowest price/)).toBeNull();
-    fireEvent.click(screen.getByRole('switch', { name: 'Advanced mode' }));
+    fireEvent.click(screen.getByRole('radio', { name: 'Advanced' }));
     expect(screen.getByText('€20.00 below its lowest price in the 30 days before 1 Nov (€149.00).')).toBeTruthy();
   });
 
