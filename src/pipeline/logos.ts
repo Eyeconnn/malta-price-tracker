@@ -14,7 +14,17 @@ import sharp, { type Metadata, type Sharp } from 'sharp';
 import { documentBase } from '../adapters/html.js';
 import { db } from '../db.js';
 import { optionalEnv, userAgent } from '../env.js';
-import { DisallowedError, type FetchResult, HttpError, OutOfScopeError, type RequestBudget, ShopAbortError, ShopFetcher } from '../http/fetcher.js';
+import type postgres from 'postgres';
+import {
+  DisallowedError,
+  type FetchResult,
+  HttpError,
+  OutOfScopeError,
+  RedirectOutOfScopeError,
+  ShopAbortError,
+  ShopFetcher,
+  TooManyRedirectsError,
+} from '../http/fetcher.js';
 import { putObject, r2Configured, r2Writable } from '../r2.js';
 import { loadShops } from '../shops.js';
 import type { Shop } from '../types.js';
@@ -27,8 +37,12 @@ export const LOGO_MAX_SIDE = 128;
 export const LOGO_MAX_REQUESTS = 4;
 /** A shop whose check failed is looked at again after this many days (or at once with --retry). */
 export const LOGO_RECHECK_DAYS = 30;
-/** Icons smaller than this are favicons, not logos. */
+/** Icons smaller than this are favicons, not logos (declared in the link, and again in the real pixels). */
 const MIN_ICON_PX = 96;
+/** A logo picture's long side is at least this many pixels (an SVG scales and is exempt). */
+const MIN_LOGO_PX = 48;
+/** Header, JSON-LD and icon logos are at most this much wider than tall (or taller than wide). */
+const MAX_LOGO_RATIO = 4;
 const LOGO_MAX_BYTES = 5 * 1024 * 1024;
 const PAGE_MAX_BYTES = 10 * 1024 * 1024;
 const SVG_MAX_BYTES = 1024 * 1024;
@@ -41,8 +55,8 @@ const ERROR_MAX = 500;
 const RASTER = new Set(['jpeg', 'png', 'webp', 'gif', 'avif', 'heif', 'tiff']);
 
 export type LogoSource = 'header' | 'json-ld' | 'icon' | 'og:image';
-/** A picture that may be the logo. mustLookLikeLogo: og:image, kept only when square-ish and small once fetched. */
-export type LogoCandidate = { source: LogoSource; url: string; mustLookLikeLogo?: true };
+/** A picture that may be the logo; its source sets the size checks it must pass once decoded (makeLogoCopy). */
+export type LogoCandidate = { source: LogoSource; url: string };
 
 const SOURCE_NAMES: Record<LogoSource, string> = {
   header: 'the header image',
@@ -210,7 +224,7 @@ export function pickLogoCandidates(html: string, pageUrl: string): { candidates:
     const w = Number(meta('og:image:width'));
     const h = Number(meta('og:image:height'));
     if (w > 0 && h > 0 && !looksLikeLogo(w, h)) notes.push(`og:image is ${w}x${h}, not logo-like`);
-    else out.push({ source: 'og:image', url: og, mustLookLikeLogo: true });
+    else out.push({ source: 'og:image', url: og });
   }
   const seen = new Set<string>();
   return { candidates: out.filter((c) => !seen.has(c.url) && seen.add(c.url)), notes };
@@ -223,27 +237,75 @@ export function isChallengePage(html: string): boolean {
   return /_cf_chl_opt|cf-browser-verification|incapsula incident|sucuri website firewall/i.test(html);
 }
 
-const RASTER_DATA_URI = /^data:image\/(png|jpe?g|gif|webp);base64,/i;
+/** SVG elements that run code or pull in other documents: dropped with their content, under any namespace prefix. */
+const SVG_DROP = new Set(['script', 'foreignobject', 'iframe', 'object', 'embed', 'audio', 'video', 'handler', 'listener']);
+/** The local part of an XML name ("xlink:href" gives "href"), lower case. */
+const localName = (name: string) => name.slice(name.lastIndexOf(':') + 1).toLowerCase();
+
+/** CSS without @import and with every url() other than url(#id) made none; null when it uses escapes (which could hide either). */
+function cleanCss(css: string): string | null {
+  if (css.includes('\\')) return null;
+  return css.replace(/@import[^;]*;?/gi, '').replace(/url\(\s*(['"]?)([^)]*?)\1\s*\)/gi, (all, _q, v: string) => (v.trim().startsWith('#') ? all : 'none'));
+}
+
+type XmlNode = { type: string; name?: string; attribs?: Record<string, string>; children?: XmlNode[] };
 
 /**
- * An SVG with everything that could reach outside it removed, before librsvg sees it (which already refuses external
- * files for an SVG read from memory): the doctype and entities, scripts, foreignObject and embedded documents, event
- * handlers, every href that is not a fragment (#id) or a raster data: image, url() other than url(#id), and @import.
+ * An SVG parsed as XML and rebuilt from its root <svg> element with only what draws it: no doctype, entities,
+ * comments or processing instructions; no script, foreignObject or embedded documents (under any prefix); no event
+ * handlers; no href under any prefix that does not start with "#" (so no external file and no data: picture); and no
+ * url() other than url(#id) or @import in styles. librsvg already refuses external files for an SVG read from memory;
+ * this does not rely on it. Empty when the document is not an SVG.
  */
 export function sanitizeSvg(text: string): string {
-  return text
-    .replace(/<!DOCTYPE[^[>]*(\[[\s\S]*?\])?\s*>/gi, '')
-    .replace(/<!ENTITY[\s\S]*?>/gi, '')
-    .replace(/<\?xml-stylesheet[\s\S]*?\?>/gi, '')
-    .replace(/<(script|foreignObject|iframe|object|embed|audio|video)\b[\s\S]*?<\/\1\s*>/gi, '')
-    .replace(/<(script|foreignObject|iframe|object|embed|audio|video)\b[^>]*\/?>/gi, '')
-    .replace(/\son[a-z]+\s*=\s*("[^"]*"|'[^']*'|[^\s>]+)/gi, '')
-    .replace(/\s(xlink:href|href)\s*=\s*("([^"]*)"|'([^']*)')/gi, (all, _attr, _q, dq: string | undefined, sq: string | undefined) => {
-      const v = (dq ?? sq ?? '').trim();
-      return v.startsWith('#') || RASTER_DATA_URI.test(v) ? all : '';
-    })
-    .replace(/@import[^;]*;?/gi, '')
-    .replace(/url\(\s*(['"]?)\s*([^)'"]*)\1\s*\)/gi, (all, _q, v: string) => (v.trim().startsWith('#') ? all : 'none'));
+  let $: cheerio.CheerioAPI;
+  try {
+    $ = cheerio.load(text, { xml: true });
+  } catch {
+    return '';
+  }
+  const root = $.root().children().toArray().find((el) => localName((el as XmlNode).name ?? '') === 'svg') as XmlNode | undefined;
+  if (!root) return '';
+  const isElement = (n: XmlNode) => n.type === 'tag' || n.type === 'script' || n.type === 'style';
+  const cleanAttrs = (el: XmlNode) => {
+    for (const [name, value] of Object.entries(el.attribs ?? {})) {
+      const local = localName(name);
+      const drop =
+        local.startsWith('on') || name.toLowerCase() === 'xml:base' || (local === 'href' && !value.trim().startsWith('#')) || /^\s*(javascript|data):/i.test(value);
+      if (drop) {
+        $(el as never).removeAttr(name);
+        continue;
+      }
+      if (/url\s*\(|@import|\\/i.test(value)) {
+        const css = cleanCss(value);
+        if (css === null) $(el as never).removeAttr(name);
+        else $(el as never).attr(name, css);
+      }
+    }
+  };
+  const clean = (el: XmlNode) => {
+    for (const child of [...(el.children ?? [])]) {
+      if (!isElement(child)) {
+        // text stays; comments, directives, processing instructions and CDATA go
+        if (child.type !== 'text') $(child as never).remove();
+        continue;
+      }
+      const name = localName(child.name ?? '');
+      if (SVG_DROP.has(name)) {
+        $(child as never).remove();
+        continue;
+      }
+      cleanAttrs(child);
+      if (name === 'style') {
+        $(child as never).text(cleanCss($(child as never).text()) ?? '');
+        continue;
+      }
+      clean(child);
+    }
+  };
+  cleanAttrs(root);
+  clean(root);
+  return $.xml(root as never);
 }
 
 /** True when the bytes are SVG text (an XML declaration, comments or a doctype may come first). */
@@ -261,12 +323,31 @@ const webp = (s: Sharp) =>
     .toBuffer({ resolveWithObject: true })
     .then(({ data, info }): LogoCopy => ({ body: data, width: info.width, height: info.height, bytes: data.length, contentType: 'image/webp' }));
 
+/** The decoded picture must look like a logo from its source: why not, or null when it does. */
+function sizeProblem(source: LogoSource | undefined, width: number, height: number, svg: boolean): string | null {
+  const long = Math.max(width, height);
+  const short = Math.min(width, height);
+  const size = `${width}x${height}`;
+  if (long <= 1) return `picture is ${size}`;
+  if (source === 'icon' && !svg && short < MIN_ICON_PX) return `icon is ${size}, too small (under ${MIN_ICON_PX} px)`;
+  // an SVG scales, so only its shape counts
+  if (!svg && long < MIN_LOGO_PX) return `picture is ${size}, too small`;
+  if (source === 'og:image') {
+    const ok = svg ? long / short <= 1.5 : looksLikeLogo(width, height);
+    return ok ? null : `picture is ${size}, not logo-like`;
+  }
+  if (source && long / short > MAX_LOGO_RATIO) return `picture is ${size}, wider or taller than ${MAX_LOGO_RATIO}:1`;
+  return null;
+}
+
 /**
  * Our stored copy of a logo: WebP, at most 128 px on its long side, transparency kept, no metadata. An SVG is cleaned
  * (sanitizeSvg) and drawn by sharp from memory, with a pixel limit and a timeout. A raster picture keeps its first
- * frame and is never enlarged. mustLookLikeLogo (og:image): refused unless square-ish and small.
+ * frame and is never enlarged. The decoded size is checked against the source (sizeProblem): never 1x1 or under
+ * 48 px on the long side; header, JSON-LD and icon pictures between 1:4 and 4:1; an icon at least 96 px whatever its
+ * link declared; og:image square-ish and small.
  */
-export async function makeLogoCopy(original: Buffer, opts: { mustLookLikeLogo?: boolean } = {}): Promise<LogoCopy> {
+export async function makeLogoCopy(original: Buffer, opts: { source?: LogoSource } = {}): Promise<LogoCopy> {
   if (original.length > LOGO_MAX_BYTES) throw new Error('picture over 5 MB');
   const svg = isSvgText(original);
   if (svg && original.length > SVG_MAX_BYTES) throw new Error('SVG over 1 MB');
@@ -280,11 +361,8 @@ export async function makeLogoCopy(original: Buffer, opts: { mustLookLikeLogo?: 
   const width = meta.width ?? 0;
   const height = (svg ? meta.height : (meta.pageHeight ?? meta.height)) ?? 0;
   if (!width || !height || (svg ? meta.format !== 'svg' : !meta.format || !RASTER.has(meta.format))) throw new Error('not an image');
-  if (opts.mustLookLikeLogo) {
-    // an SVG's own size says little; its shape still counts
-    const ok = svg ? Math.max(width, height) / Math.min(width, height) <= 1.5 : looksLikeLogo(width, height);
-    if (!ok) throw new Error(`picture is ${width}x${height}, not logo-like`);
-  }
+  const problem = sizeProblem(opts.source, width, height, svg);
+  if (problem) throw new Error(problem);
   if (svg) {
     const density = Math.min(2400, Math.max(1, (72 * SVG_RENDER_SIDE) / Math.max(width, height)));
     return webp(sharp(input, { density, limitInputPixels: MAX_INPUT_PIXELS }).resize({ width: LOGO_MAX_SIDE, height: LOGO_MAX_SIDE, fit: 'inside' }));
@@ -303,15 +381,27 @@ export type LogoShop = Pick<Shop, 'id' | 'slug' | 'name' | 'base_url' | 'config'
 
 /** passedOver: the better candidates that did not work, and why */
 type Found = { ok: true; candidate: LogoCandidate; copy: LogoCopy; sha256: string; passedOver: string[] };
-type Missing = { ok: false; error: string };
+/** transient: rate limiting, server trouble, a timeout or the deadline; not recorded, so the next run looks again */
+type Missing = { ok: false; error: string; transient: boolean };
 
-/** A refusal (401/403), rate limiting (429) or server trouble (5xx), or the request cap: nothing more is tried. */
-const stopsTheShop = (e: unknown) =>
-  e instanceof ShopAbortError || (e instanceof HttpError && (e.status === 401 || e.status === 403 || e.status === 429 || e.status >= 500));
+/** robots.txt answered with server errors (so everything is disallowed for now): try again on a later run. */
+export class LogoRetryLaterError extends Error {}
+
+/** 429, 5xx, timeouts, network trouble, the deadline: worth another try on a later run, so nothing is recorded. */
+export function isTransient(e: unknown): boolean {
+  if (e instanceof LogoRetryLaterError) return true;
+  if (e instanceof HttpError) return e.status === 408 || e.status === 425 || e.status === 429 || e.status >= 500;
+  if (e instanceof ShopAbortError) return /deadline/.test(e.message);
+  if (e instanceof DisallowedError || e instanceof OutOfScopeError || e instanceof RedirectOutOfScopeError || e instanceof TooManyRedirectsError) return false;
+  return /timeout|timed out|ECONNRESET|ECONNREFUSED|ETIMEDOUT|ENOTFOUND|EAI_AGAIN|socket|fetch failed|network|terminated/i.test((e as Error)?.message ?? '');
+}
+
+/** A refusal (401/403), anything transient, or the request cap: nothing more is tried for the shop. */
+const stopsTheShop = (e: unknown) => isTransient(e) || e instanceof ShopAbortError || (e instanceof HttpError && (e.status === 401 || e.status === 403));
 
 function why(e: unknown): string {
   if (e instanceof DisallowedError) return `robots.txt disallows ${e.url}`;
-  if (e instanceof OutOfScopeError) return `${e.url} is outside the shop's site`;
+  if (e instanceof OutOfScopeError || e instanceof RedirectOutOfScopeError) return `${e.url} is outside the shop's site and its picture hosts`;
   if (e instanceof HttpError && (e.status === 401 || e.status === 403)) return `HTTP ${e.status} (refused; no logo, the initials stay)`;
   if (e instanceof HttpError) return `HTTP ${e.status}`;
   return (e as Error).message;
@@ -323,15 +413,16 @@ export async function findShopLogo(shop: LogoShop, get: LogoGet): Promise<Found 
   try {
     page = await get(shop.base_url, 'page');
   } catch (e) {
-    return { ok: false, error: `home page: ${why(e)}` };
+    return { ok: false, error: `home page: ${why(e)}`, transient: isTransient(e) };
   }
-  if (page.status !== 200) return { ok: false, error: `home page: HTTP ${page.status}` };
+  if (page.status !== 200) return { ok: false, error: `home page: HTTP ${page.status}`, transient: false };
   const html = page.text();
-  if (isChallengePage(html)) return { ok: false, error: 'home page is a bot check (no logo; nothing is tried around it)' };
+  if (isChallengePage(html)) return { ok: false, error: 'home page is a bot check (no logo; nothing is tried around it)', transient: false };
   const { candidates, notes } = pickLogoCandidates(html, page.url);
   const tail = notes.length ? `; ${notes.join('; ')}` : '';
-  if (!candidates.length) return { ok: false, error: `no logo found on the home page${tail}` };
+  if (!candidates.length) return { ok: false, error: `no logo found on the home page${tail}`, transient: false };
   const tried: string[] = [];
+  let transient = false;
   for (const c of candidates) {
     try {
       const res = await get(c.url, 'image');
@@ -339,14 +430,17 @@ export async function findShopLogo(shop: LogoShop, get: LogoGet): Promise<Found 
         tried.push(`${c.source} ${c.url}: HTTP ${res.status}`);
         continue;
       }
-      const copy = await makeLogoCopy(res.body, { mustLookLikeLogo: c.mustLookLikeLogo });
+      const copy = await makeLogoCopy(res.body, { source: c.source });
       return { ok: true, candidate: c, copy, sha256: createHash('sha256').update(res.body).digest('hex'), passedOver: tried };
     } catch (e) {
       tried.push(`${c.source} ${c.url}: ${why(e)}`);
-      if (stopsTheShop(e)) break;
+      if (stopsTheShop(e)) {
+        transient = isTransient(e);
+        break;
+      }
     }
   }
-  return { ok: false, error: `no usable logo (${tried.join('; ')})${tail}` };
+  return { ok: false, error: `no usable logo (${tried.join('; ')})${tail}`, transient };
 }
 
 /** $n-parameter SQL as the database owner (postgres.js in production, PGlite in tests). */
@@ -354,12 +448,13 @@ export interface LogoDb {
   query<T = Record<string, unknown>>(text: string, params?: unknown[]): Promise<T[]>;
 }
 
-export type LogoJobOptions = { shop?: string; retry?: boolean; dryRun?: boolean };
+/** signal: a hard stop (the activation's deadline); once it fires nothing more is fetched, stored or recorded */
+export type LogoJobOptions = { shop?: string; retry?: boolean; dryRun?: boolean; signal?: AbortSignal };
 
 export type LogoResult =
   | { slug: string; status: 'found'; source: LogoSource; url: string; key: string; width: number; height: number; bytes: number }
   | { slug: string; status: 'none'; error: string }
-  /** not recorded (our side: R2 or the storage cap), so the shop is looked at again next time */
+  /** not recorded (rate limiting or a timeout, R2, the storage cap, the deadline, another run), so looked at again later */
   | { slug: string; status: 'skipped'; reason: string };
 
 export interface LogoJobDeps {
@@ -371,12 +466,22 @@ export interface LogoJobDeps {
   getFor(shop: LogoShop): LogoGet;
   /** stores one object in R2; needed unless dryRun */
   put?(key: string, body: Buffer, contentType: string): Promise<void>;
+  /** checked once, only when there is a shop to look at (R2 writable in production); false stops the job */
+  ready?(): Promise<boolean>;
   /** true when R2 is at the storage cap (images.ts PHOTO_STORAGE_CAP_BYTES) */
   storageFull?(): Promise<boolean>;
+  /**
+   * runs fn holding the shop's logo lock (a Postgres advisory lock in production), so the nightly job and the
+   * activation never fetch the same shop at once; false when another run holds it (fn not run)
+   */
+  withShopLock?(shopId: number, fn: () => Promise<void>): Promise<boolean>;
   log?(msg: string): void;
 }
 
 const SHOP_COLUMNS = 'id, slug, name, base_url, config';
+/** The shops that need a look: no logo, and never checked, or failed over 30 days ago, or any check with retry ($1). */
+const DUE = `logo_key is null and ($1::boolean or logo_checked_at is null
+  or (logo_error is not null and logo_checked_at < now() - make_interval(days => ${LOGO_RECHECK_DAYS})))`;
 
 /**
  * The shops the job looks at: no logo yet, and never checked, or checked over 30 days ago with an error, or any
@@ -384,15 +489,15 @@ const SHOP_COLUMNS = 'id, slug, name, base_url, config';
  */
 export async function logoShops(q: LogoDb, opts: LogoJobOptions): Promise<LogoShop[]> {
   const rows = await q.query<LogoShop & { config: unknown }>(
-    `select ${SHOP_COLUMNS} from shops
-     where logo_key is null
-       and (($1::text is null and active) or slug = $1::text)
-       and ($2::boolean or logo_checked_at is null
-            or (logo_error is not null and logo_checked_at < now() - make_interval(days => $3::int)))
-     order by slug`,
-    [opts.shop ?? null, Boolean(opts.retry), LOGO_RECHECK_DAYS],
+    `select ${SHOP_COLUMNS} from shops where ${DUE} and (($2::text is null and active) or slug = $2::text) order by slug`,
+    [Boolean(opts.retry), opts.shop ?? null],
   );
   return rows.map((r) => ({ ...r, id: Number(r.id), config: (typeof r.config === 'string' ? JSON.parse(r.config) : (r.config ?? {})) as Shop['config'] }));
+}
+
+/** Whether the shop still needs a look (another run may have just done it). */
+async function stillDue(q: LogoDb, shopId: number, opts: LogoJobOptions): Promise<boolean> {
+  return (await q.query(`select 1 from shops where ${DUE} and id = $2`, [Boolean(opts.retry), shopId])).length > 0;
 }
 
 /** Why a named shop is not looked at: unknown, has a logo, or checked recently. */
@@ -406,9 +511,11 @@ async function whyNot(q: LogoDb, slug: string): Promise<string> {
 const clip = (s: string) => (s.length > ERROR_MAX ? `${s.slice(0, ERROR_MAX - 3)}...` : s);
 
 /**
- * The logo job: for each shop (logoShops, or deps.shops), one at a time, find the logo and store our copy, then set
- * logo_key and logo_checked_at; without a logo set logo_error and logo_checked_at. A dry run fetches and reports but
- * stores and records nothing. An R2 failure or the storage cap stops the job without recording anything.
+ * The logo job: for each shop (logoShops, or deps.shops), one at a time and under the shop's logo lock, find the logo
+ * and store our copy, then set logo_key and logo_checked_at; with no logo (none found, 401/403, a bot check, nothing
+ * usable) set logo_error and logo_checked_at. Rate limiting, server errors, timeouts and the deadline record nothing,
+ * so the next run looks again. A dry run fetches and reports but stores and records nothing. An R2 failure or the
+ * storage cap stops the job without recording anything.
  */
 export async function fetchLogos(opts: LogoJobOptions, deps: LogoJobDeps): Promise<LogoResult[]> {
   const log = deps.log ?? ((m: string) => console.log(m));
@@ -418,19 +525,33 @@ export async function fetchLogos(opts: LogoJobOptions, deps: LogoJobDeps): Promi
     log(opts.shop && q ? `logos: nothing to do (${await whyNot(q, opts.shop)})` : 'logos: nothing to do');
     return [];
   }
+  if (deps.ready && !(await deps.ready())) return [];
+  const stopped = () => opts.signal?.aborted === true;
   const results: LogoResult[] = [];
-  for (const shop of shops) {
+  let stop = false;
+
+  /** One shop, under its lock. */
+  async function one(shop: LogoShop): Promise<LogoResult> {
+    if (q && !opts.dryRun && !(await stillDue(q, shop.id, opts))) return { slug: shop.slug, status: 'skipped', reason: 'done by another run' };
     if (!opts.dryRun && deps.storageFull && (await deps.storageFull())) {
+      stop = true;
       log(`[${shop.slug}] logo skipped: R2 is at the storage cap (${PHOTO_STORAGE_CAP_BYTES / 1e9} GB); stopping`);
-      results.push({ slug: shop.slug, status: 'skipped', reason: 'storage cap' });
-      break;
+      return { slug: shop.slug, status: 'skipped', reason: 'storage cap' };
     }
     const found = await findShopLogo(shop, deps.getFor(shop));
+    if (stopped()) {
+      stop = true;
+      log(`[${shop.slug}] logo stopped at the deadline (nothing recorded)`);
+      return { slug: shop.slug, status: 'skipped', reason: 'deadline' };
+    }
     if (!found.ok) {
+      if (found.transient) {
+        log(`[${shop.slug}] no logo this time, looked at again next run: ${found.error}`);
+        return { slug: shop.slug, status: 'skipped', reason: found.error };
+      }
       log(`[${shop.slug}] no logo: ${found.error}`);
       if (!opts.dryRun && q) await q.query('update shops set logo_checked_at = now(), logo_error = $2 where id = $1', [shop.id, clip(found.error)]);
-      results.push({ slug: shop.slug, status: 'none', error: found.error });
-      continue;
+      return { slug: shop.slug, status: 'none', error: found.error };
     }
     const { candidate, copy } = found;
     let key = photoKey(found.sha256);
@@ -444,78 +565,142 @@ export async function fetchLogos(opts: LogoJobOptions, deps: LogoJobDeps): Promi
         if (photo && isPhotoKey(photo.r2_key)) key = photo.r2_key;
         else await deps.put(key, copy.body, copy.contentType);
       } catch (e) {
+        stop = true;
         log(`[${shop.slug}] R2 upload failed, stopping logos for this run: ${(e as Error).message}`);
-        results.push({ slug: shop.slug, status: 'skipped', reason: 'R2 upload failed' });
-        break;
+        return { slug: shop.slug, status: 'skipped', reason: 'R2 upload failed' };
+      }
+      if (stopped()) {
+        stop = true;
+        return { slug: shop.slug, status: 'skipped', reason: 'deadline' };
       }
       await q.query('update shops set logo_key = $2, logo_checked_at = now(), logo_error = null where id = $1', [shop.id, key]);
     }
     const passed = found.passedOver.length ? ` (passed over: ${found.passedOver.join('; ')})` : '';
     log(`[${shop.slug}] logo from ${what}${opts.dryRun ? ', dry run: not stored' : ` stored as ${key}`}${passed}`);
-    results.push({ slug: shop.slug, status: 'found', source: candidate.source, url: candidate.url, key, width: copy.width, height: copy.height, bytes: copy.bytes });
+    return { slug: shop.slug, status: 'found', source: candidate.source, url: candidate.url, key, width: copy.width, height: copy.height, bytes: copy.bytes };
+  }
+
+  for (const shop of shops) {
+    if (stopped()) break;
+    let result: LogoResult | undefined;
+    const held = deps.withShopLock && !opts.dryRun ? await deps.withShopLock(shop.id, async () => void (result = await one(shop))) : ((result = await one(shop)), true);
+    if (!held || !result) {
+      log(`[${shop.slug}] logo skipped: another logo run is fetching this shop`);
+      results.push({ slug: shop.slug, status: 'skipped', reason: 'locked by another run' });
+      continue;
+    }
+    results.push(result);
+    if (stop) break;
   }
   return results;
 }
 
+/** Advisory lock key of the logo job ('LOGO'), with the shop id as the second key. */
+export const LOGO_LOCK = 0x4c4f474f;
+/** The logo job allows one redirect hop per request (home page, picture, robots.txt). */
+export const LOGO_MAX_REDIRECTS = 1;
+/** Requests to one image CDN host for a shop's logo: its robots.txt and the picture. */
+const CDN_MAX_REQUESTS = 2;
+
 /**
- * The production getter of one shop: the shop's own ShopFetcher for its pages and pictures, and one fetcher per
- * image CDN host (images.ts IMAGE_CDNS or the shop's config image_hosts) for a logo stored there. All of them share
- * one budget of LOGO_MAX_REQUESTS and keep at least the default 2 to 5 s between requests (a shop's longer gap and
- * robots Crawl-delay win). One retry, after a backoff, on 429, 5xx or a timeout.
+ * The production getter of one shop: the shop's own ShopFetcher for its pages and pictures (LOGO_MAX_REQUESTS to the
+ * shop, robots.txt, retries and redirect hops included), and for a logo on an image CDN host (images.ts IMAGE_CDNS or
+ * the shop's config image_hosts), named in the page or reached by the shop's one redirect, a fetcher of that host
+ * with its own two requests (robots.txt and the picture). At least the default 2 to 5 s between requests (a shop's
+ * longer gap and robots Crawl-delay win), at most one redirect hop, one retry after a backoff on 429, 5xx or a
+ * timeout. robots.txt answering server errors is LogoRetryLaterError. signal: a hard stop for every wait and request.
  */
-export function politeLogoGet(shop: LogoShop, log: (m: string) => void = () => {}): LogoGet {
-  const budget: RequestBudget = { max: LOGO_MAX_REQUESTS, used: 0 };
+export function politeLogoGet(shop: LogoShop, log: (m: string) => void = () => {}, signal?: AbortSignal): LogoGet {
   const common = {
-    budget,
     maxRetries: 1,
+    maxRedirects: LOGO_MAX_REDIRECTS,
     minDelayMs: Math.max(2000, Number(shop.config.min_delay_ms ?? 0)),
     maxDelayMs: Math.max(5000, Number(shop.config.max_delay_ms ?? 0)),
+    signal,
   };
-  const own = ShopFetcher.fromConfig(shop.config, userAgent(), shop.base_url, log, { ...common, maxBodyBytes: PAGE_MAX_BYTES });
+  const own = ShopFetcher.fromConfig(shop.config, userAgent(), shop.base_url, log, {
+    ...common,
+    budget: { max: LOGO_MAX_REQUESTS, used: 0 },
+    maxBodyBytes: PAGE_MAX_BYTES,
+  });
   const hosts = [...IMAGE_CDNS, ...((shop.config.image_hosts as string[] | undefined) ?? [])];
+  const cdnHost = (url: string) => {
+    const host = new URL(url).hostname.toLowerCase();
+    return hosts.some((h) => host === h || host.endsWith(`.${h}`)) ? host : null;
+  };
   const cdns = new Map<string, ShopFetcher>();
   const image = { accept: 'image/avif,image/webp,image/svg+xml,image/png,image/*;q=0.8', maxBodyBytes: LOGO_MAX_BYTES };
-  return (url, kind) => {
-    if (kind === 'page') return own.get(url, { accept: 'text/html,application/xhtml+xml;q=0.9,*/*;q=0.8' });
-    if (own.inScope(url)) return own.get(url, image);
-    const host = new URL(url).hostname.toLowerCase();
-    if (!hosts.some((h) => host === h || host.endsWith(`.${h}`))) return Promise.reject(new Error(`picture host ${host} is not in the allowlist`));
+  /** robots.txt that failed with server errors refuses everything for now: a later run tries again */
+  const retryLater = async (f: ShopFetcher, url: string, e: unknown): Promise<never> => {
+    if (e instanceof DisallowedError && (await f.robotsFor(url)).status === 'unreachable') throw new LogoRetryLaterError(`robots.txt of ${new URL(url).origin} is unreachable (server errors)`);
+    throw e;
+  };
+  const fromCdn = (url: string, hops: number) => {
+    const host = cdnHost(url);
+    if (!host) return Promise.reject(new Error(`picture host ${new URL(url).hostname} is not in the allowlist`));
     let f = cdns.get(host);
     if (!f) {
-      f = new ShopFetcher({ userAgent: userAgent(), allowedHosts: [host], ...common, maxBodyBytes: LOGO_MAX_BYTES, log });
+      f = new ShopFetcher({ userAgent: userAgent(), allowedHosts: [host], ...common, budget: { max: CDN_MAX_REQUESTS, used: 0 }, maxBodyBytes: LOGO_MAX_BYTES, log });
       cdns.set(host, f);
     }
-    return f.get(url, image);
+    const cdn = f;
+    return cdn.get(url, { ...image, maxRedirects: hops }).catch((e: unknown) => retryLater(cdn, url, e));
+  };
+  return (url, kind) => {
+    if (kind === 'page') return own.get(url, { accept: 'text/html,application/xhtml+xml;q=0.9,*/*;q=0.8' }).catch((e: unknown) => retryLater(own, url, e));
+    if (!own.inScope(url)) return fromCdn(url, LOGO_MAX_REDIRECTS);
+    // a shop picture that redirects to an allowlisted CDN: that redirect was the one hop, the CDN gets none
+    return own.get(url, image).catch((e: unknown) => (e instanceof RedirectOutOfScopeError && cdnHost(e.url) ? fromCdn(e.url, 0) : retryLater(own, url, e)));
+  };
+}
+
+/** Holds the shop's logo lock for fn: a transaction-level advisory lock (safe behind a connection pooler). */
+function shopLock(sql: postgres.Sql) {
+  return async (shopId: number, fn: () => Promise<void>): Promise<boolean> => {
+    let ran = false;
+    await sql.begin(async (tx) => {
+      await tx`set local idle_in_transaction_session_timeout = 0`;
+      const [{ ok }] = await tx<{ ok: boolean }[]>`select pg_try_advisory_xact_lock(${LOGO_LOCK}::int, ${shopId}::int) as ok`;
+      if (!ok) return;
+      ran = true;
+      await fn();
+    });
+    return ran;
   };
 }
 
 /**
  * The job with production wiring (pnpm fetch-logos, and the shop-requests activation for one new shop): the
- * database, R2 and politeLogoGet. Without R2 (or with read-only R2) nothing is fetched or recorded, so the shops are
- * looked at on a later run. A dry run without DATABASE_URL takes the shops from shops.seed.json.
+ * database, R2, the per-shop lock and politeLogoGet. R2 is checked only when a shop needs a look; without R2 (or with
+ * read-only R2) nothing is fetched or recorded, so the shops are looked at on a later run. A dry run without
+ * DATABASE_URL takes the shops from shops.seed.json.
  */
 export async function runLogoJob(opts: LogoJobOptions & { log?: (m: string) => void }): Promise<LogoResult[]> {
   const log = opts.log ?? ((m: string) => console.log(m));
   const hasDb = Boolean(optionalEnv('DATABASE_URL'));
   if (!hasDb && !opts.dryRun) throw new Error('DATABASE_URL is not set (a dry run works without it)');
-  if (!opts.dryRun && (!r2Configured() || !(await r2Writable()))) {
-    log('logos skipped: R2 is not configured or not writable (nothing recorded, the shops are looked at next time)');
-    return [];
-  }
   const sql = hasDb ? db() : null;
   const shops = sql ? undefined : await loadShops({ shop: opts.shop }, true);
-  log(`logos${opts.dryRun ? ' (dry run)' : ''} as ${userAgent()}`);
   return fetchLogos(opts, {
     db: sql ? { query: (text, params = []) => sql.unsafe(text, params as never[]) as never } : null,
     shops,
-    getFor: (s) => politeLogoGet(s, (m) => log(`[${s.slug}] ${m}`)),
+    getFor: (s) => politeLogoGet(s, (m) => log(`[${s.slug}] ${m}`), opts.signal),
     put: putObject,
+    ready: async () => {
+      if (!opts.dryRun && (!r2Configured() || !(await r2Writable()))) {
+        log('logos skipped: R2 is not configured or not writable (nothing recorded, the shops are looked at next time)');
+        return false;
+      }
+      log(`logos${opts.dryRun ? ' (dry run)' : ''} as ${userAgent()}`);
+      return true;
+    },
     storageFull: sql
       ? async () => {
           const u = await photoStorage(sql);
           return u.bytes + u.snapshotBytes + 100e6 >= PHOTO_STORAGE_CAP_BYTES;
         }
       : undefined,
+    withShopLock: sql ? shopLock(sql) : undefined,
     log,
   });
 }

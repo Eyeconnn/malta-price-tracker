@@ -184,4 +184,91 @@ describe('fetchLogos', () => {
     expect(out).toEqual([{ slug: 'toybox', status: 'skipped', reason: 'storage cap' }]);
     expect(requests).toEqual([]);
   });
+
+  it('rate limiting, server errors and timeouts record nothing, so the next run looks again', async () => {
+    await pg.exec(`insert into shops (slug, name, base_url, adapter, active) values
+      ('busy', 'Busy', 'https://busy.example.mt', 'woo', true),
+      ('slowpic', 'Slow Pic', 'https://slowpic.example.mt', 'woo', true),
+      ('gone404', 'Gone', 'https://gone404.example.mt', 'woo', true)`);
+    routes['https://busy.example.mt'] = new HttpError('https://busy.example.mt', 503);
+    routes['https://slowpic.example.mt'] = { body: await fixture('icons.html') };
+    routes['https://slowpic.example.mt/icon-192.png'] = new HttpError('https://slowpic.example.mt/icon-192.png', 429);
+    routes['https://gone404.example.mt'] = new Error('timeout after 60000ms for https://gone404.example.mt');
+    const out = (await fetchLogos({}, deps())).filter((r) => ['busy', 'slowpic', 'gone404'].includes(r.slug));
+    expect(out).toEqual([
+      { slug: 'busy', status: 'skipped', reason: 'home page: HTTP 503' },
+      { slug: 'gone404', status: 'skipped', reason: expect.stringMatching(/timeout/) },
+      { slug: 'slowpic', status: 'skipped', reason: expect.stringMatching(/icon-192\.png: HTTP 429/) },
+    ]);
+    // after the 429 nothing else is tried
+    expect(requests.filter((u) => u.includes('slowpic'))).toEqual(['https://slowpic.example.mt', 'https://slowpic.example.mt/icon-192.png']);
+    for (const slug of ['busy', 'slowpic', 'gone404']) expect(await shopRow(slug), slug).toEqual({ logo_key: null, logo_checked_at: null, logo_error: null });
+    await pg.exec(`update shops set active = false where slug in ('busy', 'slowpic', 'gone404')`);
+  });
+
+  it('fetches a shop only under its lock, and not at all when another run holds it or has just done it', async () => {
+    await pg.exec(`update shops set logo_key = null, logo_checked_at = null, logo_error = null where slug in ('toybox', 'gadget')`);
+    const locked: number[] = [];
+    let readyCalls = 0;
+    const out = await fetchLogos(
+      {},
+      deps({
+        ready: async () => {
+          readyCalls++;
+          return true;
+        },
+        withShopLock: async (id, fn) => {
+          locked.push(id);
+          const [row] = (await pg.query<{ slug: string }>('select slug from shops where id = $1', [id])).rows;
+          // another run holds gadget; toybox was just done by another run
+          if (row!.slug === 'gadget') return false;
+          await pg.query(`update shops set logo_key = 'img/${'f'.repeat(64)}.webp' where id = $1`, [id]);
+          await fn();
+          return true;
+        },
+      }),
+    );
+    expect(out).toEqual([
+      { slug: 'gadget', status: 'skipped', reason: 'locked by another run' },
+      { slug: 'toybox', status: 'skipped', reason: 'done by another run' },
+    ]);
+    expect(locked).toHaveLength(2);
+    expect(readyCalls).toBe(1);
+    expect(requests).toEqual([]);
+    expect((await shopRow('gadget')).logo_checked_at).toBeNull();
+  });
+
+  it('checks R2 only when a shop needs a look, and fetches nothing when it is not ready', async () => {
+    let readyCalls = 0;
+    const ready = async () => {
+      readyCalls++;
+      return false;
+    };
+    await pg.exec(`update shops set logo_checked_at = now(), logo_error = 'HTTP 404' where logo_key is null`);
+    expect(await fetchLogos({}, deps({ ready }))).toEqual([]);
+    expect(readyCalls).toBe(0);
+    await pg.exec(`update shops set logo_key = null, logo_checked_at = null where slug = 'toybox'`);
+    expect(await fetchLogos({}, deps({ ready }))).toEqual([]);
+    expect(readyCalls).toBe(1);
+    expect(requests).toEqual([]);
+  });
+
+  it('records nothing once the deadline has passed', async () => {
+    await pg.exec(`update shops set logo_key = null, logo_checked_at = null, logo_error = null where slug = 'toybox'`);
+    const ac = new AbortController();
+    const out = await fetchLogos(
+      { shop: 'toybox', signal: ac.signal },
+      deps({
+        getFor: () => async (url) => {
+          const r = answer(url);
+          ac.abort();
+          return r;
+        },
+      }),
+    );
+    expect(out).toEqual([{ slug: 'toybox', status: 'skipped', reason: 'deadline' }]);
+    expect(puts).toEqual([]);
+    expect(await shopRow('toybox')).toEqual({ logo_key: null, logo_checked_at: null, logo_error: null });
+  });
 });
+
