@@ -1,0 +1,279 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Black Friday Guide: home</title>
+<script src="./support.js"></script>
+<link rel="stylesheet" href="bfg.css">
+</head>
+<body>
+<x-dc>
+<helmet>
+<style>
+body{margin:0}
+</style>
+</helmet>
+<div class="{{rootCls}}" data-theme="{{dataTheme}}">
+<div class="bfg-bg" aria-hidden="true"></div>
+<dc-import name="Header" active="search" look="{{look}}" mode="{{mode}}" theme="{{theme}}" on-mode="{{setMode}}" on-theme="{{setTheme}}" hint-size="100%,64px"></dc-import>
+<main class="bfg-wrap">
+
+<section aria-labelledby="hl" class="hero">
+<h1 id="hl" class="headline"><span class="headline-flip"><sc-for list="{{headline}}" as="s" hint-placeholder-count="2"><sc-if value="{{s.em}}" hint-placeholder-val="{{false}}"><em class="headline-em">{{s.text}}</em></sc-if><sc-if value="{{s.plain}}" hint-placeholder-val="{{true}}">{{s.text}}</sc-if></sc-for></span></h1>
+<p style="color: var(--muted); font-size: 17px;">Price history from Maltese web shops, to check if a deal is real.</p>
+
+<div class="search" style="margin-top: 10px;">
+<form class="glass search-box" role="search" onSubmit="{{noSubmit}}">
+<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="color: var(--faint); flex-shrink: 0;"><circle cx="11" cy="11" r="7"></circle><path d="M20 20l-4-4"></path></svg>
+<label for="q" class="bfg-sr">Search a product, paste a shop link or a part number</label>
+<input id="q" class="search-input" type="search" autocomplete="off" placeholder="{{placeholder}}" value="{{q}}" onInput="{{onQ}}">
+<a class="btn btn-primary" href="{{href.product}}">Check</a>
+</form>
+<sc-if value="{{showResults}}" hint-placeholder-val="{{false}}">
+<div class="results" role="listbox" aria-label="Products found">
+<sc-for list="{{results}}" as="r" hint-placeholder-count="3">
+<a class="result" role="option" href="{{href.product}}">
+<span class="photo" style="width: 44px; height: 44px;" aria-hidden="true"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><rect x="3" y="5" width="18" height="14" rx="2"></rect><circle cx="9" cy="11" r="2"></circle><path d="M21 17l-5-5-9 7"></path></svg></span>
+<span class="stack" style="flex: 1;"><span style="font-weight: 600;">{{r.name}}</span><span class="t-hint">from {{r.fromTxt}} at {{r.shops}} shops</span></span>
+<sc-if value="{{r.hasAvoid}}" hint-placeholder-val="{{false}}"><span class="chip chip-bad">{{r.avoidTxt}}</span></sc-if>
+<sc-if value="{{r.hasGood}}" hint-placeholder-val="{{false}}"><span class="chip chip-good">{{r.goodTxt}}</span></sc-if>
+</a>
+</sc-for>
+<sc-if value="{{noResults}}" hint-placeholder-val="{{false}}"><p class="t-hint" style="padding: 10px 12px;">No products match. Try fewer words, or paste the shop's link.</p></sc-if>
+</div>
+</sc-if>
+</div>
+
+<div class="wrapline" style="justify-content: center;">
+<span class="t-hint">Try:</span>
+<sc-for list="{{examples}}" as="e" hint-placeholder-count="5"><button type="button" class="pill" onClick="{{e.pick}}">{{e.label}}</button></sc-for>
+</div>
+<p class="t-hint">Tracking 51 shops every night since 20 Oct. Demo data as of Sat 21 Nov.</p>
+<a class="scroll-cue" href="#deals">
+<span class="scroll-cue-pair"><span class="chip chip-good">Good deals</span><span class="chip chip-bad">Deals to avoid</span></span>
+<span>Scroll to see this week's verdicts</span>
+<span class="scroll-cue-icon" aria-hidden="true"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9l6 6 6-6"></path></svg></span>
+</a>
+</section>
+<div id="deals" aria-hidden="true"></div>
+
+<div class="desk-only" style="flex-direction: column; gap: 32px;" onMouseEnter="{{hold}}" onMouseLeave="{{release}}" onFocus="{{hold}}" onBlur="{{release}}">
+<sc-for list="{{rows}}" as="row" hint-placeholder-count="2">
+<section aria-label="{{row.title}}" style="display: flex; flex-direction: column; gap: 12px;">
+<div class="between">
+<h2 class="t-section" style="display: flex; align-items: center; gap: 10px;">{{row.title}}</h2>
+<div class="wrapline">
+<a href="{{row.all}}" style="font-weight: 600; min-height: 44px; display: inline-flex; align-items: center; padding: 0 8px;">See all</a>
+<button type="button" class="icon-btn" aria-label="{{row.pauseLabel}}" aria-pressed="{{row.paused}}" onClick="{{row.togglePause}}">
+<sc-if value="{{row.playing}}" hint-placeholder-val="{{true}}"><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><rect x="6" y="5" width="4" height="14" rx="1"></rect><rect x="14" y="5" width="4" height="14" rx="1"></rect></svg></sc-if>
+<sc-if value="{{row.paused}}" hint-placeholder-val="{{false}}"><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M7 5l12 7-12 7z"></path></svg></sc-if>
+</button>
+<button type="button" class="icon-btn" aria-label="Previous {{row.lower}}" onClick="{{row.prev}}"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 6l-6 6 6 6"></path></svg></button>
+<span class="deck-dots" role="img" aria-label="{{row.pageLabel}}"><sc-for list="{{row.dots}}" as="dot" hint-placeholder-count="3"><span class="{{dot.cls}}"></span></sc-for></span>
+<button type="button" class="icon-btn" aria-label="Next {{row.lower}}" onClick="{{row.next}}"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 6l6 6-6 6"></path></svg></button>
+</div>
+</div>
+<div class="{{row.gridCls}}" style="padding-top: 20px;">
+<sc-for list="{{row.cards}}" as="c" hint-placeholder-count="3">
+<div class="deck-item"><dc-import name="DealCard" card="{{c}}" advanced="{{isAdv}}" hint-size="100%,190px"></dc-import></div>
+</sc-for>
+</div>
+</section>
+</sc-for>
+</div>
+
+<section class="phone-only" aria-label="Deals" style="flex-direction: column; gap: 12px;">
+<div class="seg-group" role="group" aria-label="Deal type" style="width: 100%; box-sizing: border-box;">
+<button type="button" class="{{goodTabCls}}" aria-pressed="{{isGood}}" onClick="{{showGood}}" style="flex: 1; justify-content: center;">Good deals</button>
+<button type="button" class="{{badTabCls}}" aria-pressed="{{isBad}}" onClick="{{showBad}}" style="flex: 1; justify-content: center;">Deals to avoid</button>
+</div>
+<div class="between"><span class="deck-dots" role="img" aria-label="{{phonePageLabel}}"><sc-for list="{{phoneDots}}" as="dot" hint-placeholder-count="3"><span class="{{dot.cls}}"></span></sc-for></span><button type="button" class="icon-btn" aria-label="{{phonePauseLabel}}" aria-pressed="{{phonePaused}}" onClick="{{phoneTogglePause}}"><sc-if value="{{phonePlaying}}" hint-placeholder-val="{{true}}"><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><rect x="6" y="5" width="4" height="14" rx="1"></rect><rect x="14" y="5" width="4" height="14" rx="1"></rect></svg></sc-if><sc-if value="{{phonePaused}}" hint-placeholder-val="{{false}}"><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M7 5l12 7-12 7z"></path></svg></sc-if></button></div>
+<div class="{{phoneGridCls}}" style="display: flex; flex-direction: column; gap: 14px; padding-top: 20px;">
+<sc-for list="{{phoneCards}}" as="c" hint-placeholder-count="3">
+<div class="deck-item"><dc-import name="DealCard" card="{{c}}" advanced="{{isAdv}}" hint-size="100%,190px"></dc-import></div>
+</sc-for>
+</div>
+<a href="{{phoneAll}}" style="font-weight: 600; min-height: 44px; display: inline-flex; align-items: center;">See all {{phoneAllLabel}}</a>
+</section>
+
+<section class="glass card" aria-labelledby="how">
+<div class="between"><h2 id="how" class="t-section">How we check a deal</h2><a href="{{href.home}}" style="font-weight: 600;">Read the full rules</a></div>
+<div class="g4">
+<div class="stack" style="gap: 6px;"><span class="t-lbl">History</span><p style="font-weight: 600;">We judge a deal after 14 days of prices.</p><p class="t-hint">Before that it says "Not enough history yet".</p></div>
+<div class="stack" style="gap: 6px;"><span class="t-lbl">Deal to avoid</span><p style="font-weight: 600;">The price or was price rose more than 3% in the last 14 days.</p><p class="t-hint">Or the was price is higher than any price charged in 30 days.</p></div>
+<div class="stack" style="gap: 6px;"><span class="t-lbl">Good deal</span><p style="font-weight: 600;">At least 5% below its lowest price of the previous 30 days.</p><p class="t-hint">And the was price was not raised in that time.</p></div>
+<div class="stack" style="gap: 6px;"><span class="t-lbl">Cheaper elsewhere</span><p style="font-weight: 600;">The same product is at least 2% cheaper at another shop today.</p><p class="t-hint">Only for exact matches by barcode or part number.</p></div>
+</div>
+</section>
+</main>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"look":{"editor":"enum","options":["glass","blend"],"default":"glass"},"mode":{"editor":"enum","options":["simple","advanced"],"default":"simple"},"$preview":{"width":1440,"height":2300}}'>
+class Component extends DCLogic {
+  constructor(props) {
+    super(props);
+    var m = null, t = null;
+    try { m = localStorage.getItem('bfg-mode'); t = localStorage.getItem('bfg-theme'); } catch (e) {}
+    this.state = { mode: m, theme: t || 'system', q: '', ex: 0, tab: 'good', pg: 0, pa: 0, tick_pg: 0, tick_pa: 0, out_pg: false, out_pa: false, paused: false, hover: false, pick: Math.random() };
+    this.timers = [];
+  }
+  componentDidMount() {
+    var self = this;
+    this.timer = setInterval(function () { self.setState({ ex: self.state.ex + 1 }); }, 2600);
+    // every 8 seconds both rows slide their 3 cards off and 3 new ones in
+    this.deck = setInterval(function () {
+      if (self.state.hover) return;
+      var keys = ['pg', 'pa'].filter(function (k) { return !self.state['paused_' + k]; });
+      if (keys.length) self.go(keys, 1);
+    }, 8000);
+  }
+  componentWillUnmount() {
+    clearInterval(this.timer);
+    clearInterval(this.deck);
+    this.timers.forEach(clearTimeout);
+  }
+  go(keys, delta) {
+    var self = this, out = {};
+    keys.forEach(function (k) { out['out_' + k] = true; });
+    this.setState(out);
+    this.timers.push(setTimeout(function () {
+      self.setState(function (s) {
+        var o = {};
+        keys.forEach(function (k) { o['out_' + k] = false; o['tick_' + k] = s['tick_' + k] + 1; o[k] = (s[k] + delta + 3) % 3; });
+        return o;
+      });
+    }, 500));
+  }
+  renderVals() {
+    var self = this;
+    var look = this.props.look === 'blend' ? 'blend' : 'glass';
+    var suffix = look === 'blend' ? 'Blend' : '';
+    var page = function (n) { return n + suffix + '.dc.html'; };
+    var href = { home: page('Main'), deals: page('Deals'), shops: page('Shops'), shop: page('Shop'), product: page('Product') };
+    var mode = this.state.mode || this.props.mode || 'simple';
+    var theme = this.state.theme;
+    var sysDark = false;
+    try { sysDark = window.matchMedia('(prefers-color-scheme: dark)').matches; } catch (e) {}
+    var isAdv = mode === 'advanced';
+    var eur = function (n) { return '€' + n.toLocaleString('en-GB'); };
+    var initials = function (s) { return s.split(' ').map(function (w) { return w[0]; }).join('').slice(0, 2).toUpperCase(); };
+    var WHAT = { price: 'price raised', was: 'was price raised', 'was-high': 'was price above its recent prices' };
+    var card = function (d) {
+      var avoid = d.v === 'avoid';
+      var tag = !avoid ? { kind: 'good', from: '', to: '', label: '' }
+        : d.k === 'price' ? { kind: 'avoid', from: eur(d.rf), to: eur(d.p), label: '' }
+        : d.k === 'was' ? { kind: 'avoid', from: eur(d.wf), to: eur(d.w), label: 'WAS RAISED' }
+        : { kind: 'avoid', from: '', to: eur(d.p), label: 'AVOID' };
+      var fact = !avoid ? '' : d.k === 'price' ? 'Price on ' + d.ra + ': ' + eur(d.rf) : d.k === 'was' ? 'Was price raised from ' + eur(d.wf) + ' to ' + eur(d.w) : 'Was price ' + eur(d.w) + ' is above its recent prices';
+      return {
+        title: d.t, shop: d.s, initials: initials(d.s), shopHref: href.shop, href: href.product,
+        priceTxt: eur(d.p), wasTxt: d.w ? eur(d.w) : '', hasWas: !!d.w && d.w > d.p,
+        verdict: d.v, bf: d.bf, alarm: avoid && d.bf, alarmText: 'Marked Black Friday, ' + (WHAT[d.k] || 'deal to avoid'),
+        plainBf: d.bf && !(avoid && d.bf), hasFact: !!fact, fact: fact, reason: d.r, hasTag: true, tag: tag
+      };
+    };
+    var GOOD = [
+      { t: 'Sony WH-1000XM6 Wireless Noise Cancelling Headphones', s: 'Pixel Point', p: 359, w: 399, v: 'good', bf: true, r: '€40 below its lowest price in the 24 days before 16 Nov (€399).' },
+      { t: 'Apple AirPods Pro 3', s: 'Harbour Tech', p: 229, w: 279, v: 'good', bf: true, r: '€40 below its lowest price in the 26 days before 18 Nov (€269).' },
+      { t: 'Samsung 55" QLED Q80F 4K TV', s: 'Isla Digital', p: 749, w: 899, v: 'good', bf: true, r: '€100 below its lowest price in the 25 days before 17 Nov (€849).' },
+      { t: 'Dyson V15 Detect Absolute', s: 'Casa Living', p: 549, w: 699, v: 'good', bf: false, r: '€100 below its lowest price in the 23 days before 15 Nov (€649).' },
+      { t: 'LEGO Technic 4x4 Off-Roader', s: 'Toy Cove', p: 119, w: 149, v: 'good', bf: true, r: '€30 below its lowest price in the 27 days before 19 Nov (€149).' },
+      { t: 'Logitech MX Master 3S Mouse', s: 'Pixel Point', p: 79, w: 109, v: 'good', bf: true, r: '€20 below its lowest price in the 25 days before 17 Nov (€99).' },
+      { t: 'Nintendo Switch 2', s: 'Byte Arcade', p: 439, w: 479, v: 'good', bf: true, r: '€30 below its lowest price in the 26 days before 18 Nov (€469).' },
+      { t: 'Philips Airfryer XXL', s: 'Casa Living', p: 179, w: 249, v: 'good', bf: false, r: '€50 below its lowest price in the 24 days before 16 Nov (€229).' },
+      { t: 'JBL Flip 7 Portable Speaker', s: 'Volt Electronics', p: 119, w: 149, v: 'good', bf: true, r: '€20 below its lowest price in the 26 days before 18 Nov (€139).' }
+    ];
+    var AVOID = [
+      { t: 'Sony WH-1000XM6 Wireless Noise Cancelling Headphones', s: 'Volt Electronics', p: 429, w: 499, v: 'avoid', bf: true, k: 'price', rf: 399, ra: '7 Nov', r: 'Price went from €399 on 7 Nov to €429 on 12 Nov while marked Black Friday.' },
+      { t: 'HP 15 Laptop, Core i5, 16GB, 512GB', s: 'Volt Electronics', p: 729, w: 829, v: 'avoid', bf: true, k: 'price', rf: 649, ra: '8 Nov', r: 'Price went from €649 on 8 Nov to €729 on 13 Nov while marked Black Friday.' },
+      { t: 'iPhone 17 128GB', s: 'Isla Digital', p: 929, w: 1099, v: 'avoid', bf: true, k: 'was-high', r: 'Was price €1,099 is higher than any price charged since 23 Oct (highest €949).' },
+      { t: 'PlayStation 5 Slim Digital', s: 'Harbour Tech', p: 449, w: 549, v: 'avoid', bf: true, k: 'was', wf: 499, r: 'Was price went from €499 on 8 Nov to €549 on 14 Nov while the price stayed at €449.' },
+      { t: 'KitchenAid Artisan Stand Mixer 4.8L', s: 'Casa Living', p: 499, w: 699, v: 'avoid', bf: false, k: 'was-high', r: 'Was price €699 is higher than any price charged since 23 Oct (highest €529).' },
+      { t: 'Nike Air Max 90', s: 'Trend Wardrobe', p: 139, w: 179, v: 'avoid', bf: true, k: 'price', rf: 119, ra: '7 Nov', r: 'Price went from €119 on 7 Nov to €139 on 10 Nov, and it is now marked Black Friday.' },
+      { t: 'Garmin Forerunner 265', s: 'Harbour Tech', p: 399, w: 479, v: 'avoid', bf: false, k: 'price', rf: 349, ra: '6 Nov', r: 'Price went from €349 on 6 Nov to €399 on 10 Nov while showing a was price of €479.' },
+      { t: 'Barbie Dreamhouse', s: 'Toy Cove', p: 229, w: 299, v: 'avoid', bf: true, k: 'was', wf: 249, r: 'Was price went from €249 on 9 Nov to €299 on 15 Nov while marked Black Friday.' },
+      { t: 'Samsung Galaxy S25 Ultra 256GB', s: 'Volt Electronics', p: 1199, w: 1449, v: 'avoid', bf: true, k: 'price', rf: 1099, ra: '7 Nov', r: 'Price went from €1,099 on 7 Nov to €1,199 on 11 Nov while marked Black Friday.' }
+    ];
+    var good = GOOD.map(card), bad = AVOID.map(card);
+    var st0 = this.state;
+    var deckCls = function (key) { return st0['out_' + key] ? 'deck-out' : (st0['tick_' + key] % 2 ? 'deck-in-b' : 'deck-in-a'); };
+    var dotsFor = function (p) { return [0, 1, 2].map(function (i) { return { cls: 'deck-dot' + (i === p ? ' deck-dot-on' : '') }; }); };
+    var row = function (key, title, dot, list, pageKey) {
+      var p = st0[pageKey];
+      return {
+        title: title, lower: title.toLowerCase(), dot: dot, all: href.deals,
+        cards: list.slice(p * 3, p * 3 + 3),
+        gridCls: 'g3 deck ' + deckCls(pageKey),
+        dots: dotsFor(p), pageLabel: 'Showing set ' + (p + 1) + ' of 3',
+        prev: function () { self.go([pageKey], -1); },
+        next: function () { self.go([pageKey], 1); },
+        paused: !!st0['paused_' + pageKey], playing: !st0['paused_' + pageKey],
+        pauseLabel: (st0['paused_' + pageKey] ? 'Play ' : 'Pause ') + title.toLowerCase(),
+        togglePause: function () { var o = {}; o['paused_' + pageKey] = !self.state['paused_' + pageKey]; self.setState(o); }
+      };
+    };
+
+    // headline: Black Friday week slot (demo day Sat 21 Nov, 6 days to go), *word* is highlighted
+    var PHRASES = ['*{days}* to Black Friday. Prices are already moving.', '*Black Friday* week. Trust the tag, not the banner.', 'Black Friday prices are moving. *Which deals are real?*'];
+    var line = PHRASES[Math.floor(this.state.pick * PHRASES.length)].replace('{days}', '6 days');
+    var headline = [];
+    line.split(/(\*[^*]+\*)/).forEach(function (part) {
+      if (!part) return;
+      var em = part.charAt(0) === '*';
+      headline.push({ text: em ? part.slice(1, -1) : part, em: em, plain: !em });
+    });
+
+    var EX = ['Nintendo Switch 2', 'Sony headphones', 'iPhone 17', 'Air fryer', 'LEGO Technic', '55 inch TV', 'Dyson V15'];
+    var CATALOG = [
+      { name: 'Sony WH-1000XM6 Wireless Noise Cancelling Headphones', from: 359, shops: 4, avoid: 2, good: 1 },
+      { name: 'Sony WF-1000XM5 Earbuds', from: 239, shops: 3, avoid: 0, good: 0 },
+      { name: 'Sony Bravia 7 55" 4K TV', from: 1099, shops: 2, avoid: 0, good: 0 },
+      { name: 'Nintendo Switch 2', from: 439, shops: 5, avoid: 0, good: 1 },
+      { name: 'iPhone 17 128GB', from: 929, shops: 5, avoid: 1, good: 0 },
+      { name: 'Apple AirPods Pro 3', from: 229, shops: 6, avoid: 0, good: 1 },
+      { name: 'Philips Airfryer XXL', from: 179, shops: 4, avoid: 0, good: 1 },
+      { name: 'LEGO Technic 4x4 Off-Roader', from: 119, shops: 2, avoid: 0, good: 1 },
+      { name: 'Samsung 55" QLED Q80F 4K TV', from: 749, shops: 3, avoid: 0, good: 1 },
+      { name: 'Dyson V15 Detect Absolute', from: 549, shops: 3, avoid: 0, good: 1 }
+    ];
+    var q = this.state.q.trim().toLowerCase();
+    var words = q.split(/\s+/).filter(Boolean);
+    var found = !q ? [] : CATALOG.filter(function (c) { var n = c.name.toLowerCase(); return words.every(function (w) { return n.indexOf(w) !== -1; }); }).slice(0, 6).map(function (c) {
+      return { name: c.name, fromTxt: eur(c.from), shops: c.shops, hasAvoid: c.avoid > 0, avoidTxt: 'Avoid at ' + c.avoid + (c.avoid === 1 ? ' shop' : ' shops'), hasGood: c.avoid === 0 && c.good > 0, goodTxt: 'Good deal' };
+    });
+    var isGood = this.state.tab === 'good';
+    var dark = theme === 'dark' || (theme === 'system' && sysDark);
+    return {
+      look: look, mode: mode, theme: theme, isAdv: isAdv, href: href,
+      rootCls: 'bfg look-' + look, dataTheme: dark ? 'dark' : 'light',
+      setMode: function (m) { try { localStorage.setItem('bfg-mode', m); } catch (e) {} self.setState({ mode: m }); },
+      setTheme: function (t) { try { localStorage.setItem('bfg-theme', t); } catch (e) {} self.setState({ theme: t }); },
+      headline: headline,
+      q: this.state.q, onQ: function (e) { self.setState({ q: e.target.value }); },
+      noSubmit: function (e) { e.preventDefault(); },
+      placeholder: 'Search a product, e.g. ' + EX[this.state.ex % EX.length],
+      examples: EX.slice(0, 5).map(function (x) { return { label: x, pick: function () { self.setState({ q: x }); } }; }),
+      results: found, showResults: !!q, noResults: !!q && found.length === 0,
+      rows: [row('good', 'Good deals', 'var(--good-line)', good, 'pg'), row('avoid', 'Deals to avoid', 'var(--bad-fill)', bad, 'pa')],
+      isGood: isGood, isBad: !isGood,
+      goodTabCls: 'seg seg-good' + (isGood ? ' seg-on' : ''), badTabCls: 'seg seg-bad' + (isGood ? '' : ' seg-on'),
+      showGood: function () { self.setState({ tab: 'good' }); }, showBad: function () { self.setState({ tab: 'avoid' }); },
+      phoneCards: (isGood ? good : bad).slice((isGood ? st0.pg : st0.pa) * 3, (isGood ? st0.pg : st0.pa) * 3 + 3),
+      phoneGridCls: 'deck ' + deckCls(isGood ? 'pg' : 'pa'),
+      phoneDots: dotsFor(isGood ? st0.pg : st0.pa), phonePageLabel: 'Showing set ' + ((isGood ? st0.pg : st0.pa) + 1) + ' of 3',
+      phonePaused: !!st0['paused_' + (isGood ? 'pg' : 'pa')], phonePlaying: !st0['paused_' + (isGood ? 'pg' : 'pa')],
+      phonePauseLabel: (st0['paused_' + (isGood ? 'pg' : 'pa')] ? 'Play ' : 'Pause ') + (isGood ? 'good deals' : 'deals to avoid'),
+      phoneTogglePause: function () { var k = 'paused_' + (isGood ? 'pg' : 'pa'); var o = {}; o[k] = !self.state[k]; self.setState(o); },
+      phoneAll: href.deals, phoneAllLabel: isGood ? 'good deals' : 'deals to avoid',
+      playing: !st0.paused, stopped: st0.paused, pauseWord: st0.paused ? 'Play' : 'Pause',
+      pauseLabel: st0.paused ? 'Play the deal slideshow' : 'Pause the deal slideshow',
+      autoNote: st0.paused ? 'Slideshow paused' : (st0.hover ? 'Paused while you look' : 'New deals slide in every 8 seconds'),
+      togglePause: function () { self.setState({ paused: !self.state.paused }); },
+      hold: function () { if (!self.state.hover) self.setState({ hover: true }); },
+      release: function () { if (self.state.hover) self.setState({ hover: false }); }
+    };
+  }
+}
+</script>
+</body>
+</html>

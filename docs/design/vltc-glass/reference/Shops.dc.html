@@ -1,0 +1,143 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Black Friday Guide: shops</title>
+<script src="./support.js"></script>
+<link rel="stylesheet" href="bfg.css">
+</head>
+<body>
+<x-dc>
+<helmet>
+<style>
+body{margin:0}
+</style>
+</helmet>
+<div class="{{rootCls}}" data-theme="{{dataTheme}}">
+<div class="bfg-bg" aria-hidden="true"></div>
+<dc-import name="Header" active="shops" look="{{look}}" mode="{{mode}}" theme="{{theme}}" on-mode="{{setMode}}" on-theme="{{setTheme}}" hint-size="100%,64px"></dc-import>
+<main class="bfg-wrap">
+<section class="stack" style="gap: 8px;">
+<h1 class="t-page">Shops</h1>
+<p style="color: var(--muted); max-width: 760px;">Every shop gets a RATING from A to F, worked out again every night: the share of its judged products that were Deals to Avoid, plus half the share with a raised was price. Shops with fewer than 20 judged deals are not rated yet.</p>
+</section>
+
+<div class="between">
+<div class="glass" style="display: flex; align-items: center; gap: 8px; padding: 4px 6px 4px 16px; border-radius: 999px; flex: 1 1 320px; max-width: 480px;">
+<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true" style="color: var(--faint);"><circle cx="11" cy="11" r="7"></circle><path d="M20 20l-4-4"></path></svg>
+<label for="shop-q" class="bfg-sr">Find a shop</label>
+<input id="shop-q" type="search" class="input" placeholder="Find a shop" value="{{q}}" onInput="{{onQ}}" style="border: 0; background: transparent;">
+</div>
+<div class="seg-group" role="radiogroup" aria-label="Sort shops">
+<button type="button" role="radio" class="{{sortACls}}" aria-checked="{{sortA}}" onClick="{{bySort}}">Best rated first</button>
+<button type="button" role="radio" class="{{sortFCls}}" aria-checked="{{sortF}}" onClick="{{byWorst}}">Worst rated first</button>
+</div>
+</div>
+
+<sc-if value="{{isSimple}}" hint-placeholder-val="{{true}}">
+<div class="g3">
+<sc-for list="{{shops}}" as="s" hint-placeholder-count="6">
+<a class="tile" href="{{shopHref}}" style="padding: 18px; gap: 12px; text-decoration: none;">
+<div style="display: flex; align-items: center; gap: 12px;">
+<span class="logo" style="width: 44px; height: 44px; font-size: 15px;" aria-hidden="true">{{s.initials}}</span>
+<div class="stack" style="flex: 1;"><span class="t-card" style="color: var(--ink);">{{s.name}}</span><span class="t-hint">{{s.where}}</span></div>
+<sc-if value="{{s.rated}}" hint-placeholder-val="{{true}}"><span class="grade" style="color: {{s.color}};"><span class="bfg-sr">Rating </span>{{s.grade}}</span></sc-if>
+<sc-if value="{{s.unrated}}" hint-placeholder-val="{{false}}"><span class="grade" style="color: var(--muted); font-size: 13px; width: auto; padding: 0 8px;"><span class="bfg-sr">Rating </span>N/A</span></sc-if>
+</div>
+<p style="font-size: 14px; color: var(--ink);">{{s.sentence}}</p>
+</a>
+</sc-for>
+</div>
+</sc-if>
+
+<sc-if value="{{isAdv}}" hint-placeholder-val="{{false}}">
+<div class="glass card" style="padding: 10px;">
+<div class="scroll-x">
+<table class="table">
+<thead><tr><th scope="col">Shop</th><th scope="col">Rating</th><th scope="col" class="r">Judged</th><th scope="col" class="r">Deals to avoid</th><th scope="col" class="r">Raised was price</th><th scope="col" class="r">Good deals</th><th scope="col" class="r">Real deals</th><th scope="col" class="r">Marked Black Friday</th><th scope="col" class="r">Products tracked</th></tr></thead>
+<tbody>
+<sc-for list="{{shops}}" as="s" hint-placeholder-count="8">
+<tr>
+<th scope="row"><a href="{{shopHref}}" style="display: inline-flex; align-items: center; gap: 8px; font-weight: 700; color: var(--ink);"><span class="logo" aria-hidden="true">{{s.initials}}</span>{{s.name}}</a></th>
+<td><span style="font-weight: 800; font-size: 18px; color: {{s.color}};">{{s.gradeCell}}</span></td>
+<td class="r">{{s.judged}}</td>
+<td class="r" style="color: var(--bad); font-weight: 600;">{{s.avoid}}</td>
+<td class="r" style="color: var(--bad);">{{s.was}}</td>
+<td class="r" style="color: var(--good); font-weight: 600;">{{s.good}}</td>
+<td class="r">{{s.realPct}}</td>
+<td class="r">{{s.bf}}</td>
+<td class="r">{{s.products}}</td>
+</tr>
+</sc-for>
+</tbody>
+</table>
+</div>
+</div>
+<p class="t-hint">Score = (Deals to avoid + half the raised was prices) / judged. A under 5%, B under 10%, C under 20%, D under 30%, E under 45%, F above. Shop names in this prototype are demo data.</p>
+</sc-if>
+</main>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"look":{"editor":"enum","options":["glass","blend"],"default":"glass"},"mode":{"editor":"enum","options":["simple","advanced"],"default":"simple"},"$preview":{"width":1440,"height":1700}}'>
+class Component extends DCLogic {
+  constructor(props) {
+    super(props);
+    var m = null, t = null;
+    try { m = localStorage.getItem('bfg-mode'); t = localStorage.getItem('bfg-theme'); } catch (e) {}
+    this.state = { mode: m, theme: t || 'system', q: '', worst: false };
+  }
+  renderVals() {
+    var self = this;
+    var st = this.state;
+    var look = this.props.look === 'blend' ? 'blend' : 'glass';
+    var suffix = look === 'blend' ? 'Blend' : '';
+    var mode = st.mode || this.props.mode || 'simple';
+    var theme = st.theme;
+    var sysDark = false;
+    try { sysDark = window.matchMedia('(prefers-color-scheme: dark)').matches; } catch (e) {}
+    var dark = theme === 'dark' || (theme === 'system' && sysDark);
+    var isAdv = mode === 'advanced';
+    var fmt = function (n) { return n.toLocaleString('en-GB'); };
+    var BANDS = [[0.05, 'A'], [0.1, 'B'], [0.2, 'C'], [0.3, 'D'], [0.45, 'E']];
+    var RAW = [
+      { name: 'Pixel Point', where: 'Online, Sliema', judged: 74, good: 31, avoid: 2, was: 1, products: 1860, bf: 120 },
+      { name: 'Toy Cove', where: 'Online, Sliema mall', judged: 40, good: 18, avoid: 3, was: 1, products: 760, bf: 64 },
+      { name: 'Byte Arcade', where: 'Online only', judged: 35, good: 12, avoid: 4, was: 2, products: 640, bf: 51 },
+      { name: 'Harbour Tech', where: 'Online, Birkirkara', judged: 61, good: 14, avoid: 12, was: 6, products: 1420, bf: 88 },
+      { name: 'Trend Wardrobe', where: 'Online, Valletta', judged: 120, good: 22, avoid: 31, was: 10, products: 2050, bf: 190 },
+      { name: 'Casa Living', where: 'Online, Mosta', judged: 48, good: 9, avoid: 13, was: 6, products: 1310, bf: 70 },
+      { name: 'Volt Electronics', where: 'Online, Paola', judged: 96, good: 11, avoid: 30, was: 12, products: 2140, bf: 150 },
+      { name: 'Isla Digital', where: 'Online, St Julian’s', judged: 55, good: 6, avoid: 22, was: 14, products: 980, bf: 92 },
+      { name: 'FreshMart', where: 'Online, 6 stores', judged: 12, good: 4, avoid: 1, was: 0, products: 3200, bf: 18 }
+    ];
+    var q = st.q.trim().toLowerCase();
+    var shops = RAW.filter(function (s) { return !q || s.name.toLowerCase().indexOf(q) !== -1; }).map(function (s) {
+      var rated = s.judged >= 20;
+      var score = (s.avoid + s.was * 0.5) / s.judged;
+      var band = BANDS.filter(function (b) { return score < b[0]; })[0];
+      var grade = rated ? (band ? band[1] : 'F') : null;
+      return {
+        name: s.name, where: s.where, initials: s.name.split(' ').map(function (w) { return w[0]; }).join('').slice(0, 2).toUpperCase(),
+        rated: rated, unrated: !rated, grade: grade || '', gradeCell: grade || 'N/A', score: rated ? score : 9,
+        color: grade ? 'var(--grade-' + grade.toLowerCase() + ')' : 'var(--muted)',
+        sentence: rated ? fmt(s.avoid) + ' of ' + fmt(s.judged) + ' judged products ' + (s.avoid === 1 ? 'was a Deal to Avoid' : 'were Deals to Avoid') + ' (' + fmt(s.was) + ' with a raised was price).' : 'Fewer than 20 Black Friday deals checked so far.',
+        judged: fmt(s.judged), avoid: fmt(s.avoid), was: fmt(s.was), good: fmt(s.good), realPct: Math.round(s.good / s.judged * 100) + '%', bf: fmt(s.bf), products: fmt(s.products)
+      };
+    }).sort(function (a, b) { return st.worst ? (b.score === 9 ? -1 : a.score === 9 ? 1 : b.score - a.score) : a.score - b.score; });
+    return {
+      look: look, mode: mode, theme: theme, isAdv: isAdv, isSimple: !isAdv,
+      rootCls: 'bfg look-' + look, dataTheme: dark ? 'dark' : 'light',
+      setMode: function (m) { try { localStorage.setItem('bfg-mode', m); } catch (e) {} self.setState({ mode: m }); },
+      setTheme: function (t) { try { localStorage.setItem('bfg-theme', t); } catch (e) {} self.setState({ theme: t }); },
+      shopHref: 'Shop' + suffix + '.dc.html',
+      q: st.q, onQ: function (e) { self.setState({ q: e.target.value }); },
+      shops: shops,
+      sortA: !st.worst, sortF: st.worst,
+      sortACls: 'seg' + (st.worst ? '' : ' seg-on'), sortFCls: 'seg' + (st.worst ? ' seg-on' : ''),
+      bySort: function () { self.setState({ worst: false }); }, byWorst: function () { self.setState({ worst: true }); }
+    };
+  }
+}
+</script>
+</body>
+</html>

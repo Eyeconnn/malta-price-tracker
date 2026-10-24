@@ -1,0 +1,60 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>RATING ruler</title>
+<script src="./support.js"></script>
+<link rel="stylesheet" href="bfg.css">
+</head>
+<body>
+<x-dc>
+<helmet>
+<style>
+body{margin:0}
+</style>
+</helmet>
+<div style="max-width: 380px; color: var(--ink); font-family: var(--sans);">
+<div aria-hidden="true">
+<div class="rating-label">RATING</div>
+<div class="rating-ruler">
+<div class="rating-letters">
+<sc-for list="{{letters}}" as="l" hint-placeholder-count="6">
+<span class="{{l.cls}}" style="font-size: {{l.size}}px; color: {{l.color}}; opacity: {{l.opacity}};">{{l.letter}}</span>
+</sc-for>
+</div>
+<div class="rating-ticks"></div>
+<div class="rating-band"></div>
+</div>
+</div>
+<sc-if value="{{unrated}}" hint-placeholder-val="{{false}}">
+<p style="margin: 16px 0 0; font-weight: 700; color: var(--muted);"><span class="bfg-sr">Rating: </span>Not rated yet</p>
+</sc-if>
+<p style="margin: 14px 0 0; font-size: 13.5px; line-height: 1.45;"><sc-if value="{{rated}}" hint-placeholder-val="{{true}}"><span class="bfg-sr">Rating {{grade}}: </span></sc-if>{{sentence}}</p>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"grade":{"editor":"enum","options":["A","B","C","D","E","F",""],"default":"E"},"sentence":{"editor":"text","default":"30 of 96 judged products were Deals to Avoid (12 with a raised was price)."},"$preview":{"width":380,"height":200}}'>
+class Component extends DCLogic {
+  renderVals() {
+    var LETTERS = ['A', 'B', 'C', 'D', 'E', 'F'];
+    var SIZES = [54, 30, 24, 19, 15, 12];
+    var grade = this.props.grade === undefined ? 'E' : this.props.grade;
+    var at = LETTERS.indexOf(grade);
+    return {
+      grade: grade, rated: at >= 0, unrated: at < 0,
+      sentence: this.props.sentence === undefined ? '30 of 96 judged products were Deals to Avoid (12 with a raised was price).' : this.props.sentence,
+      letters: LETTERS.map(function (l, i) {
+        var d = at < 0 ? null : Math.abs(i - at);
+        return {
+          letter: l,
+          cls: 'rating-letter' + (d === 0 ? ' rating-on' : ''),
+          size: d === null ? 15 : SIZES[d],
+          color: d === null ? 'var(--muted)' : 'var(--grade-' + l.toLowerCase() + ')',
+          opacity: d === null ? 0.75 : (1 - d * 0.08).toFixed(2)
+        };
+      })
+    };
+  }
+}
+</script>
+</body>
+</html>

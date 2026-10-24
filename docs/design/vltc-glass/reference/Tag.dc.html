@@ -1,0 +1,51 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Hanging price tag</title>
+<script src="./support.js"></script>
+<link rel="stylesheet" href="bfg.css">
+</head>
+<body>
+<x-dc>
+<helmet>
+<style>
+body{margin:0}
+</style>
+</helmet>
+<div class="{{cls}}" role="img" aria-label="{{spoken}}" style="margin: {{margin}};">
+<svg aria-hidden="true" width="{{w}}" height="{{h}}" viewBox="0 0 78 104"><line class="ptag-string" x1="39" y1="-30" x2="39" y2="12" stroke-width="1.4"></line><path class="ptag-body" d="M8 22 L39 2 L70 22 L70 96 A6 6 0 0 1 64 102 L14 102 A6 6 0 0 1 8 96 Z" stroke-width="1.5"></path><circle class="ptag-hole" cx="39" cy="18" r="4"></circle></svg>
+<sc-if value="{{isAvoid}}" hint-placeholder-val="{{false}}">
+<div aria-hidden="true" class="ptag-label"><sc-if value="{{hasFrom}}" hint-placeholder-val="{{true}}"><s>{{from}}</s><br></sc-if><sc-if value="{{hasTo}}" hint-placeholder-val="{{true}}">{{to}}<br></sc-if><small>{{word}}</small></div>
+</sc-if>
+<sc-if value="{{isGood}}" hint-placeholder-val="{{true}}">
+<div aria-hidden="true" class="ptag-label">REAL<br>DEAL</div>
+<span aria-hidden="true" class="ptag-sparkle" style="left: -12%; top: 30%;">&#10022;</span>
+<span aria-hidden="true" class="ptag-sparkle" style="right: -10%; top: 62%; animation-delay: 0.8s;">&#10022;</span>
+<span aria-hidden="true" class="ptag-sparkle" style="left: 12%; top: 86%; font-size: 9px; animation-delay: 1.5s;">&#10022;</span>
+</sc-if>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"kind":{"editor":"enum","options":["good","avoid"],"default":"good"},"from":{"editor":"text","default":""},"to":{"editor":"text","default":""},"label":{"editor":"text","default":""},"size":{"editor":"enum","options":["md","sm"],"default":"md"},"$preview":{"width":120,"height":140}}'>
+class Component extends DCLogic {
+  renderVals() {
+    var kind = this.props.kind === 'avoid' ? 'avoid' : 'good';
+    var sm = this.props.size === 'sm';
+    var to = this.props.to || '';
+    var from = to ? (this.props.from || '') : '';
+    var word = this.props.label || (kind === 'avoid' ? 'RAISED' : 'REAL DEAL');
+    var spoken;
+    if (kind === 'avoid') spoken = (this.props.label ? this.props.label.charAt(0) + this.props.label.slice(1).toLowerCase() : 'Raised') + (from && to ? ': from ' + from + ' to ' + to : (to ? ', now ' + to : ''));
+    else spoken = 'Real deal';
+    return {
+      cls: 'ptag ptag-' + kind + (sm ? ' ptag-sm' : ''),
+      w: sm ? 50 : 66, h: sm ? 67 : 88,
+      margin: this.props.standalone ? '40px' : '0',
+      isAvoid: kind === 'avoid', isGood: kind === 'good',
+      from: from, to: to, hasFrom: !!from, hasTo: !!to, word: word, spoken: spoken
+    };
+  }
+}
+</script>
+</body>
+</html>
