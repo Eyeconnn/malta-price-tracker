@@ -1,0 +1,163 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Black Friday Guide: brands</title>
+<script src="./support.js"></script>
+<link rel="stylesheet" href="bfg.css">
+</head>
+<body>
+<x-dc>
+<helmet>
+<style>
+body{margin:0}
+</style>
+</helmet>
+<div class="{{rootCls}}" data-theme="{{dataTheme}}">
+<div class="bfg-bg" aria-hidden="true"></div>
+<dc-import name="Header" active="brands" look="{{look}}" mode="{{mode}}" theme="{{theme}}" on-mode="{{setMode}}" on-theme="{{setTheme}}" hint-size="100%,64px"></dc-import>
+<main class="bfg-wrap">
+<section class="stack" style="gap: 8px;">
+<h1 class="t-page">Brands</h1>
+<p style="color: var(--muted); max-width: 720px;">Every product from a brand, matched across shops by barcode or part number, with the cheapest shop for each.</p>
+</section>
+
+<div class="glass" style="display: flex; align-items: center; gap: 8px; padding: 4px 16px 4px 18px; border-radius: 999px; max-width: 560px;">
+<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true" style="color: var(--faint);"><circle cx="11" cy="11" r="7"></circle><path d="M20 20l-4-4"></path></svg>
+<label for="bq" class="bfg-sr">Find a brand</label>
+<input id="bq" type="search" class="input" placeholder="Find a brand, e.g. Sony, Dyson, LEGO" value="{{q}}" onInput="{{onQ}}" style="border: 0; background: transparent;">
+<span class="t-hint" style="white-space: nowrap;">{{count}} brands</span>
+</div>
+
+<section aria-label="Brands" style="display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 12px;">
+<sc-for list="{{brands}}" as="b" hint-placeholder-count="8">
+<button type="button" class="tile" aria-pressed="{{b.on}}" onClick="{{b.pick}}" style="padding: 14px 16px; gap: 4px; cursor: pointer; text-align: left; font: inherit; {{b.ring}}">
+<span style="font-weight: 700; font-size: 16px;">{{b.name}}</span>
+<span class="t-hint">{{b.count}} products · {{b.shops}} shops</span>
+<sc-if value="{{b.hasAvoid}}" hint-placeholder-val="{{false}}"><span class="chip chip-bad" style="margin-top: 4px;">{{b.avoidTxt}}</span></sc-if>
+</button>
+</sc-for>
+</section>
+<sc-if value="{{noBrands}}" hint-placeholder-val="{{false}}"><p class="t-hint">No brand matches that. Try a shorter name.</p></sc-if>
+
+<section class="glass card" aria-labelledby="bt">
+<h2 id="bt" class="t-section">{{sel.name}}: {{sel.count}} products</h2>
+<sc-if value="{{isSimple}}" hint-placeholder-val="{{true}}">
+<div class="stack" style="gap: 10px;">
+<sc-for list="{{products}}" as="p" hint-placeholder-count="3">
+<a class="row" href="{{productHref}}" style="flex-wrap: wrap; padding: 14px 16px; text-decoration: none; color: var(--ink);">
+<span class="stack" style="flex: 1 1 260px;"><span style="font-weight: 700;">{{p.name}}</span><span class="t-hint">Cheapest at {{p.best}} · {{p.stock}}</span></span>
+<span class="wrapline"><sc-for list="{{p.chips}}" as="c" hint-placeholder-count="1"><span class="{{c.cls}}">{{c.text}}</span></sc-for></span>
+<span class="t-num" style="font-size: 24px; min-width: 84px; text-align: right;">{{p.bestTxt}}</span>
+</a>
+</sc-for>
+</div>
+</sc-if>
+<sc-if value="{{isAdv}}" hint-placeholder-val="{{false}}">
+<div class="scroll-x"><table class="table">
+<thead><tr><th scope="col">Product</th><sc-for list="{{cols}}" as="c" hint-placeholder-count="4"><th scope="col" class="r">{{c}}</th></sc-for><th scope="col" class="r">Spread</th></tr></thead>
+<tbody>
+<sc-for list="{{products}}" as="p" hint-placeholder-count="3">
+<tr><th scope="row"><a href="{{productHref}}" style="font-weight: 600;">{{p.name}}</a></th>
+<sc-for list="{{p.cells}}" as="c" hint-placeholder-count="4"><td class="r" style="font-weight: {{c.w}}; color: {{c.color}}; white-space: nowrap;">{{c.txt}}<sc-if value="{{c.avoid}}" hint-placeholder-val="{{false}}"> <span class="chip chip-bad" style="height: 20px; padding: 0 6px;">Avoid</span></sc-if></td></sc-for>
+<td class="r">{{p.spread}}</td></tr>
+</sc-for>
+</tbody></table></div>
+<p class="t-hint">Cheapest price in each row is in green. "Avoid" marks a shop whose listing is a Deal to Avoid.</p>
+</sc-if>
+</section>
+</main>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"look":{"editor":"enum","options":["glass","blend"],"default":"glass"},"mode":{"editor":"enum","options":["simple","advanced"],"default":"simple"},"$preview":{"width":1440,"height":1700}}'>
+class Component extends DCLogic {
+  constructor(props) {
+    super(props);
+    var m = null, t = null;
+    try { m = localStorage.getItem('bfg-mode'); t = localStorage.getItem('bfg-theme'); } catch (e) {}
+    this.state = { mode: m, theme: t || 'system', q: '', brand: 'Sony' };
+  }
+  renderVals() {
+    var self = this;
+    var st = this.state;
+    var look = this.props.look === 'blend' ? 'blend' : 'glass';
+    var suffix = look === 'blend' ? 'Blend' : '';
+    var mode = st.mode || this.props.mode || 'simple';
+    var theme = st.theme;
+    var sysDark = false;
+    try { sysDark = window.matchMedia('(prefers-color-scheme: dark)').matches; } catch (e) {}
+    var dark = theme === 'dark' || (theme === 'system' && sysDark);
+    var isAdv = mode === 'advanced';
+    var eur = function (n) { return '€' + n.toLocaleString('en-GB'); };
+    var SHOP = { pixel: 'Pixel Point', volt: 'Volt Electronics', harbour: 'Harbour Tech', isla: 'Isla Digital', casa: 'Casa Living', toy: 'Toy Cove', byte: 'Byte Arcade', trend: 'Trend Wardrobe' };
+    // p: price per shop; a: shops where the listing is a Deal to Avoid; g: shop with a Good Deal
+    var DATA = [
+      { name: 'Sony', products: [
+        { n: 'Sony WH-1000XM6 Headphones', p: { pixel: 359, volt: 429, harbour: 389, isla: 399 }, a: ['volt', 'isla'], g: 'pixel' },
+        { n: 'Sony WF-1000XM5 Earbuds', p: { pixel: 249, volt: 239, harbour: 259 } },
+        { n: 'PlayStation 5 Slim Digital', p: { pixel: 469, volt: 459, harbour: 449, isla: 479 }, a: ['harbour'] },
+        { n: 'Sony Bravia 7 55" 4K TV', p: { volt: 1149, isla: 1099 } } ] },
+      { name: 'Samsung', products: [
+        { n: 'Samsung Galaxy S25 Ultra 256GB', p: { pixel: 1099, volt: 1199, isla: 1159 }, a: ['volt'] },
+        { n: 'Samsung 55" QLED Q80F 4K TV', p: { volt: 829, isla: 749, harbour: 799 }, g: 'isla' } ] },
+      { name: 'Apple', products: [
+        { n: 'iPhone 17 128GB', p: { pixel: 939, volt: 949, isla: 929, harbour: 949 }, a: ['isla'] },
+        { n: 'Apple AirPods Pro 3', p: { pixel: 259, harbour: 229, isla: 269 }, g: 'harbour' } ] },
+      { name: 'Dyson', products: [ { n: 'Dyson V15 Detect Absolute', p: { casa: 549, volt: 609, harbour: 629 }, g: 'casa' } ] },
+      { name: 'Nintendo', products: [ { n: 'Nintendo Switch 2', p: { volt: 449, pixel: 459, byte: 439, harbour: 479 }, g: 'byte' } ] },
+      { name: 'LEGO', products: [ { n: 'LEGO Technic 4x4 Off-Roader', p: { toy: 119, byte: 129 }, g: 'toy' } ] },
+      { name: 'HP', products: [ { n: 'HP 15 Laptop, Core i5, 16GB, 512GB', p: { volt: 729, pixel: 699 }, a: ['volt'] } ] },
+      { name: 'KitchenAid', products: [ { n: 'KitchenAid Artisan Stand Mixer 4.8L', p: { casa: 499, harbour: 529 }, a: ['casa'] } ] },
+      { name: 'Nike', products: [ { n: 'Nike Air Max 90', p: { trend: 139 }, a: ['trend'] } ] },
+      { name: 'Logitech', products: [ { n: 'Logitech MX Master 3S Mouse', p: { pixel: 79, volt: 89, harbour: 95 }, g: 'pixel' } ] }
+    ];
+    var q = st.q.trim().toLowerCase();
+    var brands = DATA.filter(function (b) { return !q || b.name.toLowerCase().indexOf(q) !== -1; }).map(function (b) {
+      var shops = {}, avoid = 0;
+      b.products.forEach(function (p) { Object.keys(p.p).forEach(function (k) { shops[k] = 1; }); avoid += (p.a || []).length; });
+      var on = b.name === st.brand;
+      return {
+        name: b.name, count: b.products.length, shops: Object.keys(shops).length, on: on,
+        hasAvoid: avoid > 0, avoidTxt: avoid + (avoid === 1 ? ' deal to avoid' : ' deals to avoid'),
+        ring: on ? 'border: 2px solid var(--accent); background: var(--select-tint);' : '',
+        pick: function () { self.setState({ brand: b.name }); }
+      };
+    });
+    var sel = DATA.filter(function (b) { return b.name === st.brand; })[0] || DATA[0];
+    var colSet = {};
+    sel.products.forEach(function (p) { Object.keys(p.p).forEach(function (k) { colSet[k] = 1; }); });
+    var colIds = Object.keys(SHOP).filter(function (k) { return colSet[k]; });
+    var products = sel.products.map(function (p) {
+      var ids = Object.keys(p.p);
+      var best = ids.reduce(function (a, k) { return p.p[k] < p.p[a] ? k : a; }, ids[0]);
+      var worst = ids.reduce(function (a, k) { return p.p[k] > p.p[a] ? k : a; }, ids[0]);
+      var a = p.a || [];
+      var chips = [];
+      if (a.length) chips.push({ cls: 'chip chip-bad', text: 'Avoid at ' + a.length + (a.length === 1 ? ' shop' : ' shops') });
+      if (p.g) chips.push({ cls: 'chip chip-good', text: 'Good deal at ' + SHOP[p.g] });
+      return {
+        name: p.n, best: SHOP[best], bestTxt: eur(p.p[best]), chips: chips,
+        stock: ids.length === 1 ? 'only 1 shop sells it' : ids.length + ' shops sell it',
+        spread: ids.length > 1 ? eur(p.p[worst] - p.p[best]) : '–',
+        cells: colIds.map(function (k) {
+          var has = p.p[k] !== undefined;
+          return { txt: has ? eur(p.p[k]) : '–', w: k === best ? '700' : '400', color: k === best && ids.length > 1 ? 'var(--good)' : (has ? 'var(--ink)' : 'var(--faint)'), avoid: a.indexOf(k) !== -1 };
+        })
+      };
+    });
+    return {
+      look: look, mode: mode, theme: theme, isAdv: isAdv, isSimple: !isAdv,
+      rootCls: 'bfg look-' + look, dataTheme: dark ? 'dark' : 'light',
+      setMode: function (m) { try { localStorage.setItem('bfg-mode', m); } catch (e) {} self.setState({ mode: m }); },
+      setTheme: function (t) { try { localStorage.setItem('bfg-theme', t); } catch (e) {} self.setState({ theme: t }); },
+      productHref: 'Product' + suffix + '.dc.html',
+      q: st.q, onQ: function (e) { self.setState({ q: e.target.value }); },
+      brands: brands, count: brands.length, noBrands: brands.length === 0,
+      sel: { name: sel.name, count: sel.products.length }, products: products,
+      cols: colIds.map(function (k) { return SHOP[k]; })
+    };
+  }
+}
+</script>
+</body>
+</html>

@@ -10,27 +10,14 @@ function signedEuro(cents: number): string {
 
 function ChangeCell({ row }: { row: DayRow }) {
   const c = row.change;
-  if (row.price === null) return <td className="px-2 py-2" />;
+  if (row.price === null) return <td />;
   if (!c) {
-    return (
-      <td className="px-2 py-2 text-right text-xs text-muted-foreground">{row.prevHidden ? 'Previous day not shown by the shop' : 'No earlier price'}</td>
-    );
+    return <td className="r text-xs text-muted-foreground">{row.prevHidden ? 'Previous day not shown by the shop' : 'No earlier price'}</td>;
   }
-  if (c.cents === 0) return <td className="px-2 py-2 text-right text-muted-foreground">No change</td>;
+  if (c.cents === 0) return <td className="r text-muted-foreground">No change</td>;
   return (
-    <td className={cn('px-2 py-2 text-right font-semibold whitespace-nowrap tabular-nums', c.cents > 0 ? 'text-bad' : 'text-good')}>
+    <td className={cn('r font-bold whitespace-nowrap tabular-nums', c.cents > 0 ? 'text-bad' : 'text-good')}>
       <span>{signedEuro(c.cents)}</span> <span>{signedPct(c.pct)}</span>
-    </td>
-  );
-}
-
-function WorthCell({ worth }: { worth: boolean | null }) {
-  if (worth === null) return <td className="px-2 py-2" />;
-  return (
-    <td className="px-2 py-2">
-      <span className={cn('inline-block rounded-md border px-2 py-0.5 text-xs font-semibold', worth ? 'border-good text-good' : 'border-bad text-bad')}>
-        {worth ? 'Yes' : 'No'}
-      </span>
     </td>
   );
 }
@@ -60,53 +47,43 @@ export type DayTableProps = {
 export function DayTable({ id, rows, judged, low30, wasLabel, className }: DayTableProps) {
   const newestFirst = [...rows].reverse();
   return (
-    <div className={cn('overflow-x-auto', className)}>
-      <table id={id} className="w-full border-collapse text-left text-sm">
-        <caption className="pb-2 text-left font-semibold">Price by day</caption>
-        <thead>
-          <tr className="text-xs text-muted-foreground">
-            <th scope="col" className="px-2 py-1 font-medium">
-              Day
-            </th>
-            <th scope="col" className="px-2 py-1 text-right font-medium">
-              Price
-            </th>
-            <th scope="col" className="px-2 py-1 text-right font-medium">
-              {wasLabel ?? 'Was'}
-            </th>
-            <th scope="col" className="px-2 py-1 text-right font-medium">
-              Change
-            </th>
-            <th scope="col" className="px-2 py-1 font-medium">
-              Black Friday
-            </th>
-            {judged && (
-              <th scope="col" className="px-2 py-1 font-medium">
-                Worth buying
+    <div className="flex flex-col gap-2">
+      <div className={cn('overflow-x-auto', className)}>
+        <table id={id} className="data-table">
+          <caption className="sr-only">Price by day</caption>
+          <thead>
+            <tr>
+              <th scope="col">Day</th>
+              <th scope="col" className="r">
+                Price
               </th>
-            )}
-          </tr>
-        </thead>
-        <tbody>
-          {newestFirst.map((r) => (
-            <tr key={r.day} className="border-t border-line align-top">
-              <th scope="row" className="px-2 py-2 font-medium whitespace-nowrap">
-                {formatDay(r.day)}
+              <th scope="col" className="r">
+                {wasLabel ?? 'Was'}
               </th>
-              {r.price === null ? (
-                <td className="px-2 py-2 text-right text-xs text-muted-foreground">{NO_PRICE}</td>
-              ) : (
-                <td className="px-2 py-2 text-right tabular-nums">{formatEuro(r.price)}</td>
-              )}
-              <td className="px-2 py-2 text-right text-muted-foreground tabular-nums">{r.was !== null ? formatEuro(r.was) : r.wasKnown ? 'None' : 'Not recorded'}</td>
-              <ChangeCell row={r} />
-              <td className="px-2 py-2">{r.bf ? <span className="font-semibold">Marked</span> : <span className="text-muted-foreground">Not marked</span>}</td>
-              {judged && <WorthCell worth={r.worth} />}
+              <th scope="col" className="r">
+                Change
+              </th>
+              <th scope="col">Black Friday</th>
+              {judged && <th scope="col">Worth buying</th>}
             </tr>
-          ))}
-        </tbody>
-      </table>
-      <p className="mt-2 text-xs text-muted-foreground">
+          </thead>
+          <tbody>
+            {newestFirst.map((r) => (
+              <tr key={r.day}>
+                <th scope="row" className="font-semibold whitespace-nowrap">
+                  {formatDay(r.day)}
+                </th>
+                {r.price === null ? <td className="r text-xs text-muted-foreground">{NO_PRICE}</td> : <td className="r t-num text-[15px]">{formatEuro(r.price)}</td>}
+                <td className="r text-muted-foreground tabular-nums">{r.was !== null ? formatEuro(r.was) : r.wasKnown ? 'None' : 'Not recorded'}</td>
+                <ChangeCell row={r} />
+                <td className={r.bf ? 'font-semibold' : 'text-muted-foreground'}>{r.bf ? 'Marked' : 'Not marked'}</td>
+                {judged && <td className="text-muted-foreground">{r.worth === null ? '' : r.worth ? 'Yes' : 'No'}</td>}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      <p className="text-[13px] text-muted-foreground">
         {judged && low30 !== null
           ? `Worth buying: the price that day was at or below ${formatEuro(low30)}, the lowest price this verdict uses. Change is against the previous day we tracked.`
           : 'Days worth buying are shown only for a judged deal, on the variant the verdict is about. Change is against the previous day we tracked.'}

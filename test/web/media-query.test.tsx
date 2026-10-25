@@ -90,7 +90,7 @@ describe('useMediaQuery', () => {
     expect(desktop.removed).toEqual(expect.arrayContaining(desktop.added));
   });
 
-  it('the sticky top bar uses the opaque bar fill, not see-through glass', () => {
+  it('the sticky top bar uses the smoked bar fill, not see-through glass', () => {
     stubMatchMedia(1024);
     render(
       <ModeProvider>
@@ -100,11 +100,11 @@ describe('useMediaQuery', () => {
       </ModeProvider>,
     );
     const header = screen.getByRole('navigation', { name: 'Main navigation' }).closest('header')!;
-    expect(header.className).toContain('bg-bar');
+    expect(header.className.split(/\s+/)).toContain('smoke');
     expect(header.className).not.toContain('bg-glass');
   });
 
-  it('the floating bottom bar uses the same opaque bar fill', () => {
+  it('the floating bottom bar uses the same smoked bar fill', () => {
     stubMatchMedia(375);
     render(
       <ModeProvider>
@@ -114,7 +114,7 @@ describe('useMediaQuery', () => {
       </ModeProvider>,
     );
     const classes = screen.getByRole('navigation', { name: 'Mobile navigation' }).className.split(/\s+/);
-    expect(classes).toContain('bg-bar');
+    expect(classes).toContain('smoke');
     expect(classes).not.toContain('glass');
   });
 });

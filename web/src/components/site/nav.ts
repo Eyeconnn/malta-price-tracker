@@ -8,3 +8,6 @@ export const HOW_WE_CHECK = { to: '/how-we-check', label: 'How we check' } as co
 
 /** Tailwind min-width breakpoint (md) where the top nav takes over from the bottom bar. */
 export const DESKTOP_QUERY = '(min-width: 768px)';
+
+/** Search counts as the current page on the home page (the big search) and the results page. */
+export const isSearchPage = (path: string) => path === '/' || path === '/search';

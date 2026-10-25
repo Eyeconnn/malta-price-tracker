@@ -1,0 +1,395 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Black Friday Guide: product</title>
+<script src="./support.js"></script>
+<link rel="stylesheet" href="bfg.css">
+</head>
+<body>
+<x-dc>
+<helmet>
+<style>
+body{margin:0}
+</style>
+</helmet>
+<div class="{{rootCls}}" data-theme="{{dataTheme}}">
+<div class="bfg-bg" aria-hidden="true"></div>
+<dc-import name="Header" active="product" look="{{look}}" mode="{{mode}}" theme="{{theme}}" on-mode="{{setMode}}" on-theme="{{setTheme}}" hint-size="100%,64px"></dc-import>
+<main class="bfg-wrap">
+<nav aria-label="Breadcrumb" class="t-hint wrapline"><a href="{{href.home}}">Search</a><span aria-hidden="true">/</span><a href="{{href.deals}}">TVs &amp; audio</a><span aria-hidden="true">/</span><span>Sony WH-1000XM6</span></nav>
+
+<article class="glass card" aria-labelledby="p-title">
+<div style="display: flex; gap: 18px; align-items: flex-start;">
+<div class="photo" style="width: 112px; height: 112px;" aria-hidden="true"><svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M4 15v-3a8 8 0 0 1 16 0v3"></path><rect x="3" y="14" width="4" height="7" rx="1.5"></rect><rect x="17" y="14" width="4" height="7" rx="1.5"></rect></svg></div>
+<div class="stack" style="gap: 6px;">
+<p class="t-hint">Sony</p>
+<h1 id="p-title" style="font-size: 26px; line-height: 1.25; font-weight: 700; letter-spacing: -0.01em;">Sony WH-1000XM6 Wireless Noise Cancelling Headphones · Over-ear, Bluetooth 5.3</h1>
+<p style="font-size: 15px; color: var(--muted); max-width: 640px;">Over-ear wireless headphones with adaptive noise cancelling, up to 30 hours of battery and fast USB-C charging.</p>
+</div>
+</div>
+<div class="stack" style="gap: 6px;">
+<p id="opt" class="t-hint" style="font-weight: 600; margin-left: 15px;">Variant</p>
+<div class="seg-group" role="radiogroup" aria-labelledby="opt" style="width: fit-content; max-width: 100%;">
+<sc-for list="{{options}}" as="o" hint-placeholder-count="4"><button type="button" role="radio" class="{{o.cls}}" aria-checked="{{o.on}}" onClick="{{o.pick}}">{{o.label}}</button></sc-for>
+</div>
+<div class="{{optionNoteCls}}" aria-live="polite"><p class="t-hint" aria-hidden="{{optionNoteHidden}}">Shops that do not name this variant are left out.</p></div>
+</div>
+</article>
+
+<section class="glass card" aria-labelledby="advice" style="gap: 14px;">
+<p class="t-lbl">Our advice</p>
+<div class="between" style="align-items: flex-start;">
+<div style="display: flex; align-items: flex-start; gap: 14px; min-width: 0; flex: 1 1 360px;">
+<span class="logo" style="width: 48px; height: 48px; font-size: 16px;" aria-hidden="true">{{best.initials}}</span>
+<div class="stack" style="gap: 6px;">
+<h2 id="advice" style="font-size: 24px; line-height: 1.25; font-weight: 700;">{{adviceTitle}}</h2>
+<p class="wrapline" style="font-size: 14px;"><span class="{{adviceChip}}">{{best.verdictWord}}</span><span style="color: {{best.stockColor}}; font-weight: 600;">{{best.stockTxt}}</span></p>
+<p style="font-size: 15px; color: var(--muted); max-width: 620px;">{{adviceLine}}</p>
+</div>
+</div>
+<div class="stack" style="align-items: flex-end; gap: 10px;">
+<p style="display: flex; align-items: baseline; gap: 8px;"><span class="t-num" style="font-size: 40px; line-height: 1;">{{best.priceTxt}}</span><sc-if value="{{best.hasWas}}" hint-placeholder-val="{{true}}"><s class="t-strike"><span class="bfg-sr">Shop's was price </span>{{best.wasTxt}}</s></sc-if></p>
+<a class="btn btn-primary" href="#">View on {{best.name}}</a>
+</div>
+</div>
+<sc-if value="{{hasCame}}" hint-placeholder-val="{{true}}">
+<div style="display: flex; gap: 12px; align-items: flex-start; padding-top: 14px; border-top: 1px solid var(--line);">
+<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="flex-shrink: 0; margin-top: 2px; color: var(--muted);"><circle cx="12" cy="12" r="9"></circle><path d="M12 8v5M12 16h.01"></path></svg>
+<div class="stack" style="gap: 2px;">
+<p style="font-weight: 600;">About the listing you came from</p>
+<p style="font-size: 14px; color: var(--muted); max-width: 720px;">{{cameNote}}</p>
+</div>
+</div>
+</sc-if>
+</section>
+
+<div class="{{chartWrapCls}}" aria-hidden="{{chartHidden}}" inert="{{chartHidden}}">
+<div class="collapse-inner">
+<section class="glass card" aria-labelledby="hist">
+<div class="between">
+<h2 id="hist" class="bfg-sr">Price at each shop</h2><span></span>
+<div class="wrapline">
+<div class="seg-group" role="radiogroup" aria-label="Chart range">
+<button type="button" role="radio" class="{{r7Cls}}" aria-checked="{{is7}}" onClick="{{set7}}">7 days</button>
+<button type="button" role="radio" class="{{r30Cls}}" aria-checked="{{is30}}" onClick="{{set30}}">30 days</button>
+</div>
+
+</div>
+</div>
+<dc-import name="ChartLine" title="Price at each shop" description="{{chartDesc}}" rows="{{chartRows}}" index="day" series="{{chartSeries}}" y-min="{{chartYMin}}" height="{{chartHeight}}" bare="{{yes}}" lower-is-better="{{yes}}" hint-size="100%,400px"></dc-import>
+
+<div class="{{daysWrapCls}}" aria-hidden="{{daysWrapHidden}}" inert="{{daysWrapHidden}}">
+<div class="collapse-inner">
+<div style="border-top: 1px solid var(--line); padding-top: 12px;">
+<button type="button" class="btn btn-sm btn-ghost" style="padding-left: 0;" aria-expanded="{{daysOpen}}" aria-controls="days-panel" onClick="{{toggleDays}}">{{daysLabel}} <svg class="chev" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 9l6 6 6-6"></path></svg></button>
+<div id="days-panel" class="{{daysCls}}" aria-hidden="{{daysHidden}}" inert="{{daysHidden}}">
+<div class="collapse-inner">
+<div class="split" style="padding-top: 12px;">
+<div class="main">
+<div class="seg-group" role="radiogroup" aria-label="Shop for the price by day" style="width: fit-content; max-width: 100%;">
+<sc-for list="{{shopTabs}}" as="t" hint-placeholder-count="4"><button type="button" role="radio" class="{{t.cls}}" aria-checked="{{t.on}}" onClick="{{t.pick}}">{{t.name}}</button></sc-for>
+</div>
+<div class="scroll-x" style="max-height: 400px; overflow-y: auto;">
+<table class="table">
+<thead><tr><th scope="col">Day</th><th scope="col" class="r">Price</th><th scope="col" class="r">Was</th><th scope="col" class="r">Change</th><th scope="col">Black Friday</th><sc-if value="{{sel.judged}}" hint-placeholder-val="{{true}}"><th scope="col">Worth buying</th></sc-if></tr></thead>
+<tbody>
+<sc-for list="{{dayRows}}" as="r" hint-placeholder-count="8">
+<tr>
+<th scope="row" style="white-space: nowrap; font-weight: 600;">{{r.day}}</th>
+<td class="r t-num" style="font-size: 15px;">{{r.price}}</td>
+<td class="r" style="color: var(--muted);">{{r.was}}</td>
+<td class="r" style="color: {{r.changeColor}}; font-weight: {{r.changeWeight}}; white-space: nowrap;">{{r.change}}</td>
+<td style="color: {{r.bfColor}};">{{r.bf}}</td>
+<sc-if value="{{sel.judged}}" hint-placeholder-val="{{true}}"><td style="color: var(--muted);">{{r.worth}}</td></sc-if>
+</tr>
+</sc-for>
+</tbody>
+</table>
+</div>
+<p class="t-hint">{{dayNote}}</p>
+</div>
+<div class="side">
+<h3 class="t-card">Numbers at {{sel.name}}</h3>
+<sc-if value="{{sel.judged}}" hint-placeholder-val="{{true}}">
+<dl style="margin: 0; font-size: 14px;">
+<sc-for list="{{numbers}}" as="n" hint-placeholder-count="8">
+<div style="display: flex; justify-content: space-between; gap: 12px; padding: 7px 0; border-top: 1px solid var(--line);"><dt style="color: var(--muted);">{{n.k}}</dt><dd style="margin: 0; font-weight: 600; text-align: right;">{{n.v}}</dd></div>
+</sc-for>
+</dl>
+</sc-if>
+<sc-if value="{{sel.notJudged}}" hint-placeholder-val="{{false}}"><p class="t-hint">Numbers are shown only for a judged deal. {{sel.name}} does not mark this product Black Friday or claim a discount.</p></sc-if>
+</div>
+</div>
+</div>
+</div>
+</div>
+</div>
+</div>
+</section>
+</div>
+</div>
+
+<sc-if value="{{isSimple}}" hint-placeholder-val="{{true}}">
+<button type="button" class="btn" style="align-self: flex-start;" aria-expanded="{{chartOpen}}" onClick="{{toggleChart}}"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 17l6-6 4 4 8-8"></path></svg>{{chartLabelBtn}}</button>
+</sc-if>
+
+<section class="glass card" aria-labelledby="others-title" style="gap: 4px; padding: 18px 22px;">
+<h2 id="others-title" class="t-card" style="margin-bottom: 6px;">Other shops</h2>
+<ul style="list-style: none; margin: 0; padding: 0;">
+<sc-for list="{{others}}" as="o" hint-placeholder-count="3">
+<li class="shop-row">
+<div class="shop-row-main">
+<span class="logo" aria-hidden="true">{{o.initials}}</span>
+<span class="stack" style="flex: 1 1 200px;"><span style="font-weight: 600;">{{o.name}}</span><sc-if value="{{o.mine}}" hint-placeholder-val="{{false}}"><span class="t-hint">The listing you came from</span></sc-if></span>
+<span style="font-size: 13px; font-weight: 600; color: {{o.stockColor}}; min-width: 96px;">{{o.stockTxt}}</span>
+<span style="font-size: 13px; font-weight: 600; color: {{o.verdictColor}}; min-width: 140px;">{{o.verdictWord}}</span>
+<span class="stack" style="align-items: flex-end; min-width: 90px;"><span class="t-num" style="font-size: 20px;">{{o.priceTxt}}</span><span class="t-hint">{{o.diffTxt}}</span></span>
+</div>
+<div class="{{rowMoreCls}}" aria-hidden="{{rowMoreHidden}}" inert="{{rowMoreHidden}}">
+<div class="collapse-inner">
+<div style="padding: 10px 0 2px 44px; display: flex; flex-direction: column; gap: 8px;">
+<p style="font-size: 14px;">{{o.reason}}</p>
+<sc-if value="{{o.hasWas}}" hint-placeholder-val="{{false}}"><p class="t-hint">Shop's was price {{o.wasTxt}}, so it claims {{o.claimedTxt}} off. Its own title: "{{o.shopTitle}}"</p></sc-if>
+<div class="wrapline">
+<a class="btn btn-sm" href="#">View on {{o.name}}</a>
+<button type="button" class="btn btn-sm btn-ghost" aria-expanded="{{o.reporting}}" onClick="{{o.report}}">{{o.reportLabel}}</button>
+</div>
+<sc-if value="{{o.reporting}}" hint-placeholder-val="{{false}}">
+<div class="glass card" style="padding: 16px; gap: 12px;">
+<sc-if value="{{o.sent}}" hint-placeholder-val="{{false}}"><p style="font-weight: 600;">Thanks. Every report is read before anything changes on the page.</p></sc-if>
+<sc-if value="{{o.notSent}}" hint-placeholder-val="{{true}}">
+<fieldset style="border: 0; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px;">
+<legend style="font-weight: 700; margin-bottom: 6px;">What is wrong at {{o.name}}?</legend>
+<label class="wrapline" style="min-height: 36px;"><input type="radio" name="what"> The price or was price is wrong</label>
+<label class="wrapline" style="min-height: 36px;"><input type="radio" name="what"> Not the same product</label>
+<label class="wrapline" style="min-height: 36px;"><input type="radio" name="what"> The verdict is wrong</label>
+<label class="wrapline" style="min-height: 36px;"><input type="radio" name="what"> Something else</label>
+</fieldset>
+<div class="field"><label for="rep-text">Tell us more (optional)</label><textarea id="rep-text" class="input" rows="2"></textarea></div>
+<button type="button" class="btn btn-primary" style="align-self: flex-start;" onClick="{{o.send}}">Send report</button>
+</sc-if>
+</div>
+</sc-if>
+</div>
+</div>
+</div>
+</li>
+</sc-for>
+</ul>
+<sc-if value="{{isSimple}}" hint-placeholder-val="{{true}}"><button type="button" class="btn btn-sm btn-ghost" style="align-self: flex-start; padding-left: 0;" onClick="{{toAdvanced}}">Show how each shop was judged</button></sc-if>
+</section>
+
+<div class="{{advCls}}" aria-hidden="{{advHidden}}" inert="{{advHidden}}">
+<div class="collapse-inner">
+<section class="glass card" aria-labelledby="details" style="gap: 6px;">
+<h2 id="details" class="t-card">Product details</h2>
+<dl style="margin: 0; font-size: 14px; display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); column-gap: 32px;">
+<div style="display: flex; justify-content: space-between; padding: 7px 0; border-top: 1px solid var(--line);"><dt style="color: var(--muted);">Brand</dt><dd style="margin: 0; font-weight: 600;">Sony</dd></div>
+<div style="display: flex; justify-content: space-between; padding: 7px 0; border-top: 1px solid var(--line);"><dt style="color: var(--muted);">Part number</dt><dd style="margin: 0; font-weight: 600;">WH1000XM6B</dd></div>
+<div style="display: flex; justify-content: space-between; padding: 7px 0; border-top: 1px solid var(--line);"><dt style="color: var(--muted);">Type</dt><dd style="margin: 0; font-weight: 600;">Over-ear</dd></div>
+<div style="display: flex; justify-content: space-between; padding: 7px 0; border-top: 1px solid var(--line);"><dt style="color: var(--muted);">Connection</dt><dd style="margin: 0; font-weight: 600;">Bluetooth 5.3</dd></div>
+<div style="display: flex; justify-content: space-between; padding: 7px 0; border-top: 1px solid var(--line);"><dt style="color: var(--muted);">Noise cancelling</dt><dd style="margin: 0; font-weight: 600;">Yes</dd></div>
+<div style="display: flex; justify-content: space-between; padding: 7px 0; border-top: 1px solid var(--line);"><dt style="color: var(--muted);">Matched by</dt><dd style="margin: 0; font-weight: 600;">Part number, 4 shops</dd></div>
+</dl>
+</section>
+</div>
+</div>
+<p class="t-hint" style="text-align: center;">Prices recorded every night from each shop's website. Demo data as of Sat 21 Nov.</p>
+</main>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"look":{"editor":"enum","options":["glass","blend"],"default":"glass"},"mode":{"editor":"enum","options":["simple","advanced"],"default":"simple"},"$preview":{"width":1440,"height":3000}}'>
+class Component extends DCLogic {
+  constructor(props) {
+    super(props);
+    var m = null, t = null;
+    try { m = localStorage.getItem('bfg-mode'); t = localStorage.getItem('bfg-theme'); } catch (e) {}
+    this.state = { mode: m, theme: t || 'system', option: 'all', sel: 'pixel', range: 30, report: null, sent: {}, chartOpen: false, daysOpen: false };
+  }
+  renderVals() {
+    var self = this;
+    var st = this.state;
+    var look = this.props.look === 'blend' ? 'blend' : 'glass';
+    var suffix = look === 'blend' ? 'Blend' : '';
+    var page = function (n) { return n + suffix + '.dc.html'; };
+    var href = { home: page('Main'), deals: page('Deals'), shop: page('Shop') };
+    var mode = st.mode || this.props.mode || 'simple';
+    var theme = st.theme;
+    var sysDark = false;
+    try { sysDark = window.matchMedia('(prefers-color-scheme: dark)').matches; } catch (e) {}
+    var dark = theme === 'dark' || (theme === 'system' && sysDark);
+    var isAdv = mode === 'advanced';
+    var eur = function (n) { return '€' + n.toLocaleString('en-GB'); };
+    var MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+    var WD = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+    var date = function (i) { return new Date(Date.UTC(2026, 9, 23 + i)); };
+    var short = function (i) { var d = date(i); return d.getUTCDate() + ' ' + MONTHS[d.getUTCMonth()]; };
+    var long = function (i) { var d = date(i); return WD[d.getUTCDay()] + ' ' + d.getUTCDate() + ' ' + MONTHS[d.getUTCMonth()]; };
+    var steps = function (start, ch) { var out = [], p = start; for (var d = 0; d < 30; d++) { if (ch[d] !== undefined) p = ch[d]; out.push(p); } return out; };
+    var from = function (val, day) { return steps(null, (function () { var o = {}; o[day] = val; return o; })()); };
+    var flags = function (day) { var out = []; for (var d = 0; d < 30; d++) out.push(day !== null && d >= day); return out; };
+    var initials = function (s) { return s.split(' ').map(function (w) { return w[0]; }).join('').slice(0, 2).toUpperCase(); };
+
+    var S = [
+      { id: 'pixel', name: 'Pixel Point', color: 'var(--s1)', h: steps(399, { 24: 359 }), w: from(399, 24), bf: flags(24), opts: ['black', 'silver', 'blue'], stock: true,
+        v: 'good', reason: '€40 below its lowest price in the 24 days before 16 Nov (€399).', low30: 399, usual: 399,
+        title: 'SONY WH-1000XM6 Wireless NC Headphones Black' },
+      { id: 'volt', name: 'Volt Electronics', color: 'var(--s2)', h: steps(399, { 20: 429 }), w: from(499, 20), bf: flags(20), opts: ['black', 'silver', 'blue'], stock: true,
+        v: 'avoid', k: 'price', rf: 399, ra: '7 Nov', reason: 'Price went from €399 on 7 Nov to €429 on 12 Nov while marked Black Friday.', low30: 399, usual: 399,
+        title: 'Sony WH1000XM6B Noise Cancelling Over-Ear Headphones (Black) - BLACK FRIDAY' },
+      { id: 'harbour', name: 'Harbour Tech', color: 'var(--s3)', h: steps(409, { 18: 389 }), w: steps(null, {}), bf: flags(null), opts: ['black', 'silver'], stock: true,
+        v: 'none', reason: 'Not marked Black Friday and no discount claimed. This is its regular price.',
+        title: 'Sony WH-1000XM6 Headphones' },
+      { id: 'isla', name: 'Isla Digital', color: 'var(--s4)', h: steps(399, {}), w: from(429, 22), bf: flags(22), opts: ['black', 'blue'], stock: false,
+        v: 'avoid', k: 'was-high', reason: 'Was price €429 is higher than any price it charged since 23 Oct (highest €399).', low30: 399, usual: 399,
+        title: 'Sony WH-1000XM6 Wireless Headphones, Black' }
+    ];
+    var opt = st.option;
+    var shown = S.filter(function (s) { return opt === 'all' || s.opts.indexOf(opt) !== -1; }).slice().sort(function (a, b) { return a.h[29] - b.h[29]; });
+    var changes = function (arr) { var n = 0; for (var i = 1; i < arr.length; i++) if (arr[i] !== arr[i - 1]) n++; return n; };
+
+    // one row per shop; colour is used only for the verdict word, never for borders or banners
+    var rows = shown.map(function (s) {
+      var p = s.h[29], w = s.w[29];
+      var avoid = s.v === 'avoid';
+      var reporting = st.report === s.id, sent = !!st.sent[s.id];
+      return {
+        id: s.id, name: s.name, initials: initials(s.name), shopTitle: s.title, mine: s.id === 'volt', v: s.v, src: s,
+        price: p, priceTxt: eur(p), hasWas: !!w && w > p, wasTxt: w ? eur(w) : '', claimedTxt: w ? Math.round((1 - p / w) * 100) + '%' : '',
+        inStock: s.stock, stockTxt: s.stock ? 'In stock' : 'Out of stock', stockColor: s.stock ? 'var(--ink)' : 'var(--muted)',
+        verdictWord: s.v === 'good' ? 'Real deal' : (avoid ? 'Deal to avoid' : 'Regular price'),
+        verdictColor: s.v === 'good' ? 'var(--good)' : (avoid ? 'var(--bad)' : 'var(--muted)'),
+        reason: s.reason,
+        reporting: reporting, sent: sent, notSent: !sent, reportLabel: reporting ? 'Close' : 'Something wrong?',
+        report: function () { self.setState({ report: reporting ? null : s.id }); },
+        send: function () { var o = Object.assign({}, self.state.sent); o[s.id] = true; self.setState({ sent: o }); }
+      };
+    });
+    var stocked = rows.filter(function (x) { return x.inStock; });
+    var best = stocked[0] || rows[0];
+    var others = rows.filter(function (x) { return x !== best; }).map(function (x) {
+      var d = x.price - best.price;
+      return Object.assign({}, x, { diffTxt: d > 0 ? '+' + eur(d) + ' more' : (d < 0 ? eur(-d) + ' less' : 'Same price') });
+    });
+    var came = rows.filter(function (x) { return x.mine; })[0];
+
+    // one story, not a mix of verdicts: where to buy, then a calm word on the listing the visitor came from
+    var adviceTitle = 'Buy it at ' + best.name + ' for ' + best.priceTxt;
+    var adviceLine = best.v === 'good'
+      ? 'The lowest price at any shop we track, and a real cut: it sold for ' + eur(best.src.low30) + ' for most of the past month.'
+      : 'The lowest price at any shop we track today. It is not on sale, so this is its regular price.';
+    var cameNote = '';
+    if (came && came !== best) {
+      var more = came.price - best.price;
+      cameNote = came.src.k === 'price'
+        ? came.name + ' marks this product Black Friday at ' + came.priceTxt + ', but it sold for ' + eur(came.src.rf) + ' until 12 Nov, so its discount is not real. It also costs ' + eur(more) + ' more than ' + best.name + '.'
+        : came.name + ' sells it for ' + came.priceTxt + ', ' + eur(more) + ' more than ' + best.name + '.';
+    }
+
+    var selS = S.filter(function (s) { return s.id === st.sel; })[0] || S[0];
+    var judged = selS.v === 'good' || selS.v === 'avoid';
+    var pNow = selS.h[29], wNow = selS.w[29];
+    var real = judged ? (pNow - selS.low30) / selS.low30 * 100 : 0;
+    var sel = { name: selS.name, judged: judged, notJudged: !judged, low30Txt: judged ? eur(selS.low30) : '' };
+    var numbers = !judged ? [] : [
+      { k: 'Lowest 30 days', v: eur(selS.low30) },
+      { k: 'Usual price', v: eur(selS.usual) },
+      { k: 'Claimed discount', v: wNow ? '-' + Math.round((1 - pNow / wNow) * 100) + '%' : 'None claimed' },
+      { k: 'Real change vs lowest 30 days', v: (real > 0 ? '+' : '') + real.toFixed(1) + '%' },
+      selS.k === 'price' ? { k: 'Price before the rise', v: eur(selS.rf) + ' on ' + selS.ra } : null,
+      selS.k === 'price' ? { k: 'Price after the rise', v: eur(pNow) + ' on 12 Nov' } : null,
+      { k: 'Days tracked', v: '30' },
+      { k: 'Price changes', v: String(changes(selS.h)) },
+      { k: 'Was price changes', v: String(changes(selS.w)) }
+    ].filter(Boolean);
+
+    // chart: the best shop's line is drawn on top and thicker, the others thinner
+    var N = st.range, start = 30 - N;
+    var X0 = 56, X1 = 804, Y0 = 280, Y1 = 24, PMIN = 340, PMAX = 520;
+    var xAt = function (i) { return X0 + (i - start) * (X1 - X0) / (N - 1); };
+    var yAt = function (p) { return Y0 - (p - PMIN) / (PMAX - PMIN) * (Y0 - Y1); };
+    var path = function (vals) {
+      var d = '', on = false;
+      for (var i = start; i < 30; i++) {
+        if (vals[i] === null) { on = false; continue; }
+        if (!on) { d += 'M' + xAt(i).toFixed(1) + ' ' + yAt(vals[i]).toFixed(1); on = true; }
+        else d += ' L' + xAt(i).toFixed(1) + ' ' + yAt(vals[i - 1]).toFixed(1) + ' L' + xAt(i).toFixed(1) + ' ' + yAt(vals[i]).toFixed(1);
+      }
+      return d || 'M0 0';
+    };
+    var lines = shown.slice().sort(function (a, b) { return (a.id === best.id) - (b.id === best.id); }).map(function (s) {
+      var top = s.id === best.id;
+      return { name: s.name, color: s.color, d: path(s.h), wasD: path(s.w), endY: yAt(s.h[29]).toFixed(1), nowTxt: eur(s.h[29]), width: top ? 3.5 : 2.2, opacity: top ? 1 : 0.75 };
+    });
+    var yTicks = [];
+    for (var p = PMIN; p <= PMAX; p += 30) yTicks.push({ y: yAt(p).toFixed(1), ty: (yAt(p) + 4).toFixed(1), label: eur(p) });
+    var xIdx = N === 7 ? [23, 25, 27, 29] : [0, 6, 12, 18, 24, 29];
+    var xTicks = xIdx.map(function (i) { return { x: xAt(i).toFixed(1), label: short(i) }; });
+
+    var dayRows = [];
+    for (var j = 29; j >= start; j--) {
+      var pr = selS.h[j], prev = j > 0 ? selS.h[j - 1] : null, ch = prev === null ? null : pr - prev;
+      dayRows.push({
+        day: long(j), price: eur(pr), was: selS.w[j] ? eur(selS.w[j]) : 'None',
+        change: ch === null ? 'No earlier price' : (ch === 0 ? 'No change' : (ch > 0 ? '+' : '-') + eur(Math.abs(ch)) + ' (' + (ch > 0 ? '+' : '') + (ch / prev * 100).toFixed(1) + '%)'),
+        changeColor: ch > 0 ? 'var(--bad)' : (ch < 0 ? 'var(--good)' : 'var(--muted)'), changeWeight: ch ? '700' : '400',
+        bf: selS.bf[j] ? 'Marked' : 'Not marked', bfColor: selS.bf[j] ? 'var(--ink)' : 'var(--muted)',
+        worth: judged ? (pr <= selS.low30 ? 'Yes' : 'No') : ''
+      });
+    }
+
+    // rows for the line chart: one per day, a column per shop and a dashed was-price column where one is shown
+    var chartRows = [];
+    for (var ci = start; ci < 30; ci++) {
+      var row = { day: short(ci) };
+      shown.forEach(function (s) { row[s.id] = s.h[ci]; row[s.id + '_was'] = s.w[ci]; });
+      chartRows.push(row);
+    }
+    var ordered = shown.slice().sort(function (a, b) { return (b.id === best.id) - (a.id === best.id); });
+    var chartSeries = ordered.map(function (s) { return { key: s.id, label: s.name, color: s.color }; });
+    ordered.forEach(function (s) { if (s.w.slice(start).some(function (v) { return v !== null; })) chartSeries.push({ key: s.id + '_was', label: s.name + ' was price', color: s.color, dashed: true }); });
+    var chartOpen = isAdv || st.chartOpen;
+    var daysOpen = isAdv && st.daysOpen;
+    var col = function (open) { return 'collapse' + (open ? ' open' : ''); };
+    var OPTS = [['all', 'All'], ['black', 'Black'], ['silver', 'Silver'], ['blue', 'Midnight Blue']];
+    var setMode = function (m) { try { localStorage.setItem('bfg-mode', m); } catch (e) {} self.setState({ mode: m }); };
+    return {
+      look: look, mode: mode, theme: theme, href: href,
+      rootCls: 'bfg look-' + look, dataTheme: dark ? 'dark' : 'light',
+      setMode: setMode,
+      setTheme: function (t) { try { localStorage.setItem('bfg-theme', t); } catch (e) {} self.setState({ theme: t }); },
+      isAdv: isAdv, isSimple: !isAdv,
+      options: OPTS.map(function (o) { return { label: o[1], on: opt === o[0], cls: 'seg' + (opt === o[0] ? ' seg-on' : ''), pick: function () { self.setState({ option: o[0] }); } }; }),
+      optionNote: opt !== 'all',
+      optionNoteCls: 'opt-note' + (opt !== 'all' ? ' opt-note-on' : ''), optionNoteHidden: opt === 'all' ? 'true' : 'false',
+      best: best, others: others,
+      adviceTitle: adviceTitle, adviceLine: adviceLine,
+      adviceChip: 'chip ' + (best.v === 'good' ? 'chip-good' : 'chip-neutral'),
+      hasCame: !!cameNote, cameNote: cameNote,
+      chartWrapCls: col(chartOpen), chartHidden: !chartOpen, chartOpen: chartOpen,
+      chartLabelBtn: st.chartOpen ? 'Hide price chart' : 'View price chart',
+      toggleChart: function () { self.setState({ chartOpen: !self.state.chartOpen }); },
+      daysWrapCls: col(isAdv), daysWrapHidden: !isAdv,
+      daysCls: col(daysOpen), daysHidden: !daysOpen, daysOpen: daysOpen,
+      daysLabel: daysOpen ? 'Hide price by day' : 'Show price by day',
+      toggleDays: function () { self.setState({ daysOpen: !self.state.daysOpen }); },
+      rowMoreCls: col(isAdv), rowMoreHidden: !isAdv,
+      advCls: col(isAdv), advHidden: !isAdv,
+      toAdvanced: function () { setMode('advanced'); },
+      r7Cls: 'seg' + (N === 7 ? ' seg-on' : ''), r30Cls: 'seg' + (N === 30 ? ' seg-on' : ''), is7: N === 7, is30: N === 30,
+      set7: function () { self.setState({ range: 7 }); }, set30: function () { self.setState({ range: 30 }); },
+      lines: lines, yTicks: yTicks, xTicks: xTicks,
+      chartRows: chartRows, chartSeries: chartSeries, chartYMin: 340, chartHeight: 260, yes: true,
+      chartDesc: 'Last ' + N + ' days. ' + best.name + ' is the main line; dashed lines are the shops’ was prices.',
+      chartLabel: 'Each shop’s price over the last ' + N + ' days. ' + best.name + ' is the bold line. The same prices are in the price by day table.',
+      sel: sel, numbers: numbers,
+      shopTabs: shown.map(function (s) { return { name: s.name, on: st.sel === s.id, cls: 'seg' + (st.sel === s.id ? ' seg-on' : ''), pick: function () { self.setState({ sel: s.id }); } }; }),
+      dayRows: dayRows,
+      dayNote: judged ? 'Worth buying: the price that day was at or below ' + sel.low30Txt + ', the lowest price the verdict uses. Change is against the previous day we tracked.' : 'Change is against the previous day we tracked.'
+    };
+  }
+}
+</script>
+</body>
+</html>

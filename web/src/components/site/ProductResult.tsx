@@ -68,7 +68,14 @@ const PHOTO = /^\/img\/[0-9a-f]{64}\.webp$/;
 export function ProductImage({ url, alt, size, className }: { url: string | null; alt: string; size: number; className?: string }) {
   const [failed, setFailed] = useState<string | null>(null);
   if (!url || !PHOTO.test(url) || failed === url) {
-    return <span aria-hidden="true" data-photo-placeholder="" className={cn('block flex-none rounded-xl bg-secondary/60', className)} style={{ width: size, height: size }} />;
+    return (
+      <span
+        aria-hidden="true"
+        data-photo-placeholder=""
+        className={cn('block flex-none rounded-xl border border-line bg-linear-160 from-surface to-line-soft', className)}
+        style={{ width: size, height: size }}
+      />
+    );
   }
   return (
     <img
@@ -79,7 +86,7 @@ export function ProductImage({ url, alt, size, className }: { url: string | null
       loading="lazy"
       decoding="async"
       onError={() => setFailed(url)}
-      className={cn('flex-none rounded-xl bg-popover object-contain', className)}
+      className={cn('flex-none rounded-xl border border-line bg-white object-contain', className)}
     />
   );
 }

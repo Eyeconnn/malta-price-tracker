@@ -98,7 +98,8 @@ describe('Search page results', () => {
     expect(card.className).not.toMatch(/ring|has-\[/);
     expect(card.className).toContain('min-h-11');
     fireEvent.click(link);
-    expect(where()).toBe('/product/s77');
+    // the page change waits for the old page's blocks to slide away
+    await waitFor(() => expect(where()).toBe('/product/s77'));
   });
 
   it('a product at several shops is one row: name, specs after a middle dot, "from" the lowest price at N shops', async () => {
@@ -200,7 +201,7 @@ describe('live results', () => {
       const link = await within(region).findByRole('link', { name: /Lenovo ThinkBook 16 G6/ });
       expect(link.getAttribute('aria-label')).toBeNull();
       expect(link.className).toContain('min-h-11');
-      expect(link.className).toContain('hover:bg-secondary');
+      expect(link.className).toContain('hover:bg-select-tint');
       expect(link.className).toContain('focus-visible:ring-[3px]');
       expect(link.className).toMatch(/focus-visible:ring-ring(\s|$)/);
       const el = target === 'title' ? within(link).getByText('Lenovo ThinkBook 16 G6') : target === 'price' ? link.querySelector<HTMLElement>('.tabular-nums')! : link;

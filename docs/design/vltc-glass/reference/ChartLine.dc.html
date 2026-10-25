@@ -1,0 +1,319 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Line chart</title>
+<script src="./support.js"></script>
+<link rel="stylesheet" href="bfg.css">
+</head>
+<body>
+<x-dc>
+<helmet>
+<style>
+body{margin:0}
+</style>
+</helmet>
+<div class="{{rootCls}}">
+<div class="cl-head">
+<div style="display: flex; align-items: flex-start; gap: 10px; min-width: 0;">
+<span class="cl-icon" aria-hidden="true"><svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M2 11.5 6 7.5l3 3 5-6"></path></svg></span>
+<div class="stack" style="gap: 2px; min-width: 0;">
+<h3 class="cl-title">{{title}}</h3>
+<sc-if value="{{hasDesc}}" hint-placeholder-val="{{true}}"><p class="t-hint">{{description}}</p></sc-if>
+</div>
+</div>
+<sc-if value="{{hasHeadline}}" hint-placeholder-val="{{true}}">
+<div style="display: flex; align-items: baseline; gap: 8px;">
+<span class="cl-value t-num">{{headlineTxt}}</span>
+<sc-if value="{{hasDelta}}" hint-placeholder-val="{{true}}"><span class="cl-delta" style="color: {{deltaColor}}; background: {{deltaBg}};"><span class="bfg-sr">Change over the period: </span>{{deltaTxt}}</span></sc-if>
+</div>
+</sc-if>
+</div>
+
+<div ref="{{setBox}}" class="cl-plot" tabindex="0" role="group" aria-label="{{ariaLabel}}" onKeyDown="{{onKey}}" onBlur="{{clear}}" style="height: {{svgH}}px;">
+<sc-if value="{{ready}}" hint-placeholder-val="{{false}}">
+<svg width="{{width}}" height="{{svgH}}" style="display: block; overflow: visible;" onPointerMove="{{onMove}}" onPointerLeave="{{clear}}">
+<defs>
+<sc-for list="{{lines}}" as="l" hint-placeholder-count="2">
+<pattern id="{{l.patId}}" width="5" height="5" patternUnits="userSpaceOnUse"><circle cx="1.25" cy="1.25" r="1.1" fill="{{l.color}}"></circle><circle cx="3.75" cy="3.75" r="1.1" fill="{{l.color}}"></circle></pattern>
+</sc-for>
+</defs>
+<sc-for list="{{grid}}" as="g" hint-placeholder-count="4">
+<line class="cl-fade" x1="{{padL}}" x2="{{gridX2}}" y1="{{g.y}}" y2="{{g.y}}" stroke="var(--line)" stroke-dasharray="3 4"></line>
+<text class="cl-fade cl-axis" x="{{g.lx}}" y="{{g.y}}" text-anchor="end" dominant-baseline="middle">{{g.label}}</text>
+</sc-for>
+<sc-for list="{{xLabels}}" as="x" hint-placeholder-count="6">
+<text class="cl-fade cl-axis" x="{{x.x}}" y="{{x.y}}" text-anchor="middle" style="fill: {{x.fill}};">{{x.label}}</text>
+</sc-for>
+<sc-for list="{{areas}}" as="a" hint-placeholder-count="1">
+<path class="cl-area" d="{{a.d}}" fill="url(#{{a.patId}})" style="opacity: {{a.opacity}};"></path>
+</sc-for>
+<sc-for list="{{lines}}" as="l" hint-placeholder-count="2">
+<path class="{{l.cls}}" d="{{l.d}}" fill="none" stroke="{{l.color}}" stroke-width="{{l.width}}" stroke-linecap="round" stroke-linejoin="round" pathLength="{{l.pathLength}}" stroke-dasharray="{{l.dash}}" style="transition-delay: {{l.delay}}; opacity: {{l.opacity}};"></path>
+</sc-for>
+<sc-if value="{{hasActive}}" hint-placeholder-val="{{false}}">
+<line x1="{{activeX}}" x2="{{activeX}}" y1="6" y2="{{height}}" stroke="var(--ink)" stroke-opacity="0.25" stroke-dasharray="3 3" pointer-events="none"></line>
+<sc-for list="{{activeDots}}" as="d" hint-placeholder-count="2">
+<circle cx="{{d.x}}" cy="{{d.y}}" r="5" fill="{{d.color}}" stroke="var(--surface)" stroke-width="2.5" pointer-events="none"></circle>
+</sc-for>
+</sc-if>
+<sc-if value="{{hasMarker}}" hint-placeholder-val="{{true}}">
+<g transform="translate({{marker.x}} {{marker.y}})" pointer-events="none">
+<g class="cl-marker">
+<circle class="cl-pulse" r="7" fill="{{marker.color}}"></circle>
+<circle r="7.5" fill="var(--surface)"></circle>
+<circle r="4.5" fill="{{marker.color}}"></circle>
+</g>
+</g>
+</sc-if>
+</svg>
+</sc-if>
+<sc-if value="{{hasActive}}" hint-placeholder-val="{{false}}">
+<div class="cl-tip" role="status" style="left: {{tip.x}}px; top: {{tip.y}}px; translate: {{tip.shift}};">
+<div style="font-weight: 700; margin-bottom: 6px;">{{tip.title}}</div>
+<sc-for list="{{tip.rows}}" as="r" hint-placeholder-count="2">
+<div style="display: flex; align-items: center; gap: 8px; padding: 1px 0;"><span class="swatch" style="color: {{r.color}}; width: 12px;"></span><span style="color: var(--muted);">{{r.label}}</span><span class="t-num" style="margin-left: auto; padding-left: 14px; font-size: 13px;">{{r.value}}</span></div>
+</sc-for>
+</div>
+</sc-if>
+</div>
+
+<sc-if value="{{hasLegend}}" hint-placeholder-val="{{true}}">
+<ul class="cl-legend" aria-label="Lines on the chart">
+<sc-for list="{{legend}}" as="g" hint-placeholder-count="3">
+<li><button type="button" class="cl-pill" aria-pressed="{{g.on}}" onClick="{{g.toggle}}" style="opacity: {{g.opacity}};"><span class="swatch" style="color: {{g.color}}; {{g.swatchStyle}}"></span><span style="text-decoration: {{g.deco}};">{{g.label}}</span></button></li>
+</sc-for>
+</ul>
+</sc-if>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"title":{"editor":"text","default":"Price at each shop"},"description":{"editor":"text","default":"Last 30 days"},"rows":{"editor":null},"index":{"editor":null},"series":{"editor":null},"height":{"editor":"int","default":240},"yMin":{"editor":null},"currency":{"editor":null},"valueFormat":{"editor":"enum","options":["currency","number"],"default":"currency"},"total":{"editor":"enum","options":["last","sum","none"],"default":"last"},"lowerIsBetter":{"editor":"boolean","default":true},"fill":{"editor":"enum","options":["dots","none"],"default":"dots"},"curve":{"editor":"enum","options":["smooth","linear","step"],"default":"smooth"},"bare":{"editor":"boolean","default":false},"unit":{"editor":null},"$preview":{"width":720,"height":420}}'>
+class Component extends DCLogic {
+  constructor(props) {
+    super(props);
+    var self = this;
+    this.state = { width: 0, shown: false, active: null, hidden: {}, tick: 0 };
+    this.still = false;
+    try { this.still = window.matchMedia('(prefers-reduced-motion: reduce)').matches; } catch (e) {}
+    // measure the plot box, and reveal the chart the first time it scrolls into view
+    this.setBox = function (el) {
+      if (el === self.box) return;
+      if (self.ro) self.ro.disconnect();
+      if (self.io) self.io.disconnect();
+      self.box = el;
+      if (!el) return;
+      if (typeof ResizeObserver !== 'undefined') {
+        self.ro = new ResizeObserver(function (entries) { var w = Math.round(entries[0].contentRect.width); if (w !== self.state.width) self.setState({ width: w }); });
+        self.ro.observe(el);
+      } else self.setState({ width: el.clientWidth });
+      if (self.still || typeof IntersectionObserver === 'undefined') { self.reveal(); return; }
+      self.io = new IntersectionObserver(function (entries) { if (entries[0] && entries[0].isIntersecting) { self.reveal(); self.io.disconnect(); } }, { threshold: 0.2 });
+      self.io.observe(el);
+    };
+  }
+  reveal() {
+    var self = this;
+    if (this.state.shown) return;
+    this.setState({ shown: true });
+    if (this.still) { this.setState({ tick: 1 }); return; }
+    var t0 = null;
+    var step = function (ts) {
+      if (t0 === null) t0 = ts;
+      var k = Math.min(1, (ts - t0) / 1200);
+      self.setState({ tick: 1 - Math.pow(1 - k, 4) });
+      if (k < 1) self.raf = requestAnimationFrame(step);
+    };
+    this.raf = requestAnimationFrame(step);
+  }
+  componentWillUnmount() {
+    if (this.ro) this.ro.disconnect();
+    if (this.io) this.io.disconnect();
+    if (this.raf) cancelAnimationFrame(this.raf);
+  }
+  renderVals() {
+    var self = this;
+    var p = this.props, st = this.state;
+    // with no data passed in (the component's own board), show a small price demo
+    var demo = !p.rows;
+    var rows = p.rows || [399, 399, 399, 409, 409, 399, 389, 389, 379, 359, 359, 359].map(function (v, i) { return { day: (10 + i) + ' Nov', a: v, b: i < 6 ? 399 : 429 }; });
+    var index = demo ? 'day' : (p.index || 'x');
+    var series = p.series || [{ key: 'a', label: 'Pixel Point', color: 'var(--s1)' }, { key: 'b', label: 'Volt Electronics', color: 'var(--s2)' }];
+    if (demo && p.yMin === undefined) p = Object.assign({}, p, { yMin: 340 });
+    var height = Number(p.height) || 240;
+    var currency = p.currency || 'EUR';
+    var unit = p.unit || '';
+    var money = (p.valueFormat || 'currency') === 'currency';
+    var fmt = function (v) {
+      if (v === null || v === undefined) return 'None';
+      return money ? new Intl.NumberFormat('en-GB', { style: 'currency', currency: currency, maximumFractionDigits: 0 }).format(v) : new Intl.NumberFormat('en-GB').format(v);
+    };
+    var num = function (v) { return typeof v === 'number' && isFinite(v) ? v : null; };
+    var n = rows.length;
+    var hidden = st.hidden;
+    var isOff = function (s) { return s.dashed ? !!hidden.__was : !!hidden[s.key]; };
+    var vis = series.filter(function (s) { return !isOff(s); });
+
+    // y domain: round ticks over the visible data (or from yMin)
+    var vals = [];
+    vis.forEach(function (s) { rows.forEach(function (r) { var v = num(r[s.key]); if (v !== null) vals.push(v); }); });
+    var dMin = vals.length ? Math.min.apply(null, vals) : 0, dMax = vals.length ? Math.max.apply(null, vals) : 1;
+    var yMinP = num(p.yMin);
+    var lo0 = yMinP !== null ? yMinP : Math.min(0, dMin), hi0 = Math.max(lo0 + 1, dMax);
+    var raw = (hi0 - lo0) / 4, mag = Math.pow(10, Math.floor(Math.log10(raw))), nr = raw / mag;
+    var stepV = (nr <= 1 ? 1 : nr <= 2 ? 2 : nr <= 2.5 ? 2.5 : nr <= 5 ? 5 : 10) * mag;
+    var lo = yMinP !== null ? yMinP : Math.floor(lo0 / stepV) * stepV;
+    var hi = Math.ceil(hi0 / stepV) * stepV;
+    var ticks = [];
+    for (var tv = Math.ceil(lo / stepV) * stepV; tv <= hi + stepV / 2; tv += stepV) ticks.push(Math.round(tv * 1e6) / 1e6);
+
+    var width = st.width;
+    var axisLabel = function (v) { return money ? new Intl.NumberFormat('en-GB', { style: 'currency', currency: currency, notation: 'compact', maximumFractionDigits: 1 }).format(v) : new Intl.NumberFormat('en-GB', { notation: 'compact' }).format(v); };
+    var padT = 10, padR = 12;
+    var padL = Math.max.apply(null, ticks.map(function (t) { return axisLabel(t).length; }).concat([1])) * 6.4 + 14;
+    var svgH = height + 26;
+    var plotW = Math.max(width - padL - padR, 1);
+    var r2 = function (v) { return Math.round(v * 100) / 100; };
+    var xAt = function (i) { return r2(n <= 1 ? padL + plotW / 2 : padL + i / (n - 1) * plotW); };
+    var yAt = function (v) { return r2(padT + (1 - (v - lo) / (hi - lo)) * (height - padT)); };
+    var baseY = yAt(Math.max(lo, Math.min(0, hi)) === lo ? lo : 0);
+
+    // monotone curve through each run of known points (a missing day breaks the line)
+    var f = function (v) { return String(Math.round(v * 100) / 100); };
+    var curve = p.curve || 'smooth';
+    var pathOf = function (pts) {
+      if (pts.length === 1) return 'M' + f(pts[0][0]) + ',' + f(pts[0][1]);
+      if (curve === 'linear') return pts.map(function (q, i) { return (i ? 'L' : 'M') + f(q[0]) + ',' + f(q[1]); }).join('');
+      if (curve === 'step') { var s = 'M' + f(pts[0][0]) + ',' + f(pts[0][1]); for (var i = 1; i < pts.length; i++) s += 'L' + f(pts[i][0]) + ',' + f(pts[i - 1][1]) + 'L' + f(pts[i][0]) + ',' + f(pts[i][1]); return s; }
+      var k = pts.length, dx = [], m = [], tg = [];
+      for (var a = 0; a < k - 1; a++) { dx[a] = pts[a + 1][0] - pts[a][0]; m[a] = dx[a] ? (pts[a + 1][1] - pts[a][1]) / dx[a] : 0; }
+      tg[0] = m[0];
+      for (var b = 1; b < k - 1; b++) {
+        if (m[b - 1] * m[b] <= 0) tg[b] = 0;
+        else { var w1 = 2 * dx[b] + dx[b - 1], w2 = dx[b] + 2 * dx[b - 1]; tg[b] = (w1 + w2) / (w1 / m[b - 1] + w2 / m[b]); }
+      }
+      tg[k - 1] = m[k - 2];
+      var d = 'M' + f(pts[0][0]) + ',' + f(pts[0][1]);
+      for (var c = 0; c < k - 1; c++) {
+        var h = dx[c] / 3;
+        d += 'C' + f(pts[c][0] + h) + ',' + f(pts[c][1] + tg[c] * h) + ',' + f(pts[c + 1][0] - h) + ',' + f(pts[c + 1][1] - tg[c + 1] * h) + ',' + f(pts[c + 1][0]) + ',' + f(pts[c + 1][1]);
+      }
+      return d;
+    };
+    var runs = function (s) {
+      var out = [], cur = [];
+      rows.forEach(function (r, i) { var v = num(r[s.key]); if (v === null) { if (cur.length) out.push(cur); cur = []; } else cur.push([xAt(i), yAt(v)]); });
+      if (cur.length) out.push(cur);
+      return out;
+    };
+    var uid = (p.title || 'chart').replace(/[^a-zA-Z0-9]/g, '').slice(0, 12) + series.length;
+    var firstSolid = series.filter(function (s) { return !s.dashed; })[0];
+    var drawn = 0;
+    var lines = series.map(function (s, si) {
+      var off = isOff(s);
+      var segs = runs(s);
+      var d = segs.map(pathOf).join('') || 'M0,0';
+      var o = {
+        key: s.key, label: s.label, color: s.color, d: d, segs: segs, off: off, dashed: !!s.dashed,
+        patId: uid + '-p' + si,
+        cls: s.dashed ? 'cl-was' : 'cl-line',
+        width: s.dashed ? 1.8 : (s === firstSolid ? 3 : 2.2),
+        pathLength: s.dashed ? '' : '1',
+        dash: s.dashed ? '5 5' : '',
+        delay: s.dashed ? '1s' : (drawn * 0.15) + 's',
+        opacity: off ? 0 : (s.dashed ? 0.75 : 1)
+      };
+      if (!s.dashed) drawn++;
+      return o;
+    });
+    // dotted fill under the first (main) line only, so the picture stays calm
+    var main = lines.filter(function (l) { return !l.dashed && !l.off; })[0];
+    var areas = [];
+    if ((p.fill || 'dots') !== 'none' && main) {
+      main.segs.forEach(function (seg) {
+        if (seg.length < 2) return;
+        areas.push({ d: pathOf(seg) + 'L' + f(seg[seg.length - 1][0]) + ',' + f(height) + 'L' + f(seg[0][0]) + ',' + f(height) + 'Z', patId: main.patId, opacity: '' });
+      });
+    }
+
+    var grid = ticks.filter(function (t) { return t >= lo - 1e-9 && t <= hi + 1e-9; }).map(function (t) { return { y: yAt(t), lx: r2(padL - 10), label: axisLabel(t) }; });
+    var labelW = Math.max.apply(null, rows.map(function (r) { return String(r[index] || '').length; }).concat([1])) * 6.6 + 14;
+    var every = Math.max(1, Math.ceil(n * labelW / Math.max(plotW, 1)));
+    var active = st.active !== null && st.active < n ? st.active : null;
+    var xLabels = [];
+    rows.forEach(function (r, i) { if (i % every === 0 || i === n - 1 && (n - 1) % every > every / 2) xLabels.push({ x: xAt(i), y: height + 19, label: String(r[index]), fill: active === i ? 'var(--ink)' : 'var(--faint)' }); });
+
+    // headline: the main line's last value (or the sum), counting up as the chart is revealed
+    var firstVals = firstSolid ? rows.map(function (r) { return num(r[firstSolid.key]); }).filter(function (v) { return v !== null; }) : [];
+    var total = p.total || 'last';
+    var headline = total === 'none' || !firstVals.length ? null : (total === 'sum' ? firstVals.reduce(function (a, b) { return a + b; }, 0) : firstVals[firstVals.length - 1]);
+    var dPct = firstVals.length > 1 && firstVals[0] ? (firstVals[firstVals.length - 1] - firstVals[0]) / Math.abs(firstVals[0]) * 100 : null;
+    var lowerBetter = p.lowerIsBetter !== false;
+    var good = dPct !== null && (lowerBetter ? dPct < 0 : dPct > 0);
+    var flat = dPct !== null && Math.abs(dPct) < 0.05;
+    var tone = flat ? 'var(--muted)' : (good ? 'var(--good)' : 'var(--bad)');
+
+    var lastI = n - 1;
+    var mk = main && lastI >= 0 ? rows[lastI] && num(rows[lastI][main.key]) : null;
+
+    var tip = { x: 0, y: 0, shift: '14px -50%', title: '', rows: [] };
+    var activeDots = [];
+    if (active !== null) {
+      lines.forEach(function (l) {
+        if (l.off || l.dashed) return;
+        var v = num(rows[active][l.key]);
+        if (v !== null) activeDots.push({ x: xAt(active), y: yAt(v), color: l.color });
+      });
+      var ys = activeDots.map(function (d) { return d.y; });
+      tip = {
+        x: xAt(active), y: Math.min(Math.max(ys.length ? Math.min.apply(null, ys) : height / 2, 40), height - 40),
+        shift: xAt(active) > width - 200 ? 'calc(-100% - 14px) -50%' : '14px -50%',
+        title: String(rows[active][index]),
+        rows: lines.filter(function (l) { return !l.off; }).map(function (l) { return { label: l.label, value: fmt(num(rows[active][l.key])), color: l.color }; })
+      };
+    }
+
+    var hasWas = series.some(function (s) { return s.dashed; });
+    var legend = series.filter(function (s) { return !s.dashed; }).map(function (s) {
+      var on = !hidden[s.key];
+      return { label: s.label, color: s.color, on: on, opacity: on ? 1 : 0.45, deco: on ? 'none' : 'line-through', swatchStyle: '', toggle: function () { var h = Object.assign({}, self.state.hidden); h[s.key] = !h[s.key]; self.setState({ hidden: h }); } };
+    });
+    if (hasWas) {
+      var wasOn = !hidden.__was;
+      legend.push({ label: 'Was prices', color: 'var(--muted)', on: wasOn, opacity: wasOn ? 1 : 0.45, deco: wasOn ? 'none' : 'line-through', swatchStyle: 'background: repeating-linear-gradient(90deg, currentColor 0 4px, transparent 4px 7px);', toggle: function () { var h = Object.assign({}, self.state.hidden); h.__was = !h.__was; self.setState({ hidden: h }); } });
+    }
+
+    var moveTo = function (i) { self.setState({ active: i }); };
+    return {
+      rootCls: 'cl' + (p.bare ? ' cl-bare' : ' glass card') + (st.shown ? ' cl-shown' : ''),
+      title: p.title || '', description: p.description || '', hasDesc: !!p.description,
+      hasHeadline: headline !== null, headlineTxt: headline === null ? '' : fmt(Math.round(headline * (self.still ? 1 : st.tick))) + unit,
+      hasDelta: dPct !== null && total === 'last', deltaTxt: dPct === null ? '' : (flat ? '0%' : (dPct > 0 ? '+' : '') + dPct.toFixed(1) + '%'),
+      deltaColor: tone, deltaBg: 'color-mix(in srgb, ' + tone + ' 14%, transparent)',
+      setBox: this.setBox, ready: width > 0 && n > 0, width: width, svgH: svgH, height: height,
+      ariaLabel: (p.title || 'Line chart') + '. Use the left and right arrow keys to read each day.',
+      padL: r2(padL), gridX2: r2(width - padR + 4), grid: grid, xLabels: xLabels, areas: areas, lines: lines,
+      hasMarker: mk !== null && mk !== undefined, marker: { x: xAt(lastI), y: mk === null || mk === undefined ? 0 : yAt(mk), color: main ? main.color : 'var(--accent)' },
+      hasActive: active !== null, activeX: active === null ? 0 : xAt(active), activeDots: activeDots, tip: tip,
+      hasLegend: legend.length > 1, legend: legend,
+      onMove: function (e) {
+        var x = e.clientX - e.currentTarget.getBoundingClientRect().left;
+        moveTo(n <= 1 ? 0 : Math.min(n - 1, Math.max(0, Math.round((x - padL) / plotW * (n - 1)))));
+      },
+      clear: function () { if (self.state.active !== null) self.setState({ active: null }); },
+      onKey: function (e) {
+        var a = self.state.active, next;
+        if (e.key === 'ArrowRight') next = a === null ? 0 : Math.min(n - 1, a + 1);
+        else if (e.key === 'ArrowLeft') next = a === null ? n - 1 : Math.max(0, a - 1);
+        else if (e.key === 'Home') next = 0;
+        else if (e.key === 'End') next = n - 1;
+        else if (e.key === 'Escape') next = null;
+        else return;
+        e.preventDefault();
+        self.setState({ active: next });
+      }
+    };
+  }
+}
+</script>
+</body>
+</html>

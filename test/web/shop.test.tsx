@@ -144,14 +144,31 @@ describe('shops list', () => {
     expect(rows[1]!.textContent).toMatch(/^BB/);
   });
 
-  it('shows "Not rated yet" instead of a letter for an unrated shop and renders shop text as text', async () => {
+  it('shows a grey N/A, never a letter, for an unrated shop and says why; renders shop text as text', async () => {
     mockApi({ '/api/shops': () => json(shops) });
     const { container } = renderAt('/shops');
     const rows = await screen.findAllByRole('listitem');
-    expect(within(rows[1]!).getByText('Not rated yet')).toBeTruthy();
+    expect(within(rows[1]!).getByText('N/A')).toBeTruthy();
+    expect(within(rows[1]!).getByText('Fewer than 20 Black Friday deals checked so far.')).toBeTruthy();
     expect(rows[1]!.textContent).not.toMatch(/\bF\b/);
     expect(within(rows[1]!).getByText(/Beta <b>Shop<\/b>/)).toBeTruthy();
     expect(container.querySelector('b')).toBeNull();
+  });
+
+  it('finds a shop by name, sorts worst first with unrated shops last, and shows a table in Advanced mode', async () => {
+    const three = { shops: [...shops.shops, { slug: 'gamma', name: 'Gamma', grade: 'E' as const, products: 50, logoUrl: null, logoAspect: null }] };
+    mockApi({ '/api/shops': () => json(three) });
+    renderAt('/shops');
+    await screen.findAllByRole('listitem');
+    const names = () => screen.getAllByRole('listitem').map((li) => li.querySelector('.truncate')?.textContent);
+    expect(names()).toEqual(['Alpha Shop', 'Gamma', 'Beta <b>Shop</b>']);
+    fireEvent.click(within(screen.getByRole('radiogroup', { name: 'Sort shops' })).getByRole('radio', { name: 'Worst rated first' }));
+    expect(names()).toEqual(['Gamma', 'Alpha Shop', 'Beta <b>Shop</b>']);
+    fireEvent.change(screen.getByRole('searchbox', { name: 'Find a shop' }), { target: { value: 'gam' } });
+    expect(names()).toEqual(['Gamma']);
+    fireEvent.click(screen.getByRole('radio', { name: 'Advanced' }));
+    const table = screen.getByRole('table', { name: 'Shops and their ratings' });
+    expect(within(table).getByRole('link', { name: /Gamma/ }).getAttribute('href')).toBe('/shops/gamma');
   });
 
   it('says so when there are no shops, and offers a retry on an error', async () => {

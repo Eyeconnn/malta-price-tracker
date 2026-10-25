@@ -48,22 +48,39 @@ describe.each([
   ['dark', dark],
 ] as const)('%s theme tokens', (_name, tokens) => {
   const color = (name: string): Rgb => {
-    const v = tokens.get(name);
+    // a dark value that is not redefined keeps the light one (--white, --white-muted)
+    const v = tokens.get(name) ?? light.get(name);
     if (!v) throw new Error(`missing ${name}`);
     return parse(v).rgb;
   };
   const bg = color('--bg');
   const glass = over(parse(tokens.get('--glass')!), bg);
 
-  const textTokens = ['--ink', '--muted', '--good', '--bad', '--accent', '--grade-a', '--grade-b', '--grade-c', '--grade-d', '--grade-e', '--grade-f'];
+  const textTokens = [
+    '--ink',
+    '--muted',
+    '--faint',
+    '--good',
+    '--bad',
+    '--accent',
+    '--warn',
+    '--info',
+    '--neutral',
+    '--grade-a',
+    '--grade-b',
+    '--grade-c',
+    '--grade-d',
+    '--grade-e',
+    '--grade-f',
+  ];
   it.each(textTokens)('%s text is at least 4.5:1 on bg and on glass', (name) => {
     expect(ratio(color(name), bg)).toBeGreaterThanOrEqual(4.5);
     expect(ratio(color(name), glass)).toBeGreaterThanOrEqual(4.5);
   });
 
-  // The search overlay panel is the solid --surface; its text sits on it and on glass boxes over it.
-  // The scrim behind it only dims the page and carries no text.
-  it.each(['--ink', '--muted', '--good', '--bad', '--accent'])('%s text is at least 4.5:1 on the search overlay panel and on glass over it', (name) => {
+  // Solid panels (search results, the More sheet, dropdown lists, chart tooltips) are --surface; text sits on it
+  // and on glass boxes over it. The scrim behind dialogs only dims the page and carries no text.
+  it.each(['--ink', '--muted', '--faint', '--good', '--bad', '--accent'])('%s text is at least 4.5:1 on the surface and on glass over it', (name) => {
     const surface = color('--surface');
     expect(ratio(color(name), surface)).toBeGreaterThanOrEqual(4.5);
     expect(ratio(color(name), over(parse(tokens.get('--glass')!), surface))).toBeGreaterThanOrEqual(4.5);
@@ -75,40 +92,55 @@ describe.each([
     expect(alpha).toBeLessThanOrEqual(0.8);
   });
 
-  it('text on accent is at least 4.5:1', () => {
-    expect(ratio(color('--accent-ink'), color('--accent'))).toBeGreaterThanOrEqual(4.5);
+  // filled controls: buttons, the selected segment pill (ink, green for good deals, red for deals to avoid), badges
+  it.each([
+    ['--accent-ink', '--accent'],
+    ['--on-ink', '--ink'],
+    ['--good-fill-ink', '--good-fill'],
+    ['--bad-ink', '--bad-fill'],
+  ])('%s text is at least 4.5:1 on %s', (fg, fill) => {
+    expect(ratio(color(fg), color(fill))).toBeGreaterThanOrEqual(4.5);
   });
 
-  it('text on bad (the Black Friday avoid banner) is at least 4.5:1', () => {
-    expect(ratio(color('--bad-ink'), color('--bad'))).toBeGreaterThanOrEqual(4.5);
+  // chips: verdict words and stock on their tinted grounds
+  it.each([
+    ['--good', '--good-bg'],
+    ['--bad', '--bad-bg'],
+    ['--warn', '--warn-bg'],
+    ['--info', '--info-bg'],
+    ['--neutral', '--neutral-bg'],
+  ])('%s chip text is at least 4.5:1 on %s', (fg, ground) => {
+    expect(ratio(color(fg), color(ground))).toBeGreaterThanOrEqual(4.5);
   });
 
-  // The sticky top bar floats over scrolling content: its text must stay readable over the page
-  // and over the most contrasting content that can pass under it (ink-coloured text).
-  it.each(['--ink', '--muted', '--accent'])('%s nav text is at least 4.5:1 on the top bar over the page and over ink', (name) => {
-    const bar = parse(tokens.get('--bar')!);
-    for (const under of [bg, color('--ink')]) expect(ratio(color(name), over(bar, under))).toBeGreaterThanOrEqual(4.5);
+  // The smoked top bar and bottom bar float over scrolling content: their white text must stay readable over the
+  // page and over the most contrasting content that can pass under it (ink-coloured text).
+  it.each(['--white', '--white-muted'])('%s nav text is at least 4.5:1 on the smoked bars over the page and over ink', (name) => {
+    const smoke = parse(tokens.get('--smoke')!);
+    for (const under of [bg, color('--ink')]) {
+      const bar = over(smoke, under);
+      expect(ratio(over(parse((tokens.get(name) ?? light.get(name))!), bar), bar)).toBeGreaterThanOrEqual(4.5);
+    }
   });
 
-  it('the top bar is more opaque than glass', () => {
-    expect(parse(tokens.get('--bar')!).alpha).toBeGreaterThan(parse(tokens.get('--glass')!).alpha);
+  it('the smoked bars are more opaque than glass', () => {
+    expect(parse(tokens.get('--smoke')!).alpha).toBeGreaterThan(parse(tokens.get('--glass')!).alpha);
   });
 
   it('tag ink is at least 4.5:1 on its tag fill', () => {
-    expect(ratio(color('--tag-gold-ink'), color('--tag-gold'))).toBeGreaterThanOrEqual(4.5);
-    expect(ratio(color('--tag-red-ink'), color('--tag-red'))).toBeGreaterThanOrEqual(4.5);
+    expect(ratio(color('--tag-good-ink'), color('--tag-good'))).toBeGreaterThanOrEqual(4.5);
+    expect(ratio(color('--tag-bad-ink'), color('--tag-bad'))).toBeGreaterThanOrEqual(4.5);
   });
 
-  // Product page: the "not enough history" panel and the "possibly the same product" chip use ink
-  // text on the fill colour, over the page or over glass. (Muted text on fill is below 4.5:1.)
+  // quiet boxes (the deal card facts, "not enough history") use ink text on the fill colour, over the page or glass
   it('ink text on fill is at least 4.5:1 over bg and glass', () => {
     const fill = parse(tokens.get('--fill')!);
     for (const under of [bg, glass]) expect(ratio(color('--ink'), over(fill, under))).toBeGreaterThanOrEqual(4.5);
   });
 
   it('crossed-out was price is at least 4.5:1 on its tag fill', () => {
-    expect(ratio(color('--tag-gold-was'), color('--tag-gold'))).toBeGreaterThanOrEqual(4.5);
-    expect(ratio(color('--tag-red-was'), color('--tag-red'))).toBeGreaterThanOrEqual(4.5);
+    expect(ratio(color('--tag-good-was'), color('--tag-good'))).toBeGreaterThanOrEqual(4.5);
+    expect(ratio(color('--tag-bad-was'), color('--tag-bad'))).toBeGreaterThanOrEqual(4.5);
   });
 });
 
@@ -118,13 +150,13 @@ describe('price tag was price', () => {
     const rules = [...css.matchAll(/([^{}]*\bs)\s*\{([^{}]*)\}/g)].filter((m) => m[1]!.includes('.price-tag'));
     expect(rules.length).toBeGreaterThan(0);
     for (const [, , body] of rules) expect(body).not.toMatch(/opacity/);
-    expect(css).toMatch(/\.price-tag-good \.price-tag-label s\s*\{[^}]*color:\s*var\(--tag-gold-was\)/);
-    expect(css).toMatch(/\.price-tag-avoid \.price-tag-label s\s*\{[^}]*color:\s*var\(--tag-red-was\)/);
+    expect(css).toMatch(/\.price-tag-good \.price-tag-label s\s*\{[^}]*color:\s*var\(--tag-good-was\)/);
+    expect(css).toMatch(/\.price-tag-avoid \.price-tag-label s\s*\{[^}]*color:\s*var\(--tag-bad-was\)/);
   });
 });
 
 describe('light theme accent buttons', () => {
   it('use white text', () => {
-    expect(light.get('--accent-ink')).toBe('#ffffff');
+    expect(light.get('--accent-ink')).toBe('#fefefe');
   });
 });

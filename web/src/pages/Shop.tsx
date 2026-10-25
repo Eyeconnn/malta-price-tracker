@@ -21,25 +21,24 @@ const LIST_MAX = 5;
 const count = new Intl.NumberFormat('en-GB');
 
 const LISTS = {
-  avoid: { title: 'Deals to avoid here', none: 'No deals to avoid at this shop at the moment.', dot: 'bg-bad' },
-  good: { title: 'Good deals here', none: 'No good deals at this shop at the moment.', dot: 'bg-good' },
+  avoid: { title: 'Deals to avoid here', none: 'No deals to avoid at this shop at the moment.' },
+  good: { title: 'Good deals here', none: 'No good deals at this shop at the moment.' },
 } as const;
 
 function DealSection({ kind, cards, slug }: { kind: keyof typeof LISTS; cards: Card[]; slug: string }) {
   const id = useId();
-  const { title, none, dot } = LISTS[kind];
+  const { title, none } = LISTS[kind];
   return (
     <section aria-labelledby={id} className="flex flex-col gap-3">
       <div className="flex items-center gap-2">
-        <span aria-hidden="true" className={cn('size-2.5 rounded-full', dot)} />
-        <h2 id={id} className="text-lg font-semibold">
+        <h2 id={id} className="text-xl font-bold">
           {title}
         </h2>
         {cards.length > 0 && (
           <Link
             to={`/deals?${new URLSearchParams({ type: kind, shop: slug })}`}
             aria-label={`See all ${title.toLowerCase()}`}
-            className="ml-auto inline-flex min-h-11 items-center rounded-md px-2 text-sm font-medium text-brand outline-none hover:underline focus-visible:ring-[3px] focus-visible:ring-ring/50"
+            className="ml-auto inline-flex min-h-11 items-center rounded-full px-2 text-sm font-semibold text-brand outline-none hover:text-brand-dark hover:underline focus-visible:ring-[3px] focus-visible:ring-ring/50"
           >
             See all
           </Link>
@@ -57,11 +56,12 @@ const isCount = (n: unknown): n is number => typeof n === 'number' && Number.isF
 /** A count with thousands separators, or "Not shown" when the API did not send a finite number. */
 const countText = (n: unknown) => (isCount(n) ? count.format(n) : 'Not shown');
 
-function Stat({ label, value, tone }: { label: string; value: string; tone?: 'good' | 'bad' }) {
+function Stat({ label, value, tone, hint }: { label: string; value: string; tone?: 'good' | 'bad'; hint?: string }) {
   return (
-    <div className="glass flex flex-col gap-1 p-3">
-      <dt className="text-xs text-muted-foreground">{label}</dt>
-      <dd className={cn('m-0 text-xl font-bold tabular-nums', tone === 'good' && 'text-good', tone === 'bad' && 'text-bad')}>{value}</dd>
+    <div className="glass flex flex-col gap-1.5 rounded-[14px] px-5 py-[18px]">
+      <dt className="t-lbl">{label}</dt>
+      <dd className={cn('m-0 t-num text-[32px] leading-[1.15]', /^\d/.test(value) ? undefined : 'font-sans text-base font-semibold', tone === 'good' && 'text-good', tone === 'bad' && 'text-bad')}>{value}</dd>
+      {hint && <p className="text-[13px] text-muted-foreground">{hint}</p>}
     </div>
   );
 }
@@ -75,11 +75,15 @@ function StatsBlock({ stats, wasLabel }: { stats: ShopStats; wasLabel?: string }
       <h2 id={id} className="sr-only">
         Shop statistics
       </h2>
-      <dl className="m-0 grid grid-cols-2 gap-3 md:grid-cols-4">
-        <Stat label="Real deals" value={real === null || !isCount(real) ? 'Not enough judged yet' : percent(real)} />
+      <dl className="m-0 grid grid-cols-2 gap-4 lg:grid-cols-4">
+        <Stat
+          label="Real deals"
+          value={real === null || !isCount(real) ? 'Not enough judged yet' : percent(real)}
+          hint={isCount(stats.good) && isCount(stats.judged) && stats.judged > 0 ? `${countText(stats.good)} of ${countText(stats.judged)} judged products` : undefined}
+        />
         <Stat label="Deals to avoid" value={countText(stats.avoid)} tone={isCount(stats.avoid) && stats.avoid > 0 ? 'bad' : undefined} />
         <Stat label={`${wasTerms(wasLabel).start} raised`} value={countText(stats.wasRaised)} tone={isCount(stats.wasRaised) && stats.wasRaised > 0 ? 'bad' : undefined} />
-        <Stat label="Marked Black Friday" value={countText(stats.bfMarked)} />
+        <Stat label="Marked Black Friday" value={countText(stats.bfMarked)} hint={isCount(stats.products) ? `of ${countText(stats.products)} products` : undefined} />
       </dl>
     </section>
   );
@@ -97,9 +101,9 @@ function day(iso: string): string {
 }
 
 function PriceCell({ cents, at }: { cents: number; at: string }) {
-  if (!shown(cents)) return <td className="px-2 py-2 text-xs text-muted-foreground">{NO_PRICE}</td>;
+  if (!shown(cents)) return <td className="text-xs text-muted-foreground">{NO_PRICE}</td>;
   return (
-    <td className="px-2 py-2 tabular-nums">
+    <td className="tabular-nums">
       {formatEuro(cents)}
       <span className="block text-xs text-muted-foreground">{day(at)}</span>
     </td>
@@ -114,36 +118,30 @@ function signed(pct: number): string {
 
 function ChangeTable({ caption, rows, tone, none }: { caption: string; rows: Change[]; tone: 'good' | 'bad'; none: string }) {
   return (
-    <div className="glass p-3">
+    <div className="glass px-3 py-[18px]">
       {rows.length === 0 ? (
-        <>
-          <p className="font-semibold">{caption}</p>
+        <div className="px-2.5">
+          <p className="text-[17px] font-bold">{caption}</p>
           <p className="mt-2 text-sm text-muted-foreground">{none}</p>
-        </>
+        </div>
       ) : (
         <div className="overflow-x-auto">
-          <table className="w-full border-collapse text-left text-sm">
-            <caption className="pb-2 text-left font-semibold">{caption}</caption>
+          <table className="data-table">
+            <caption className="px-2.5 pb-2 text-left text-[17px] font-bold">{caption}</caption>
             <thead>
-              <tr className="text-xs text-muted-foreground">
-                <th scope="col" className="px-2 py-1 font-medium">
-                  Product
-                </th>
-                <th scope="col" className="px-2 py-1 font-medium">
-                  Before
-                </th>
-                <th scope="col" className="px-2 py-1 font-medium">
-                  Now
-                </th>
-                <th scope="col" className="px-2 py-1 text-right font-medium">
+              <tr>
+                <th scope="col">Product</th>
+                <th scope="col">Before</th>
+                <th scope="col">Now</th>
+                <th scope="col" className="r">
                   Change
                 </th>
               </tr>
             </thead>
             <tbody>
               {rows.map((r) => (
-                <tr key={r.id} className="border-t border-line align-top">
-                  <th scope="row" className="px-2 py-2 font-medium">
+                <tr key={r.id}>
+                  <th scope="row" className="font-semibold">
                     <Link
                       to={listingPath(r.id)}
                       className="rounded-sm outline-none hover:underline focus-visible:ring-[3px] focus-visible:ring-ring/50"
@@ -154,9 +152,9 @@ function ChangeTable({ caption, rows, tone, none }: { caption: string; rows: Cha
                   <PriceCell cents={r.fromCents} at={r.fromAt} />
                   <PriceCell cents={r.toCents} at={r.at} />
                   {shown(r.fromCents) && shown(r.toCents) ? (
-                    <td className={cn('px-2 py-2 text-right font-semibold tabular-nums', tone === 'bad' ? 'text-bad' : 'text-good')}>{signed(r.pct)}</td>
+                    <td className={cn('r font-bold tabular-nums', tone === 'bad' ? 'text-bad' : 'text-good')}>{signed(r.pct)}</td>
                   ) : (
-                    <td className="px-2 py-2 text-right text-xs text-muted-foreground">{NO_PRICE}</td>
+                    <td className="r text-xs text-muted-foreground">{NO_PRICE}</td>
                   )}
                 </tr>
               ))}
@@ -178,40 +176,50 @@ function ShopContent({ data, slug }: { data: ShopResponse; slug: string }) {
   const { shop, rating } = data;
   const changeWindow = lastDays(data.raiseWindowDays);
   return (
-    <div className="flex flex-col gap-6">
-      <div className="glass flex flex-col gap-4 p-4 md:flex-row md:items-center md:justify-between">
-        <div className="flex min-w-0 flex-col gap-3">
-          <div className="flex min-w-0 items-center gap-3">
+    <>
+      <nav aria-label="Breadcrumb" className="flex flex-wrap items-center gap-2 text-[13px] text-muted-foreground">
+        <Link to="/shops" className="font-medium text-brand hover:underline">
+          Shops
+        </Link>
+        <span aria-hidden="true">/</span>
+        <span className="truncate">{shop.name}</span>
+      </nav>
+      <section className="glass flex flex-wrap items-start gap-x-10 gap-y-6 p-[22px]">
+        <div className="flex min-w-0 flex-[1_1_340px] flex-col gap-3.5">
+          <div className="flex min-w-0 items-center gap-4">
             <ShopBadge name={shop.name} logoUrl={shop.logoUrl} logoAspect={shop.logoAspect} decorative />
-            <h1 className="min-w-0 text-2xl font-bold tracking-tight break-words">{shop.name}</h1>
+            <div className="flex min-w-0 flex-col gap-0.5">
+              <h1 className="min-w-0 text-[26px] leading-tight font-bold tracking-[-0.01em] break-words md:text-[32px]">{shop.name}</h1>
+              {isCount(data.stats.products) && <p className="text-sm text-muted-foreground">{`${countText(data.stats.products)} products tracked`}</p>}
+            </div>
           </div>
-          <RatingScale grade={rating.grade} sentence={rating.sentence} />
+          <LiveSearch shop={slug} placeholder={`Search inside ${shop.name}`} className="max-w-none" />
+        </div>
+        <div className="flex min-w-[260px] flex-[0_1_380px] flex-col items-start gap-1.5">
+          <RatingScale grade={rating.grade} sentence={rating.sentence} className="w-full" />
           <ReportButton targetType="shop" targetId={shop.id} about={shop.name} />
         </div>
-        <div className="w-full md:max-w-sm">
-          <LiveSearch shop={slug} placeholder={`Search ${shop.name}`} className="max-w-none" />
-        </div>
-      </div>
+      </section>
       {mode === 'advanced' && <StatsBlock stats={data.stats} wasLabel={data.shop.wasLabel} />}
-      <DealSection kind="avoid" cards={data.avoid} slug={slug} />
-      <DealSection kind="good" cards={data.good} slug={slug} />
       {mode === 'advanced' && (
-        <div className="grid gap-3 lg:grid-cols-2">
+        <div className="grid gap-6 lg:grid-cols-2">
           <ChangeTable caption="Top price rises" rows={data.rises} tone="bad" none={`No price rises ${changeWindow}.`} />
           <ChangeTable caption="Top real drops" rows={data.drops} tone="good" none={`No price drops ${changeWindow}.`} />
         </div>
       )}
-    </div>
+      <DealSection kind="avoid" cards={data.avoid} slug={slug} />
+      <DealSection kind="good" cards={data.good} slug={slug} />
+    </>
   );
 }
 
 function NotFound() {
   return (
     <GlassCard className="p-6">
-      <h1 className="text-2xl font-bold tracking-tight">Shop not found</h1>
+      <h1 className="text-[26px] font-bold tracking-tight">Shop not found</h1>
       <p className="mt-2 text-muted-foreground">
         No shop is listed under that address.{' '}
-        <Link to="/shops" className="font-medium text-brand underline underline-offset-4">
+        <Link to="/shops" className="font-semibold text-brand underline underline-offset-4">
           All shops
         </Link>
       </p>
@@ -247,19 +255,19 @@ export function ShopPage() {
   }
   if (state.status === 'error') {
     return (
-      <div className="flex flex-col gap-4">
-        <h1 className="text-2xl font-bold tracking-tight">Shop</h1>
+      <>
+        <h1 className="text-[26px] font-bold tracking-tight">Shop</h1>
         <Notice
           title="This shop could not be loaded."
           action={
-            <Button variant="outline" className="min-h-11" onClick={state.retry}>
+            <Button variant="outline" onClick={state.retry}>
               Try again
             </Button>
           }
         >
           Check your connection and try again.
         </Notice>
-      </div>
+      </>
     );
   }
   if (state.status !== 'ready') {

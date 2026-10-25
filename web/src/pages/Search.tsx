@@ -21,15 +21,15 @@ function ProductCard({ result }: { result: ProductResult }) {
   const descId = useId();
   const description = [verdictNote(result), result.inStock ? '' : 'out of stock'].filter((x) => x !== '').join(', ');
   return (
-    <article aria-labelledby={id} className="glass relative flex min-h-11 items-start gap-3 p-4">
+    <article aria-labelledby={id} className="glass relative flex min-h-11 items-start gap-3.5 p-[18px]">
       <ProductImage url={result.imageUrl} alt="" size={64} className="size-16" />
       <div className="flex min-w-0 flex-1 flex-col gap-1">
-        <h2 id={id} className="leading-snug font-semibold break-words">
+        <h2 id={id} className="text-[17px] leading-snug font-bold break-words">
           <Link
             to={productPath(result.key)}
             aria-label={resultLabel(result)}
             aria-describedby={description ? descId : undefined}
-            className="rounded-sm outline-none after:absolute after:inset-0 after:rounded-2xl after:content-[''] hover:underline hover:after:bg-secondary focus-visible:after:ring-[3px] focus-visible:after:ring-ring"
+            className="rounded-sm text-ink outline-none after:absolute after:inset-0 after:rounded-[20px] after:content-[''] hover:underline hover:after:bg-secondary focus-visible:after:ring-[3px] focus-visible:after:ring-ring"
           >
             {resultTitle(result)}
           </Link>
@@ -50,7 +50,7 @@ function ProductCard({ result }: { result: ProductResult }) {
           </span>
         )}
       </div>
-      <p className="max-w-32 flex-none text-right font-bold tabular-nums">
+      <p className="t-num max-w-32 flex-none text-right text-xl">
         {result.priceCents === null ? <span className="text-xs font-medium text-muted-foreground">{NO_PRICE}</span> : resultPrice(result)}
       </p>
     </article>
@@ -91,8 +91,8 @@ export function SearchPage() {
   }, [settled, setParams]);
 
   return (
-    <div className="flex flex-col gap-4">
-      <h1 className="text-2xl font-bold tracking-tight">Search</h1>
+    <>
+      <h1 className="text-[26px] leading-tight font-bold tracking-[-0.01em] md:text-[32px]">Search</h1>
       <SearchBox
         animated
         value={value}
@@ -114,7 +114,7 @@ export function SearchPage() {
       {shop && (
         <p className="text-sm text-muted-foreground">
           Results from one shop only.{' '}
-          <Link to={searchPath(value)} className="font-medium text-brand underline-offset-2 hover:underline">
+          <Link to={searchPath(value)} className="font-semibold text-brand underline-offset-2 hover:underline">
             Search all shops
           </Link>
         </p>
@@ -133,7 +133,7 @@ export function SearchPage() {
             <Notice
               title="Search is not available right now."
               action={
-                <Button variant="outline" className="min-h-11" onClick={state.retry}>
+                <Button variant="outline" onClick={state.retry}>
                   Try again
                 </Button>
               }
@@ -151,6 +151,6 @@ export function SearchPage() {
           )}
         </section>
       )}
-    </div>
+    </>
   );
 }

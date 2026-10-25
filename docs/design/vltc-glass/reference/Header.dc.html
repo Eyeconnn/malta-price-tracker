@@ -1,0 +1,217 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Header and phone navigation</title>
+<script src="./support.js"></script>
+<link rel="stylesheet" href="bfg.css">
+</head>
+<body>
+<x-dc>
+<helmet>
+<style>
+body{margin:0}
+</style>
+</helmet>
+<div style="display: contents;">
+<header class="bar" ref="{{setBar}}">
+<div class="bar-inner">
+<a class="brand" href="{{href.home}}">
+<span class="brand-mark" aria-hidden="true"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20.6 13.4l-7.2 7.2a2 2 0 0 1-2.8 0L3 13V3h10l7.6 7.6a2 2 0 0 1 0 2.8z"></path><circle cx="7.5" cy="7.5" r="1.5"></circle></svg></span>
+Black Friday Guide
+</a>
+<nav class="nav desk-only" aria-label="Main">
+<sc-for list="{{links}}" as="l" hint-placeholder-count="4">
+<a class="{{l.cls}}" href="{{l.href}}" aria-current="{{l.current}}">{{l.label}}</a>
+</sc-for>
+</nav>
+<div class="desk-only" style="align-items: center; gap: 8px;">
+<div class="mode" role="group" aria-label="Detail">
+<button type="button" class="{{simpleCls}}" aria-pressed="{{isSimple}}" onClick="{{toSimple}}">Simple</button>
+<button type="button" class="{{advCls}}" aria-pressed="{{isAdv}}" onClick="{{toAdv}}">Advanced</button>
+</div>
+<button type="button" class="bar-icon" aria-label="{{themeLabel}}" onClick="{{flipTheme}}">
+<sc-if value="{{isDark}}" hint-placeholder-val="{{false}}"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="4"></circle><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"></path></svg></sc-if>
+<sc-if value="{{isLight}}" hint-placeholder-val="{{true}}"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"></path></svg></sc-if>
+</button>
+</div>
+<a class="bar-icon phone-only" href="{{href.home}}" aria-label="Search"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="11" cy="11" r="7"></circle><path d="M20 20l-4-4"></path></svg></a>
+</div>
+</header>
+
+<nav class="bottom phone-only" aria-label="Main">
+<a class="{{bottom.search}}" href="{{href.home}}"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="11" cy="11" r="7"></circle><path d="M20 20l-4-4"></path></svg>Search</a>
+<a class="{{bottom.deals}}" href="{{href.deals}}"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20.6 13.4l-7.2 7.2a2 2 0 0 1-2.8 0L3 13V3h10l7.6 7.6a2 2 0 0 1 0 2.8z"></path><circle cx="7.5" cy="7.5" r="1.5"></circle></svg>Deals</a>
+<a class="{{bottom.shops}}" href="{{href.shops}}"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 9l1.5-5h15L21 9"></path><path d="M4 9v11h16V9"></path><path d="M3 9h18"></path><path d="M9 20v-6h6v6"></path></svg>Shops</a>
+<button type="button" class="bottom-item" aria-haspopup="dialog" aria-expanded="{{open}}" onClick="{{openSheet}}"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="5" cy="12" r="1.5"></circle><circle cx="12" cy="12" r="1.5"></circle><circle cx="19" cy="12" r="1.5"></circle></svg>More</button>
+</nav>
+
+<sc-if value="{{open}}" hint-placeholder-val="{{false}}">
+<div class="sheet-scrim" onClick="{{closeSheet}}"></div>
+<div class="sheet" role="dialog" aria-modal="true" aria-label="More">
+<div class="between"><h2 class="t-section">More</h2><button type="button" class="icon-btn" aria-label="Close" onClick="{{closeSheet}}"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"></path></svg></button></div>
+<div>
+<a class="sheet-link" href="{{href.brands}}">Brands<span aria-hidden="true">&#8250;</span></a>
+<a class="sheet-link" href="{{href.home}}">How we check<span aria-hidden="true">&#8250;</span></a>
+<a class="sheet-link" href="{{href.deals}}">Hall of shame<span class="chip chip-neutral">Soon</span></a>
+<a class="sheet-link" href="{{href.home}}">Price watches<span class="chip chip-neutral">Soon</span></a>
+</div>
+<label style="display: flex; align-items: center; justify-content: space-between; min-height: 48px; font-weight: 600; cursor: pointer;">Advanced mode<input type="checkbox" role="switch" class="switch" checked="{{isAdv}}" onChange="{{toggleMode}}"></label>
+<div style="display: flex; flex-direction: column; gap: 8px;">
+<span style="font-weight: 600;">Theme</span>
+<div class="seg-group" role="radiogroup" aria-label="Theme" style="width: 100%; box-sizing: border-box; justify-content: stretch;">
+<sc-for list="{{themes}}" as="t" hint-placeholder-count="3">
+<button type="button" role="radio" class="{{t.cls}}" aria-checked="{{t.on}}" onClick="{{t.pick}}" style="flex: 1; justify-content: center;">{{t.label}}</button>
+</sc-for>
+</div>
+</div>
+</div>
+</sc-if>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"active":{"editor":"enum","options":["search","deals","shops","brands","product"],"default":"search"},"look":{"editor":"enum","options":["glass","blend"],"default":"glass"},"mode":{"editor":null},"theme":{"editor":null},"onMode":{"editor":null},"onTheme":{"editor":null},"$preview":{"width":1440,"height":80}}'>
+class Component extends DCLogic {
+  constructor(props) {
+    super(props);
+    this.state = { open: false, mode: 'simple', theme: 'system' };
+  }
+  // one watcher per page: slides the selection pill of every segmented control to its selected option
+  // page change: the old page's blocks drop away and the new page's blocks settle in from above, one after another.
+  // Both halves stay under 0.2s. The header itself stays put so the navigation never jumps.
+  pageEnter(el) {
+    if (!el || el === window.__bfgBar) return;
+    window.__bfgBar = el;
+    var root = document.documentElement;
+    root.classList.remove('bfg-leaving');
+    root.classList.add('bfg-enter');
+    clearTimeout(window.__bfgEnterT);
+    window.__bfgEnterT = setTimeout(function () { root.classList.remove('bfg-enter'); }, 260);
+    if (window.__bfgPageFx) return;
+    window.__bfgPageFx = true;
+    document.addEventListener('click', function (e) {
+      if (e.defaultPrevented || e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
+      var a = e.target && e.target.closest ? e.target.closest('a[href]') : null;
+      if (!a || (a.target && a.target !== '_self')) return;
+      if (a.__bfgGo) { a.__bfgGo = false; return; }
+      var href = a.getAttribute('href') || '';
+      if (href.indexOf('.dc.html') < 0 || href.charAt(0) === '#') return;
+      if (!document.querySelector('.bfg main.bfg-wrap')) return;
+      var reduce = false;
+      try { reduce = window.matchMedia('(prefers-reduced-motion: reduce)').matches; } catch (err) {}
+      if (reduce) return;
+      e.preventDefault();
+      e.stopImmediatePropagation();
+      root.classList.remove('bfg-enter');
+      root.classList.add('bfg-leaving');
+      setTimeout(function () {
+        a.__bfgGo = true;
+        a.click();
+        // if the page did not change (same page link), bring the blocks back
+        setTimeout(function () { if (root.classList.contains('bfg-leaving')) { root.classList.remove('bfg-leaving'); root.classList.add('bfg-enter'); setTimeout(function () { root.classList.remove('bfg-enter'); }, 260); } }, 400);
+      }, 135);
+    }, true);
+  }
+  installSegInd() {
+    if (window.__bfgSegInd) return;
+    window.__bfgSegInd = true;
+    var seen = new WeakSet();
+    var ro = typeof ResizeObserver === 'function' ? new ResizeObserver(function () { queue(); }) : null;
+    var place = function (g) {
+      var on = g.querySelector('.seg-on, .mode-on');
+      if (!on || !on.offsetWidth) { g.classList.remove('ind-ready', 'ind-anim'); return; }
+      if (ro && !seen.has(g)) { seen.add(g); ro.observe(g); }
+      g.style.setProperty('--ind-x', on.offsetLeft + 'px');
+      g.style.setProperty('--ind-y', on.offsetTop + 'px');
+      g.style.setProperty('--ind-w', on.offsetWidth + 'px');
+      g.style.setProperty('--ind-h', on.offsetHeight + 'px');
+      if (!g.classList.contains('ind-ready')) {
+        g.classList.add('ind-ready');
+        requestAnimationFrame(function () { requestAnimationFrame(function () { g.classList.add('ind-anim'); }); });
+      }
+    };
+    var pending = false;
+    var queue = function () {
+      if (pending) return;
+      pending = true;
+      requestAnimationFrame(function () {
+        pending = false;
+        var gs = document.querySelectorAll('.seg-group, .mode');
+        for (var i = 0; i < gs.length; i++) place(gs[i]);
+      });
+    };
+    new MutationObserver(queue).observe(document.body, { subtree: true, childList: true, attributes: true, attributeFilter: ['class'] });
+    window.addEventListener('resize', queue);
+    if (document.fonts && document.fonts.ready) document.fonts.ready.then(queue);
+    queue();
+  }
+  renderVals() {
+    var self = this;
+    var p = this.props;
+    var look = p.look === 'blend' ? 'Blend' : '';
+    var page = function (n) { return n + look + '.dc.html'; };
+    var href = { home: page('Main'), deals: page('Deals'), shops: page('Shops'), brands: page('Brands'), product: page('Product') };
+    var active = p.active || 'search';
+    var mode = p.mode || this.state.mode;
+    var theme = p.theme || this.state.theme;
+    var setMode = function (m) { if (p.onMode) p.onMode(m); else self.setState({ mode: m }); };
+    var commitTheme = function (t) { if (p.onTheme) p.onTheme(t); else self.setState({ theme: t }); };
+    // light and dark never cut: a circle of the new theme grows from the button that was pressed
+    // (View Transitions, Chrome and Edge), else every colour cross-fades for half a second
+    var setTheme = function (t, e) {
+      var reduce = false;
+      try { reduce = window.matchMedia('(prefers-reduced-motion: reduce)').matches; } catch (err) {}
+      // repaint the page in the same frame the button is pressed: the page's own state update lands a moment later,
+      // too late for the transition's snapshot (that was the delay followed by a hard cut)
+      var resolved = t;
+      if (t === 'system') { try { resolved = window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'; } catch (err) { resolved = 'light'; } }
+      var roots = document.querySelectorAll('.bfg');
+      var current = roots.length ? roots[0].getAttribute('data-theme') : null;
+      var paint = function () { for (var i = 0; i < roots.length; i++) roots[i].setAttribute('data-theme', resolved); };
+      if (reduce || current === resolved) { paint(); commitTheme(t); return; }
+      var root = document.documentElement;
+      var x = window.innerWidth / 2, y = 0;
+      if (e && e.currentTarget && e.currentTarget.getBoundingClientRect) { var r = e.currentTarget.getBoundingClientRect(); x = r.left + r.width / 2; y = r.top + r.height / 2; }
+      if (typeof document.startViewTransition === 'function') {
+        var vt = document.startViewTransition(function () { paint(); commitTheme(t); });
+        vt.ready.then(function () {
+          var far = Math.hypot(Math.max(x, window.innerWidth - x), Math.max(y, window.innerHeight - y));
+          root.animate({ clipPath: ['circle(0px at ' + x + 'px ' + y + 'px)', 'circle(' + far + 'px at ' + x + 'px ' + y + 'px)'] }, { duration: 650, easing: 'cubic-bezier(0.65, 0, 0.35, 1)', pseudoElement: '::view-transition-new(root)' });
+        }).catch(function () {});
+        return;
+      }
+      root.classList.add('bfg-theming');
+      clearTimeout(self.themeTimer);
+      self.themeTimer = setTimeout(function () { root.classList.remove('bfg-theming'); }, 600);
+      paint();
+      commitTheme(t);
+    };
+    var sysDark = false;
+    try { sysDark = window.matchMedia('(prefers-color-scheme: dark)').matches; } catch (e) {}
+    var dark = theme === 'dark' || (theme === 'system' && sysDark);
+    var isAdv = mode === 'advanced';
+    var items = [['search', 'Search', href.home], ['deals', 'Deals', href.deals], ['shops', 'Shops', href.shops], ['brands', 'Brands', href.brands]];
+    var bi = function (k) { return 'bottom-item' + (active === k ? ' bottom-on' : ''); };
+    return {
+      href: href,
+      links: items.map(function (i) { return { label: i[1], href: i[2], cls: 'nav-link' + (active === i[0] ? ' nav-on' : ''), current: active === i[0] ? 'page' : 'false' }; }),
+      bottom: { search: bi('search'), deals: bi('deals'), shops: bi('shops') },
+      isAdv: isAdv, isSimple: !isAdv,
+      simpleCls: 'mode-btn' + (isAdv ? '' : ' mode-on'), advCls: 'mode-btn' + (isAdv ? ' mode-on' : ''),
+      toSimple: function () { setMode('simple'); }, toAdv: function () { setMode('advanced'); },
+      toggleMode: function () { setMode(isAdv ? 'simple' : 'advanced'); },
+      isDark: dark, isLight: !dark,
+      themeLabel: dark ? 'Switch to light theme' : 'Switch to dark theme',
+      flipTheme: function (e) { setTheme(dark ? 'light' : 'dark', e); },
+      themes: [['system', 'System'], ['light', 'Light'], ['dark', 'Dark']].map(function (t) {
+        return { label: t[1], on: theme === t[0], cls: 'seg' + (theme === t[0] ? ' seg-on' : ''), pick: function (e) { setTheme(t[0], e); } };
+      }),
+      setBar: function (el) { if (el) { try { if (window.screen && screen.availHeight) document.documentElement.style.setProperty('--screen-h', screen.availHeight + 'px'); } catch (err) {} self.installSegInd(); self.pageEnter(el); } },
+      open: this.state.open,
+      openSheet: function () { self.setState({ open: true }); },
+      closeSheet: function () { self.setState({ open: false }); }
+    };
+  }
+}
+</script>
+</body>
+</html>

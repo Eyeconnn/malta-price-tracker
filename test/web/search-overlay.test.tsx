@@ -122,16 +122,17 @@ afterEach(() => {
 });
 
 describe('the Search button in the navigation', () => {
-  it('is an icon-only button with the accessible name Search at desktop width, not a link', () => {
+  it('is a Search button among the page links at desktop width, not a link', () => {
     renderAt('/how-we-check');
     const nav = mainNav();
     expect(within(nav).queryByRole('link', { name: 'Search' })).toBeNull();
     const button = desktopOpener();
-    expect(button.textContent?.trim()).toBe('');
-    expect(button.querySelector('svg')).not.toBeNull();
+    // the design's top bar: Search sits with the page links, the same 42px height and 96px minimum width
+    expect(button.textContent?.trim()).toBe('Search');
     expect(button.getAttribute('aria-haspopup')).toBe('dialog');
     expect(button.getAttribute('aria-expanded')).toBe('false');
-    expect(button.className).toContain('min-h-11');
+    expect(button.className).toContain('h-[42px]');
+    expect(button.className).toContain('min-w-24');
   });
 
   it('opens the search dialog at desktop width and reports aria-expanded', async () => {
@@ -149,7 +150,7 @@ describe('the Search button in the navigation', () => {
     const button = mobileOpener();
     expect(button.textContent).toContain('Search');
     expect(button.querySelector('svg')).not.toBeNull();
-    expect(button.className).toContain('min-h-11');
+    expect(button.className).toContain('min-h-[54px]');
     expect(button.getAttribute('aria-haspopup')).toBe('dialog');
     fireEvent.click(button);
     const d = await screen.findByRole('dialog', { name: 'Search products' });
@@ -301,7 +302,8 @@ describe('searching in the overlay', () => {
     expect(within(d).queryByTestId('search-example')).toBeNull();
     const examples = Object.values(SEARCH_EXAMPLES).flat() as string[];
     expect(examples).toContain(input.getAttribute('placeholder'));
-    expect(input.className).toContain('placeholder:text-muted-foreground');
+    // the placeholder is the faint text colour, still AA on glass and the surface (contrast test)
+    expect(input.className).toContain('placeholder:text-faint');
   });
 
   it('Enter goes to /search?q= and closes the overlay', async () => {

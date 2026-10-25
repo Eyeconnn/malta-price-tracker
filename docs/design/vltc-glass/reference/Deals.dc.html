@@ -1,0 +1,161 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Black Friday Guide: deals</title>
+<script src="./support.js"></script>
+<link rel="stylesheet" href="bfg.css">
+</head>
+<body>
+<x-dc>
+<helmet>
+<style>
+body{margin:0}
+</style>
+</helmet>
+<div class="{{rootCls}}" data-theme="{{dataTheme}}">
+<div class="bfg-bg" aria-hidden="true"></div>
+<dc-import name="Header" active="deals" look="{{look}}" mode="{{mode}}" theme="{{theme}}" on-mode="{{setMode}}" on-theme="{{setTheme}}" hint-size="100%,64px"></dc-import>
+<main class="bfg-wrap">
+<section class="stack" style="gap: 8px;">
+<h1 class="t-page">Black Friday deals</h1>
+<p style="color: var(--muted); max-width: 720px;">Every product we judged, from all shops. A deal is checked against its own price history, never against the shop's banner.</p>
+</section>
+
+<div class="between">
+<div class="seg-group" role="group" aria-label="Deal type">
+<button type="button" class="{{goodTabCls}}" aria-pressed="{{isGood}}" onClick="{{showGood}}">Good deals</button>
+<button type="button" class="{{badTabCls}}" aria-pressed="{{isBad}}" onClick="{{showBad}}">Deals to avoid</button>
+</div>
+<sc-if value="{{isAdv}}" hint-placeholder-val="{{false}}"><p class="t-hint">{{counts}}</p></sc-if>
+</div>
+
+<section class="glass card" aria-label="Filters" style="padding: 16px 18px;">
+<div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 14px; align-items: end;">
+<div class="field"><label for="f-cat">Category</label>
+<select id="f-cat" class="input" value="{{cat}}" onChange="{{onCat}}">
+<sc-for list="{{cats}}" as="o" hint-placeholder-count="6"><option value="{{o}}">{{o}}</option></sc-for>
+</select></div>
+<sc-if value="{{isAdv}}" hint-placeholder-val="{{false}}">
+<div class="field"><label for="f-shop">Shop</label>
+<select id="f-shop" class="input" value="{{shop}}" onChange="{{onShop}}">
+<sc-for list="{{shops}}" as="o" hint-placeholder-count="6"><option value="{{o}}">{{o}}</option></sc-for>
+</select></div>
+<div class="field"><label for="f-min">Lowest price (EUR)</label><input id="f-min" class="input" inputmode="numeric" value="{{min}}" onInput="{{onMin}}" placeholder="0"></div>
+<div class="field"><label for="f-max">Highest price (EUR)</label><input id="f-max" class="input" inputmode="numeric" value="{{max}}" onInput="{{onMax}}" placeholder="Any"></div>
+<div class="field"><label for="f-disc">Claimed discount</label>
+<select id="f-disc" class="input" value="{{disc}}" onChange="{{onDisc}}"><option value="0">Any size</option><option value="10">10% or more</option><option value="25">25% or more</option></select></div>
+</sc-if>
+</div>
+<sc-if value="{{badRange}}" hint-placeholder-val="{{false}}"><p role="alert" class="t-bad" style="font-size: 13px; font-weight: 600;">The lowest price is above the highest.</p></sc-if>
+</section>
+
+<p class="t-hint" role="status">{{showing}}</p>
+<div class="g3">
+<sc-for list="{{cards}}" as="c" hint-placeholder-count="6">
+<dc-import name="DealCard" card="{{c}}" advanced="{{isAdv}}" hint-size="100%,200px"></dc-import>
+</sc-for>
+</div>
+<sc-if value="{{none}}" hint-placeholder-val="{{false}}">
+<div class="glass card" style="align-items: flex-start;"><p style="font-weight: 700;">No deals match these filters.</p><button type="button" class="btn" onClick="{{reset}}">Clear filters</button></div>
+</sc-if>
+<p class="t-hint" style="text-align: center;">That is every judged deal for now. New prices arrive every night.</p>
+</main>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"look":{"editor":"enum","options":["glass","blend"],"default":"glass"},"mode":{"editor":"enum","options":["simple","advanced"],"default":"simple"},"$preview":{"width":1440,"height":2100}}'>
+class Component extends DCLogic {
+  constructor(props) {
+    super(props);
+    var m = null, t = null;
+    try { m = localStorage.getItem('bfg-mode'); t = localStorage.getItem('bfg-theme'); } catch (e) {}
+    this.state = { mode: m, theme: t || 'system', tab: 'good', cat: 'All categories', shop: 'All shops', min: '', max: '', disc: '0' };
+  }
+  renderVals() {
+    var self = this;
+    var look = this.props.look === 'blend' ? 'blend' : 'glass';
+    var suffix = look === 'blend' ? 'Blend' : '';
+    var page = function (n) { return n + suffix + '.dc.html'; };
+    var mode = this.state.mode || this.props.mode || 'simple';
+    var theme = this.state.theme;
+    var sysDark = false;
+    try { sysDark = window.matchMedia('(prefers-color-scheme: dark)').matches; } catch (e) {}
+    var dark = theme === 'dark' || (theme === 'system' && sysDark);
+    var isAdv = mode === 'advanced';
+    var eur = function (n) { return '€' + n.toLocaleString('en-GB'); };
+    var initials = function (s) { return s.split(' ').map(function (w) { return w[0]; }).join('').slice(0, 2).toUpperCase(); };
+    var WHAT = { price: 'price raised', was: 'was price raised', 'was-high': 'was price above its recent prices' };
+    var card = function (d) {
+      var avoid = d.v === 'avoid';
+      var tag = !avoid ? { kind: 'good', from: '', to: '', label: '' }
+        : d.k === 'price' ? { kind: 'avoid', from: eur(d.rf), to: eur(d.p), label: '' }
+        : d.k === 'was' ? { kind: 'avoid', from: eur(d.wf), to: eur(d.w), label: 'WAS RAISED' }
+        : { kind: 'avoid', from: '', to: eur(d.p), label: 'AVOID' };
+      var fact = !avoid ? '' : d.k === 'price' ? 'Price on ' + d.ra + ': ' + eur(d.rf) : d.k === 'was' ? 'Was price raised from ' + eur(d.wf) + ' to ' + eur(d.w) : 'Was price ' + eur(d.w) + ' is above its recent prices';
+      return {
+        title: d.t, shop: d.s, initials: initials(d.s), shopHref: page('Shop'), href: page('Product'),
+        priceTxt: eur(d.p), wasTxt: d.w ? eur(d.w) : '', hasWas: !!d.w && d.w > d.p,
+        verdict: d.v, bf: d.bf, alarm: avoid && d.bf, alarmText: 'Marked Black Friday, ' + (WHAT[d.k] || 'deal to avoid'),
+        plainBf: d.bf && !(avoid && d.bf), hasFact: !!fact, fact: fact, reason: d.r, hasTag: true, tag: tag
+      };
+    };
+    var ALL = [
+      { t: 'Sony WH-1000XM6 Wireless Noise Cancelling Headphones', s: 'Pixel Point', c: 'TVs & audio', p: 359, w: 399, v: 'good', bf: true, r: '€40 below its lowest price in the 24 days before 16 Nov (€399).' },
+      { t: 'Apple AirPods Pro 3', s: 'Harbour Tech', c: 'TVs & audio', p: 229, w: 279, v: 'good', bf: true, r: '€40 below its lowest price in the 26 days before 18 Nov (€269).' },
+      { t: 'Samsung 55" QLED Q80F 4K TV', s: 'Isla Digital', c: 'TVs & audio', p: 749, w: 899, v: 'good', bf: true, r: '€100 below its lowest price in the 25 days before 17 Nov (€849).' },
+      { t: 'Dyson V15 Detect Absolute', s: 'Casa Living', c: 'Appliances', p: 549, w: 699, v: 'good', bf: false, r: '€100 below its lowest price in the 23 days before 15 Nov (€649).' },
+      { t: 'LEGO Technic 4x4 Off-Roader', s: 'Toy Cove', c: 'Toys', p: 119, w: 149, v: 'good', bf: true, r: '€30 below its lowest price in the 27 days before 19 Nov (€149).' },
+      { t: 'Logitech MX Master 3S Mouse', s: 'Pixel Point', c: 'Laptops', p: 79, w: 109, v: 'good', bf: true, r: '€20 below its lowest price in the 25 days before 17 Nov (€99).' },
+      { t: 'Nintendo Switch 2', s: 'Byte Arcade', c: 'Gaming', p: 439, w: 479, v: 'good', bf: true, r: '€30 below its lowest price in the 26 days before 18 Nov (€469).' },
+      { t: 'Philips Airfryer XXL', s: 'Casa Living', c: 'Home & kitchen', p: 179, w: 249, v: 'good', bf: false, r: '€50 below its lowest price in the 24 days before 16 Nov (€229).' },
+      { t: 'Sony WH-1000XM6 Wireless Noise Cancelling Headphones', s: 'Volt Electronics', c: 'TVs & audio', p: 429, w: 499, v: 'avoid', bf: true, k: 'price', rf: 399, ra: '7 Nov', r: 'Price went from €399 on 7 Nov to €429 on 12 Nov while marked Black Friday.' },
+      { t: 'HP 15 Laptop, Core i5, 16GB, 512GB', s: 'Volt Electronics', c: 'Laptops', p: 729, w: 829, v: 'avoid', bf: true, k: 'price', rf: 649, ra: '8 Nov', r: 'Price went from €649 on 8 Nov to €729 on 13 Nov while marked Black Friday.' },
+      { t: 'iPhone 17 128GB', s: 'Isla Digital', c: 'Phones & tablets', p: 929, w: 1099, v: 'avoid', bf: true, k: 'was-high', r: 'Was price €1,099 is higher than any price charged since 23 Oct (highest €949).' },
+      { t: 'PlayStation 5 Slim Digital', s: 'Harbour Tech', c: 'Gaming', p: 449, w: 549, v: 'avoid', bf: true, k: 'was', wf: 499, r: 'Was price went from €499 on 8 Nov to €549 on 14 Nov while the price stayed at €449.' },
+      { t: 'KitchenAid Artisan Stand Mixer 4.8L', s: 'Casa Living', c: 'Home & kitchen', p: 499, w: 699, v: 'avoid', bf: false, k: 'was-high', r: 'Was price €699 is higher than any price charged since 23 Oct (highest €529).' },
+      { t: 'Nike Air Max 90', s: 'Trend Wardrobe', c: 'Fashion', p: 139, w: 179, v: 'avoid', bf: true, k: 'price', rf: 119, ra: '7 Nov', r: 'Price went from €119 on 7 Nov to €139 on 10 Nov, and it is now marked Black Friday.' },
+      { t: 'Garmin Forerunner 265', s: 'Harbour Tech', c: 'Sports', p: 399, w: 479, v: 'avoid', bf: false, k: 'price', rf: 349, ra: '6 Nov', r: 'Price went from €349 on 6 Nov to €399 on 10 Nov while showing a was price of €479.' },
+      { t: 'Barbie Dreamhouse', s: 'Toy Cove', c: 'Toys', p: 229, w: 299, v: 'avoid', bf: true, k: 'was', wf: 249, r: 'Was price went from €249 on 9 Nov to €299 on 15 Nov while marked Black Friday.' }
+    ];
+    var tab = this.state.tab;
+    var st = this.state;
+    var minN = st.min === '' ? null : Number(st.min), maxN = st.max === '' ? null : Number(st.max);
+    var badRange = minN !== null && maxN !== null && minN > maxN;
+    var list = ALL.filter(function (d) {
+      if (d.v !== tab) return false;
+      if (st.cat !== 'All categories' && d.c !== st.cat) return false;
+      if (!isAdv) return true;
+      if (st.shop !== 'All shops' && d.s !== st.shop) return false;
+      if (!badRange && minN !== null && d.p < minN) return false;
+      if (!badRange && maxN !== null && d.p > maxN) return false;
+      var claimed = d.w ? (1 - d.p / d.w) * 100 : 0;
+      if (claimed < Number(st.disc)) return false;
+      return true;
+    });
+    var nGood = ALL.filter(function (d) { return d.v === 'good'; }).length, nBad = ALL.length - nGood;
+    var isGood = tab === 'good';
+    var label = isGood ? (list.length === 1 ? 'good deal' : 'good deals') : (list.length === 1 ? 'deal to avoid' : 'deals to avoid');
+    var set = function (k) { return function (e) { var o = {}; o[k] = e.target.value; self.setState(o); }; };
+    return {
+      look: look, mode: mode, theme: theme, isAdv: isAdv,
+      rootCls: 'bfg look-' + look, dataTheme: dark ? 'dark' : 'light',
+      setMode: function (m) { try { localStorage.setItem('bfg-mode', m); } catch (e) {} self.setState({ mode: m }); },
+      setTheme: function (t) { try { localStorage.setItem('bfg-theme', t); } catch (e) {} self.setState({ theme: t }); },
+      isGood: isGood, isBad: !isGood,
+      goodTabCls: 'seg seg-good' + (isGood ? ' seg-on' : ''), badTabCls: 'seg seg-bad' + (isGood ? '' : ' seg-on'),
+      showGood: function () { self.setState({ tab: 'good' }); }, showBad: function () { self.setState({ tab: 'avoid' }); },
+      counts: nGood + ' good deals and ' + nBad + ' deals to avoid, across all shops and prices.',
+      cats: ['All categories', 'Laptops', 'Phones & tablets', 'TVs & audio', 'Gaming', 'Appliances', 'Toys', 'Fashion', 'Home & kitchen', 'Sports'],
+      shops: ['All shops', 'Byte Arcade', 'Casa Living', 'Harbour Tech', 'Isla Digital', 'Pixel Point', 'Toy Cove', 'Trend Wardrobe', 'Volt Electronics'],
+      cat: st.cat, shop: st.shop, min: st.min, max: st.max, disc: st.disc,
+      onCat: set('cat'), onShop: set('shop'), onMin: set('min'), onMax: set('max'), onDisc: set('disc'),
+      badRange: isAdv && badRange,
+      cards: list.map(card), none: list.length === 0,
+      showing: list.length + ' ' + label,
+      reset: function () { self.setState({ cat: 'All categories', shop: 'All shops', min: '', max: '', disc: '0' }); }
+    };
+  }
+}
+</script>
+</body>
+</html>

@@ -6,9 +6,9 @@ import { cn } from '@/lib/utils';
 /** Deal cards: one column on a phone, three from 768px. */
 export function DealList({ cards, className }: { cards: Card[]; className?: string }) {
   return (
-    <ul className={cn('m-0 grid list-none gap-3 p-0 md:grid-cols-3', className)}>
+    <ul className={cn('m-0 grid list-none gap-4 p-0 md:grid-cols-2 lg:grid-cols-3', className)}>
       {cards.map((c) => (
-        <li key={c.id} className="min-w-0">
+        <li key={c.id} className="flex min-w-0 flex-col [&>*]:flex-1">
           <DealCard card={c} />
         </li>
       ))}
@@ -19,9 +19,9 @@ export function DealList({ cards, className }: { cards: Card[]; className?: stri
 /** Placeholder tiles the size of deal cards, so the page does not jump when the cards arrive. */
 export function DealListSkeleton({ count, className }: { count: number; className?: string }) {
   return (
-    <ul aria-hidden="true" className={cn('m-0 grid list-none gap-3 p-0 md:grid-cols-3', className)}>
+    <ul aria-hidden="true" className={cn('m-0 grid list-none gap-4 p-0 md:grid-cols-3', className)}>
       {Array.from({ length: count }, (_, i) => (
-        <li key={i} className="glass min-h-40 opacity-60" />
+        <li key={i} className="glass min-h-[360px] opacity-60" />
       ))}
     </ul>
   );
@@ -30,7 +30,7 @@ export function DealListSkeleton({ count, className }: { count: number; classNam
 /** A short message in a glass panel: errors, empty lists. */
 export function Notice({ title, children, action, className }: { title: string; children?: ReactNode; action?: ReactNode; className?: string }) {
   return (
-    <div className={cn('glass flex flex-col items-start gap-2 p-5', className)}>
+    <div className={cn('glass flex flex-col items-start gap-2 p-[22px]', className)}>
       <p className="font-semibold">{title}</p>
       {children && <div className="text-sm text-muted-foreground">{children}</div>}
       {action}
