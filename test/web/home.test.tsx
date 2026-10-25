@@ -103,47 +103,64 @@ afterEach(() => {
 });
 
 describe('home', () => {
-  it('renders the headline as the only h1, then 6 good and 6 avoid cards on desktop', async () => {
+  it('renders the headline as the only h1, then three good and three avoid cards at a time on desktop', async () => {
     mockApi({ '/api/home': home() });
     renderAt('/');
-    await waitFor(() => expect(screen.getAllByRole('article')).toHaveLength(12));
+    await waitFor(() => expect(screen.getAllByRole('article')).toHaveLength(6));
     const h1 = screen.getAllByRole('heading', { level: 1 });
     expect(h1).toHaveLength(1);
     expect(h1[0]!.textContent).toBe('Is that deal real?');
-    expect(cardsIn(section('Good deals'))).toHaveLength(6);
-    expect(cardsIn(section('Deals to avoid'))).toHaveLength(6);
+    expect(cardsIn(section('Good deals'))).toHaveLength(3);
+    expect(cardsIn(section('Deals to avoid'))).toHaveLength(3);
     expect(within(section('Good deals')).getByRole('link', { name: /See all good deals/ }).getAttribute('href')).toBe('/deals?type=good');
     expect(within(section('Deals to avoid')).getByRole('link', { name: /See all deals to avoid/ }).getAttribute('href')).toBe('/deals?type=avoid');
   });
 
-  it('from 768px the headline and search block fills the first screen and is centred in it', async () => {
+  it('each row pages through its deals with previous and next, shows the set as bars, and can be paused', async () => {
     mockApi({ '/api/home': home() });
     renderAt('/');
-    await waitFor(() => expect(screen.getAllByRole('article')).toHaveLength(12));
+    const row = await waitFor(() => section('Good deals'));
+    await waitFor(() => expect(cardsIn(row)).toHaveLength(3));
+    expect(within(row).getByRole('img', { name: 'Showing set 1 of 2' })).toBeTruthy();
+    expect(within(row).getByText('Product 1')).toBeTruthy();
+    fireEvent.click(within(row).getByRole('button', { name: 'Next good deals' }));
+    await waitFor(() => expect(within(row).getByText('Product 4')).toBeTruthy());
+    expect(within(row).getByRole('img', { name: 'Showing set 2 of 2' })).toBeTruthy();
+    const pause = within(row).getByRole('button', { name: 'Pause good deals' });
+    expect(pause.getAttribute('aria-pressed')).toBe('false');
+    fireEvent.click(pause);
+    expect(within(row).getByRole('button', { name: 'Play good deals' }).getAttribute('aria-pressed')).toBe('true');
+  });
+
+  it('the first screen is the search alone: headline, search and the scroll cue, the deals below it', async () => {
+    mockApi({ '/api/home': home() });
+    renderAt('/');
+    await waitFor(() => expect(screen.getAllByRole('article')).toHaveLength(6));
     const hero = screen.getByTestId('home-hero');
-    expect(hero.className).toMatch(/min-h-\[calc\(100dvh-/);
+    expect(hero.className.split(/\s+/)).toContain('hero');
     expect(hero.className).toContain('justify-center');
     expect(hero.contains(screen.getByRole('heading', { level: 1 }))).toBe(true);
     expect(hero.contains(screen.getByRole('searchbox', { name: 'Search a product' }))).toBe(true);
     expect(hero.contains(screen.getByTestId('search-status'))).toBe(true);
     expect(hero.contains(section('Good deals'))).toBe(false);
+    expect(within(hero).getByRole('link', { name: /Scroll to see this week's verdicts/ }).getAttribute('href')).toBe('#deals');
   });
 
-  it('on a phone the headline and search block keeps its natural height', async () => {
-    setViewport(375);
-    mockApi({ '/api/home': home() });
+  it('a Try example fills the search', async () => {
+    mockApi({ '/api/home': home(), '/api/search': () => json({ results: [] }) });
     renderAt('/');
-    await screen.findByRole('tab', { name: 'Good deals' });
     const hero = screen.getByTestId('home-hero');
-    expect(hero.className).not.toMatch(/min-h-/);
-    expect(hero.className).not.toContain('justify-center');
-    expect(screen.getAllByRole('heading', { level: 1 })).toHaveLength(1);
+    const example = within(hero)
+      .getAllByRole('button')
+      .find((b) => b.textContent && b.textContent !== 'Check')!;
+    fireEvent.click(example);
+    expect((screen.getByRole('searchbox', { name: 'Search a product' }) as HTMLInputElement).value).toBe(example.textContent);
   });
 
   it('the main search types an example as an aria-hidden overlay, the name stays "Search a product"', async () => {
     mockApi({ '/api/home': home() });
     renderAt('/');
-    await waitFor(() => expect(screen.getAllByRole('article')).toHaveLength(12));
+    await waitFor(() => expect(screen.getAllByRole('article')).toHaveLength(6));
     expect(screen.getByTestId('search-example').getAttribute('aria-hidden')).toBe('true');
     expect(screen.getByRole('searchbox', { name: 'Search a product' }).getAttribute('placeholder')).toBeNull();
   });
@@ -152,16 +169,18 @@ describe('home', () => {
     setViewport(375);
     mockApi({ '/api/home': home() });
     renderAt('/');
-    const goodTab = await screen.findByRole('tab', { name: 'Good deals' });
-    const avoidTab = screen.getByRole('tab', { name: 'Deals to avoid' });
-    expect(goodTab.getAttribute('aria-selected')).toBe('true');
+    const type = await screen.findByRole('radiogroup', { name: 'Deal type' });
+    const goodTab = within(type).getByRole('radio', { name: 'Good deals' });
+    const avoidTab = within(type).getByRole('radio', { name: 'Deals to avoid' });
+    expect(goodTab.getAttribute('aria-checked')).toBe('true');
     const panel = () => screen.getByRole('tabpanel');
-    expect(cardsIn(panel())).toHaveLength(6);
+    expect(cardsIn(panel())).toHaveLength(3);
     expect(within(panel()).getByText('Product 1')).toBeTruthy();
-    fireEvent.mouseDown(avoidTab, { button: 0 });
-    await waitFor(() => expect(avoidTab.getAttribute('aria-selected')).toBe('true'));
-    expect(cardsIn(panel())).toHaveLength(6);
+    fireEvent.click(avoidTab);
+    await waitFor(() => expect(avoidTab.getAttribute('aria-checked')).toBe('true'));
+    expect(cardsIn(panel())).toHaveLength(3);
     expect(within(panel()).getByText('Product 11')).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Pause deals to avoid' })).toBeTruthy();
   });
 
   it('a card links to its product and its shop', async () => {
@@ -180,41 +199,59 @@ describe('home', () => {
     expect(document.body.textContent).not.toContain('€0.00');
   });
 
-  it('Simple mode hides the reason, Advanced shows it', async () => {
-    mockApi({ '/api/home': home([card(1, { reason: '€20.00 below its lowest price in the 30 days before 1 Nov (€149.00).' })], []) });
+  it("focusing a card opens its panel: why, the shop's claim against our check, price history and the shop", async () => {
+    mockApi({ '/api/home': home([card(1, { priceCents: 14900, wasCents: 16900, reason: '€20.00 below its lowest price in the 30 days before 1 Nov (€169.00).' })], []) });
     renderAt('/');
-    await screen.findByText('Product 1');
-    expect(screen.queryByText(/below its lowest price/)).toBeNull();
-    fireEvent.click(screen.getByRole('radio', { name: 'Advanced' }));
-    expect(screen.getByText('€20.00 below its lowest price in the 30 days before 1 Nov (€149.00).')).toBeTruthy();
+    const c = await waitFor(() => cardsIn(section('Good deals'))[0]!);
+    // closed: the panel is hidden and out of the tab order
+    expect(within(c).queryByRole('link', { name: 'See price history' })).toBeNull();
+    fireEvent.focus(within(c).getByRole('link', { name: 'Product 1' }));
+    expect(c.getAttribute('data-active')).toBe('true');
+    expect(within(c).getByText('Why it is a good deal')).toBeTruthy();
+    expect(within(c).getByText('€20.00 below its lowest price in the 30 days before 1 Nov (€169.00).')).toBeTruthy();
+    expect(within(c).getByText('12% off')).toBeTruthy();
+    expect(within(c).getByText("Shop's claim")).toBeTruthy();
+    expect(within(c).getByText('Real deal')).toBeTruthy();
+    expect(within(c).getByRole('link', { name: 'See price history' }).getAttribute('href')).toBe('/product/s1?seller=1');
+    expect(within(c).getByRole('link', { name: 'Alpha Shop rating' }).getAttribute('href')).toBe('/shops/alpha');
   });
 
-  it('a good card shows the real deal tag with the price and the was price', async () => {
+  it('a good card says how much off and that it is real, with the price and the was price', async () => {
     mockApi({ '/api/home': home([card(1, { priceCents: 12999, wasCents: 13999 })], []) });
     renderAt('/');
     const c = (await screen.findAllByRole('article'))[0]!;
-    expect(within(c).getByRole('img', { name: /Real deal/ })).toBeTruthy();
+    expect(within(c).getByText('7% off, real deal')).toBeTruthy();
     expect(within(c).getByText('€129.99')).toBeTruthy();
     expect(within(c).getByText(/€139\.99/).closest('s')).not.toBeNull();
   });
 
-  it('an avoid card shows the raise on its tag and as a fact line in Simple mode', async () => {
+  it('an avoid card says the price was raised, and its why is the change in Simple mode', async () => {
     mockApi({ '/api/home': home([], [card(11, { verdict: 'avoid', priceCents: 79900, wasCents: 88900, raisedFrom: { priceCents: 70900, at: '2026-10-20' } })]) });
     renderAt('/');
     const c = await waitFor(() => cardsIn(section('Deals to avoid'))[0]!);
-    expect(within(c).getByRole('img', { name: 'Raised from €709.00 to €799.00' })).toBeTruthy();
+    expect(within(c).getByText('Price raised')).toBeTruthy();
     expect(within(c).getByText('Price on 20 Oct: €709.00')).toBeTruthy();
+    expect(within(c).getByText('Not real')).toBeTruthy();
   });
 
-  it('an avoid card with a raised was price says so on its tag', async () => {
+  it('an avoid card with a raised was price says so', async () => {
     mockApi({ '/api/home': home([], [card(11, { verdict: 'avoid', priceCents: 24900, wasCents: 39900, wasRaisedFromCents: 29900 })]) });
     renderAt('/');
     const c = await waitFor(() => cardsIn(section('Deals to avoid'))[0]!);
-    expect(within(c).getByRole('img', { name: 'WAS RAISED: from €299.00 to €399.00' })).toBeTruthy();
+    expect(within(c).getByText('Was price raised')).toBeTruthy();
     expect(within(c).getByText('Was price raised from €299.00 to €399.00')).toBeTruthy();
   });
 
-  it('marks Black Friday cards, and a Black Friday avoid card is unmistakable', async () => {
+  it('Advanced mode gives the verdict sentence as the why of an avoid card', async () => {
+    mockApi({ '/api/home': home([], [card(11, { verdict: 'avoid', priceCents: 79900, raisedFrom: { priceCents: 70900, at: '2026-10-20' }, reason: 'Price went up before the sale.' })]) });
+    renderAt('/');
+    const c = await waitFor(() => cardsIn(section('Deals to avoid'))[0]!);
+    expect(within(c).queryByText('Price went up before the sale.')).toBeNull();
+    fireEvent.click(screen.getByRole('radio', { name: 'Advanced' }));
+    expect(within(c).getByText('Price went up before the sale.')).toBeTruthy();
+  });
+
+  it('marks Black Friday cards, and a Black Friday avoid card is flagged', async () => {
     mockApi({
       '/api/home': home(
         [card(1, { bf: true })],
@@ -225,17 +262,17 @@ describe('home', () => {
     const good = await waitFor(() => cardsIn(section('Good deals'))[0]!);
     expect(within(good).getByText('Black Friday')).toBeTruthy();
     const [bfAvoid, plainAvoid] = cardsIn(section('Deals to avoid'));
-    expect(within(bfAvoid!).getByText('Marked Black Friday, price raised')).toBeTruthy();
+    expect(within(bfAvoid!).getByText('Black Friday')).toBeTruthy();
     expect(bfAvoid!.getAttribute('data-alarm')).toBe('true');
     expect(within(plainAvoid!).queryByText(/Black Friday/)).toBeNull();
     expect(plainAvoid!.getAttribute('data-alarm')).toBeNull();
   });
 
-  it('none and insufficient cards get no tag, only the price', async () => {
+  it('none and insufficient cards get no badge, only the price', async () => {
     mockApi({ '/api/home': home([card(1, { verdict: 'none' }), card(2, { verdict: 'insufficient' })], []) });
     renderAt('/');
     const cards = await waitFor(() => cardsIn(section('Good deals')));
-    for (const c of cards) expect(within(c).queryByRole('img', { name: /Real deal|Raised|AVOID/i })).toBeNull();
+    for (const c of cards) expect(within(c).queryByText(/real deal|raised|not real|to avoid/i)).toBeNull();
     expect(within(cards[0]!).getByText('€100.01')).toBeTruthy();
   });
 
@@ -263,7 +300,7 @@ describe('home', () => {
     expect(screen.getAllByRole('heading', { level: 1 })).toHaveLength(1);
     up = true;
     fireEvent.click(screen.getByRole('button', { name: 'Try again' }));
-    await waitFor(() => expect(screen.getAllByRole('article')).toHaveLength(12));
+    await waitFor(() => expect(screen.getAllByRole('article')).toHaveLength(6));
     expect(fetchMock.mock.calls.filter(([i]) => String(i).startsWith('/api/home'))).toHaveLength(2);
   });
 

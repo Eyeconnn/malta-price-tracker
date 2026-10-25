@@ -44,6 +44,54 @@ const PAGES = {
   how: '/how-we-check',
   notfound: '/no-such-page',
 };
+// Sample judged deals for the pages whose real lists are still empty (no product has 14 days of prices yet).
+// Used only in the browser for these screenshots, never stored.
+const card = (id, title, shop, slug, price, was, verdict, extra = {}) => ({
+  id, title, shop, shopSlug: slug, priceCents: price, wasCents: was, verdict, bf: true, category: null,
+  raisedFrom: null, wasRaisedFromCents: null, logoUrl: null, logoAspect: null,
+  reason: verdict === 'good' ? `€40.00 below its lowest price in the 24 days before 16 Nov (€${(was / 100).toFixed(2)}).` : 'Price went from €399.00 on 7 Nov to €429.00 on 12 Nov while marked Black Friday.',
+  ...extra,
+});
+const GOOD = [
+  card(9001, 'Sony WH-1000XM6 Wireless Noise Cancelling Headphones', 'Pixel Point', shopSlug, 35900, 39900, 'good'),
+  card(9002, 'Apple AirPods Pro 3', 'Harbour Tech', shopSlug, 22900, 27900, 'good'),
+  card(9003, 'Samsung 55" QLED Q80F 4K TV', 'Isla Digital', shopSlug, 74900, 89900, 'good'),
+  card(9004, 'Dyson V15 Detect Absolute', 'Casa Living', shopSlug, 54900, 69900, 'good', { bf: false }),
+  card(9005, 'LEGO Technic 4x4 Off-Roader', 'Toy Cove', shopSlug, 11900, 14900, 'good'),
+  card(9006, 'Nintendo Switch 2', 'Byte Arcade', shopSlug, 43900, 47900, 'good'),
+];
+const AVOID = [
+  card(9101, 'Sony WH-1000XM6 Wireless Noise Cancelling Headphones', 'Volt Electronics', shopSlug, 42900, 49900, 'avoid', { raisedFrom: { priceCents: 39900, at: '2026-11-07' } }),
+  card(9102, 'iPhone 17 128GB', 'Isla Digital', shopSlug, 92900, 109900, 'avoid', { reason: 'Was price €1,099.00 is higher than any price charged since 23 Oct (highest €949.00).' }),
+  card(9103, 'PlayStation 5 Slim Digital', 'Harbour Tech', shopSlug, 44900, 54900, 'avoid', { wasRaisedFromCents: 49900, reason: 'Was price went from €499.00 on 8 Nov to €549.00 on 14 Nov while the price stayed at €449.00.' }),
+  card(9104, 'Nike Air Max 90', 'Trend Wardrobe', shopSlug, 13900, 17900, 'avoid', { raisedFrom: { priceCents: 11900, at: '2026-11-07' } }),
+];
+async function withSamples(page) {
+  if (!args.samples) return;
+  await page.route('**/api/home', async (route) => {
+    const res = await route.fetch();
+    const body = await res.json();
+    if (!body.good?.length && !body.avoid?.length) Object.assign(body, { good: GOOD, avoid: AVOID });
+    await route.fulfill({ response: res, json: body });
+  });
+  await page.route('**/api/deals?*', async (route) => {
+    const res = await route.fetch();
+    const body = await res.json();
+    if (!body.items?.length) {
+      const type = new URL(route.request().url()).searchParams.get('type');
+      body.items = type === 'avoid' ? AVOID : GOOD;
+      body.total = body.items.length;
+    }
+    await route.fulfill({ response: res, json: body });
+  });
+  await page.route('**/api/shops/*', async (route) => {
+    const res = await route.fetch();
+    const body = await res.json();
+    if (body.shop && !body.good?.length && !body.avoid?.length) Object.assign(body, { good: GOOD.slice(0, 2), avoid: AVOID.slice(0, 3) });
+    await route.fulfill({ response: res, json: body });
+  });
+}
+
 const only = typeof args.only === 'string' ? args.only.split(',') : null;
 const VIEWPORTS = { desktop: { width: 1440, height: 900 }, phone: { width: 390, height: 844 } };
 const axe = [];
@@ -68,6 +116,7 @@ for (const [name, path] of Object.entries(PAGES)) {
           } catch {}
         }, [theme, mode]);
         const page = await ctx.newPage();
+        await withSamples(page);
         await page.goto(`${BASE}${path}`, { waitUntil: 'networkidle' });
         await page.waitForTimeout(1600); // entry animations, chart draw
         await page.screenshot({ path: `${OUT}/${name}-${vp}-${theme}-${mode}.png`, fullPage: true });

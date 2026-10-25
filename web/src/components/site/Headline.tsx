@@ -58,7 +58,7 @@ export function Headline({ phrases, now, random = Math.random, className }: Head
     usable.length > 0 ? usable[Math.min(usable.length - 1, Math.floor(pick * usable.length))]! : parseHighlight(FALLBACK_LINE);
 
   return (
-    <h1 className={cn('headline text-balance text-3xl font-extrabold tracking-tight sm:text-4xl', className)}>
+    <h1 className={cn('headline text-[clamp(30px,5vw,52px)] leading-[1.1] font-extrabold tracking-[-0.02em] text-balance', className)}>
       <span className="headline-flip">
         {segments.map((s, i) =>
           s.em ? (
