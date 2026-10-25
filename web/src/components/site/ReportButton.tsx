@@ -128,7 +128,7 @@ export function ReportButton({ targetType, targetId, title = 'Something wrong?',
     }
   }
 
-  const field = 'w-full rounded-md border border-muted-foreground bg-transparent px-3 py-2 text-base outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50 aria-invalid:border-bad';
+  const field = 'w-full rounded-[10px] border border-line-strong bg-field px-3 py-2 text-[15px] font-medium text-ink outline-none placeholder:text-faint focus-visible:ring-[3px] focus-visible:ring-ring/50 aria-invalid:border-bad';
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -136,7 +136,7 @@ export function ReportButton({ targetType, targetId, title = 'Something wrong?',
         <Button
           variant={compact ? 'ghost' : 'outline'}
           size={compact ? 'sm' : 'default'}
-          className={cn('min-h-11 w-fit', compact && 'px-2 text-xs', className)}
+          className={cn('min-h-11 w-fit', compact && 'px-2.5 text-[13px] text-muted-foreground hover:text-ink', className)}
           aria-label={ariaLabel}
           data-report-target={`${targetType}:${targetId}`}
         >

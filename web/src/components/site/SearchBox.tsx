@@ -102,12 +102,12 @@ export function SearchBox({ value, onChange, onSubmit, placeholder = 'Search a p
         e.preventDefault();
         onSubmit(value.trim());
       }}
-      className={cn('glass flex items-center gap-2 rounded-full p-1.5 pl-4 focus-within:ring-[3px] focus-within:ring-ring/50', className)}
+      className={cn('glass flex items-center gap-2.5 rounded-full py-2 pr-2 pl-5 focus-within:ring-[3px] focus-within:ring-ring', className)}
     >
       <label htmlFor={id} className="sr-only">
         {placeholder}
       </label>
-      <Search aria-hidden="true" className="size-5 flex-none text-muted-foreground" />
+      <Search aria-hidden="true" className="size-[22px] flex-none text-faint" />
       <div className="relative min-w-0 flex-1">
         <input
           id={id}
@@ -120,20 +120,20 @@ export function SearchBox({ value, onChange, onSubmit, placeholder = 'Search a p
           onChange={(e) => onChange(e.target.value)}
           onFocus={() => setFocused(true)}
           onBlur={() => setFocused(false)}
-          className="min-h-11 w-full min-w-0 bg-transparent text-base outline-none placeholder:text-muted-foreground [&::-webkit-search-cancel-button]:hidden"
+          className="min-h-12 w-full min-w-0 bg-transparent text-base font-medium text-ink outline-none placeholder:text-faint sm:text-lg [&::-webkit-search-cancel-button]:hidden"
         />
         {showExample && (
           <span
             aria-hidden="true"
             data-testid="search-example"
-            className="pointer-events-none absolute inset-0 flex items-center overflow-hidden whitespace-pre text-base text-muted-foreground"
+            className="pointer-events-none absolute inset-0 flex items-center overflow-hidden text-base font-medium whitespace-pre text-faint sm:text-lg"
           >
             <span className="min-w-0 truncate">{text}</span>
             {caret && <span className="search-caret" />}
           </span>
         )}
       </div>
-      <Button type="submit" className="min-h-11 rounded-full px-5 font-semibold">
+      <Button type="submit" className="px-5">
         Check
       </Button>
     </form>
@@ -157,13 +157,13 @@ function LiveRow({ result, replace }: { result: ProductResult; replace: boolean 
         to={productPath(result.key)}
         replace={replace}
         aria-describedby={note ? descId : undefined}
-        className="flex min-h-11 items-center gap-3 rounded-xl px-3 py-2 outline-none hover:bg-secondary focus-visible:ring-[3px] focus-visible:ring-ring"
+        className="flex min-h-11 items-center gap-3 rounded-xl px-3 py-2.5 text-ink outline-none hover:bg-select-tint focus-visible:ring-[3px] focus-visible:ring-ring"
       >
         <span className="sr-only">{resultLabel(result)}</span>
         <span aria-hidden="true" className="flex min-w-0 flex-1 items-center gap-3">
           <ProductImage url={result.imageUrl} alt="" size={40} className="size-10" />
           <span className="min-w-0 flex-1">
-            <span className="block truncate font-medium">{resultTitle(result)}</span>
+            <span className="block truncate font-semibold">{resultTitle(result)}</span>
             <span className="block truncate text-xs text-muted-foreground">
               {result.shops > 1 ? `${result.shops} shops` : result.shop}
               {verdictParts(result).map((p) => (
@@ -175,7 +175,7 @@ function LiveRow({ result, replace }: { result: ProductResult; replace: boolean 
               {result.bf && <BlackFridayMark className="ml-1.5 py-0 align-middle text-[11px]" />}
             </span>
           </span>
-          <span className="max-w-28 flex-none text-right text-sm font-bold tabular-nums">
+          <span className="t-num max-w-28 flex-none text-right text-[15px] tabular-nums">
             {result.priceCents === null ? <span className="text-xs font-medium text-muted-foreground">{NO_PRICE}</span> : resultPrice(result)}
           </span>
         </span>
@@ -224,7 +224,7 @@ export function LiveSearch({
       <SearchBox value={value} onChange={setValue} onSubmit={(q) => q && navigate(searchPath(q, shop), { replace })} placeholder={placeholder} animated={animated} />
       <SearchStatus state={state} term={term} />
       {state.status !== 'idle' && (
-        <section aria-labelledby={headingId} className="glass mt-2 p-2 text-left">
+        <section aria-labelledby={headingId} className="mt-2 rounded-[18px] border border-line bg-surface p-2 text-left text-ink shadow-(--shadow-pop)">
           <h2 id={headingId} className="sr-only">
             Search results
           </h2>
@@ -233,7 +233,7 @@ export function LiveSearch({
           {state.status === 'error' && (
             <div className="flex min-h-11 flex-wrap items-center gap-3 px-3">
               <p className="text-sm">Search is not available right now.</p>
-              <Button variant="outline" className="min-h-11" onClick={state.retry}>
+              <Button variant="outline" onClick={state.retry}>
                 Try again
               </Button>
             </div>

@@ -201,7 +201,7 @@ describe('live results', () => {
       const link = await within(region).findByRole('link', { name: /Lenovo ThinkBook 16 G6/ });
       expect(link.getAttribute('aria-label')).toBeNull();
       expect(link.className).toContain('min-h-11');
-      expect(link.className).toContain('hover:bg-secondary');
+      expect(link.className).toContain('hover:bg-select-tint');
       expect(link.className).toContain('focus-visible:ring-[3px]');
       expect(link.className).toMatch(/focus-visible:ring-ring(\s|$)/);
       const el = target === 'title' ? within(link).getByText('Lenovo ThinkBook 16 G6') : target === 'price' ? link.querySelector<HTMLElement>('.tabular-nums')! : link;

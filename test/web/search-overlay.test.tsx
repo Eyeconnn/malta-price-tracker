@@ -302,7 +302,8 @@ describe('searching in the overlay', () => {
     expect(within(d).queryByTestId('search-example')).toBeNull();
     const examples = Object.values(SEARCH_EXAMPLES).flat() as string[];
     expect(examples).toContain(input.getAttribute('placeholder'));
-    expect(input.className).toContain('placeholder:text-muted-foreground');
+    // the placeholder is the faint text colour, still AA on glass and the surface (contrast test)
+    expect(input.className).toContain('placeholder:text-faint');
   });
 
   it('Enter goes to /search?q= and closes the overlay', async () => {

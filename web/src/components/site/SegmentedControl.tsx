@@ -28,6 +28,7 @@ export function SegmentedControl<T extends string>({
   onValueChange,
   label,
   labelledBy,
+  describedBy,
   bar = false,
   stretch = false,
   size = 'md',
@@ -40,6 +41,7 @@ export function SegmentedControl<T extends string>({
   /** aria-label of the group (or labelledBy) */
   label?: string;
   labelledBy?: string;
+  describedBy?: string;
   bar?: boolean;
   /** options share the full width */
   stretch?: boolean;
@@ -95,6 +97,7 @@ export function SegmentedControl<T extends string>({
       value={value}
       aria-label={label}
       aria-labelledby={labelledBy}
+      aria-describedby={describedBy}
       spacing={1}
       // every choice arrives through the option's click (Space and Enter press it too), with the pressed button
       onValueChange={() => {}}

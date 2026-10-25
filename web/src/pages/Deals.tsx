@@ -3,9 +3,9 @@ import { useSearchParams } from 'react-router';
 import { SITE_CATEGORIES } from '../../../src/site/categories.js';
 import { DealList, DealListSkeleton, Notice } from '@/components/site/DealList';
 import { useMode } from '@/components/site/ModeProvider';
+import { SegmentedControl } from '@/components/site/SegmentedControl';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group';
 import { ApiError, api, type Card, type DealsResponse, useApi, useDebounced } from '@/lib/api';
 import { cn } from '@/lib/utils';
 
@@ -20,7 +20,9 @@ const CATEGORY_SLUGS = new Set<string>(SITE_CATEGORIES.map((c) => c.slug));
 const BAD_EUROS = 'Use whole euros from 0 to 100000.';
 const BAD_RANGE = 'The lowest price is above the highest.';
 
-const FIELD = 'min-h-11 w-full rounded-xl border border-line bg-glass px-3 text-base text-ink outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50';
+/** A form field: 44px, a solid light line, the see-through field fill; its open list is the solid surface (styles.css). */
+export const FIELD =
+  'min-h-11 w-full rounded-[10px] border border-line-strong bg-field px-3 text-[15px] font-medium text-ink outline-none placeholder:text-faint focus-visible:ring-[3px] focus-visible:ring-ring/50';
 
 type DealType = 'good' | 'avoid';
 
@@ -61,7 +63,7 @@ const plural = (n: number) => `${n} ${n === 1 ? 'deal' : 'deals'}`;
 function Field({ label, htmlFor, children, className }: { label: string; htmlFor: string; children: ReactNode; className?: string }) {
   return (
     <div className={cn('flex min-w-0 flex-col gap-1', className)}>
-      <label htmlFor={htmlFor} className="text-xs font-medium text-muted-foreground">
+      <label htmlFor={htmlFor} className="text-[13px] font-semibold text-muted-foreground">
         {label}
       </label>
       {children}
@@ -197,9 +199,6 @@ function useDealPages(filters: Filters) {
   };
 }
 
-const TOGGLE =
-  'min-h-11 flex-1 gap-2 rounded-xl px-3 font-bold text-muted-foreground hover:bg-secondary hover:text-ink data-[state=on]:bg-ink data-[state=on]:text-background data-[state=on]:hover:bg-ink data-[state=on]:hover:text-background';
-
 /** Black Friday deals: the Good / Avoid switch, filters kept in the URL, and a list that grows with Load more. */
 export function DealsPage() {
   const { mode } = useMode();
@@ -296,52 +295,35 @@ export function DealsPage() {
   const hidden = [shop !== null && 'shop', (min !== null || max !== null) && 'price'].filter(Boolean) as string[];
 
   return (
-    <div className="flex flex-col gap-4">
-      <h1 className="text-2xl font-bold tracking-tight">Black Friday deals</h1>
-
-      <ToggleGroup
-        type="single"
-        aria-label="Deal type"
-        aria-describedby={showCounts ? noteId : undefined}
-        value={type}
-        onValueChange={(v) => {
-          if (v === 'good' || v === 'avoid') change({ type: v });
-        }}
-        className="glass w-full gap-1 rounded-2xl p-1 sm:w-fit sm:min-w-80"
-      >
-        <ToggleGroupItem value="good" className={TOGGLE}>
-          <span aria-hidden="true" className="size-2.5 rounded-full bg-good" />
-          <span>
-            Good deals
-            {advanced && counts && (
-              <>
-                {' '}
-                <span className="ml-0.5 font-semibold tabular-nums">{counts.good}</span>
-              </>
-            )}
-          </span>
-        </ToggleGroupItem>
-        <ToggleGroupItem value="avoid" className={TOGGLE}>
-          <span aria-hidden="true" className="size-2.5 rounded-full bg-bad" />
-          <span>
-            Deals to avoid
-            {advanced && counts && (
-              <>
-                {' '}
-                <span className="ml-0.5 font-semibold tabular-nums">{counts.avoid}</span>
-              </>
-            )}
-          </span>
-        </ToggleGroupItem>
-      </ToggleGroup>
-
-      {showCounts && (
-        <p id={noteId} className="-mt-2 text-xs text-muted-foreground">
-          Counts cover all shops and prices.
+    <>
+      <section className="flex flex-col gap-2">
+        <h1 className="text-[26px] leading-tight font-bold tracking-[-0.01em] md:text-[32px]">Black Friday deals</h1>
+        <p className="max-w-[720px] text-muted-foreground">
+          Every product we judged, from all shops. A deal is checked against its own price history, never against the shop's banner.
         </p>
-      )}
+      </section>
 
-      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <SegmentedControl
+          label="Deal type"
+          describedBy={showCounts ? noteId : undefined}
+          items={[
+            { value: 'good', tone: 'good', label: advanced && counts ? `Good deals ${counts.good}` : 'Good deals' },
+            { value: 'avoid', tone: 'bad', label: advanced && counts ? `Deals to avoid ${counts.avoid}` : 'Deals to avoid' },
+          ]}
+          value={type}
+          onValueChange={(v) => change({ type: v })}
+          className="w-full sm:w-fit"
+          itemClassName="flex-1 justify-center sm:flex-none"
+        />
+        {showCounts && (
+          <p id={noteId} className="text-[13px] text-muted-foreground">
+            Counts cover all shops and prices.
+          </p>
+        )}
+      </div>
+
+      <section aria-label="Filters" className="glass grid items-end gap-3.5 px-[18px] py-4 sm:grid-cols-2 lg:grid-cols-4">
         <Field label="Category" htmlFor={categoryId}>
           <select id={categoryId} aria-describedby={showCounts ? noteId : undefined} className={FIELD} value={category ?? ''} onChange={(e) => change({ category: e.target.value || null })}>
             <option value="">All categories</option>
@@ -368,7 +350,7 @@ export function DealsPage() {
             <PriceRange min={min} max={max} onCommit={(lo, hi) => change({ min: lo, max: hi }, true)} />
           </>
         )}
-      </div>
+      </section>
 
       {!advanced && hidden.length > 0 && (
         <p className="flex flex-wrap items-center gap-x-3 text-sm text-muted-foreground">
@@ -388,7 +370,7 @@ export function DealsPage() {
         {statusText}
       </p>
       {advanced && current && !pages.loadingMore && (
-        <p data-testid="deals-count" aria-hidden="true" className="text-sm text-muted-foreground">
+        <p data-testid="deals-count" aria-hidden="true" className="text-[13px] text-muted-foreground">
           {statusText}
         </p>
       )}
@@ -464,6 +446,7 @@ export function DealsPage() {
           </div>
         )}
       </section>
-    </div>
+      <p className="text-center text-[13px] text-muted-foreground">New prices arrive every night.</p>
+    </>
   );
 }

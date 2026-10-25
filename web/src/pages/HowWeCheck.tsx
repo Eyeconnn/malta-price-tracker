@@ -33,7 +33,7 @@ function Section({ title, children }: { title: string; children: ReactNode }) {
   const id = useId();
   return (
     <section aria-labelledby={id} className="flex flex-col gap-3">
-      <h2 id={id} className="text-xl font-semibold tracking-tight">
+      <h2 id={id} className="text-xl font-bold">
         {title}
       </h2>
       {children}
@@ -42,7 +42,12 @@ function Section({ title, children }: { title: string; children: ReactNode }) {
 }
 
 function List({ children }: { children: ReactNode }) {
-  return <ul className="flex list-disc flex-col gap-2 pl-5 marker:text-muted-foreground">{children}</ul>;
+  // short line markers, never round bullets
+  return (
+    <ul className="m-0 flex list-none flex-col gap-2 p-0 [&>li]:relative [&>li]:pl-5 [&>li]:before:absolute [&>li]:before:top-[0.72em] [&>li]:before:left-0 [&>li]:before:h-0.5 [&>li]:before:w-2.5 [&>li]:before:rounded-full [&>li]:before:bg-faint [&>li]:before:content-['']">
+      {children}
+    </ul>
+  );
 }
 
 export function HowWeCheckPage() {
@@ -50,9 +55,9 @@ export function HowWeCheckPage() {
   const t: Thresholds = state.status === 'ready' ? state.data.thresholds : DEFAULT_SETTINGS.thresholds;
 
   return (
-    <GlassCard className="flex flex-col gap-8 p-6 leading-relaxed">
+    <GlassCard className="flex flex-col gap-8 p-[22px] leading-relaxed md:p-8">
       <header className="flex flex-col gap-3">
-        <h1 className="text-2xl font-semibold tracking-tight">How we check</h1>
+        <h1 className="text-[26px] leading-tight font-bold tracking-[-0.01em] md:text-[32px]">How we check</h1>
         <p>
           Every night we write down the prices on Maltese web shops. We then compare today&apos;s price with that history. This page
           explains how, in plain words. It is information, not legal advice.
