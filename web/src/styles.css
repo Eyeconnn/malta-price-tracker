@@ -505,10 +505,12 @@
   transition: color 0.3s ease-out;
 }
 
-/* ---------- open and close (components/site/Collapse.tsx) ---------- */
+/* ---------- open and close (components/site/Fold.tsx) ---------- */
 /* height, fade and a small slide; CSS grid rows go from 0fr to 1fr */
-.collapse {
+.fold {
   display: grid;
+  /* the column never grows past its container, whatever is inside (a wide control while closed) */
+  grid-template-columns: minmax(0, 1fr);
   grid-template-rows: 0fr;
   opacity: 0;
   transition:
@@ -516,22 +518,22 @@
     opacity 0.3s ease,
     margin-top 0.45s cubic-bezier(0.2, 0.8, 0.2, 1);
 }
-.collapse[data-open="true"] {
+.fold[data-open="true"] {
   grid-template-rows: 1fr;
   opacity: 1;
 }
 /* a closed block in a gapped stack also takes back the gap above it, so nothing jumps */
-.collapse-stacked:not([data-open="true"]) {
+.fold-stacked:not([data-open="true"]) {
   margin-top: calc(-1 * var(--stack-gap, 24px));
 }
-.collapse > .collapse-inner {
+.fold > .fold-inner {
   min-height: 0;
   overflow: clip;
   overflow-clip-margin: 32px;
   transform: translateY(-8px);
   transition: transform 0.45s cubic-bezier(0.2, 0.8, 0.2, 1);
 }
-.collapse[data-open="true"] > .collapse-inner {
+.fold[data-open="true"] > .fold-inner {
   transform: none;
 }
 .chev {

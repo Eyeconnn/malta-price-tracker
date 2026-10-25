@@ -99,7 +99,8 @@ export function SegmentedControl<T extends string>({
       // every choice arrives through the option's click (Space and Enter press it too), with the pressed button
       onValueChange={() => {}}
       className={cn(
-        'seg-group flex-wrap gap-1 rounded-full p-1',
+        // 24px corners: a pill on one line, still tidy when the options wrap to a second line
+        'seg-group flex-wrap gap-1 rounded-[24px] p-1',
         bar ? 'h-[42px] gap-0.5 border border-white/14 bg-white/8 p-[3px]' : 'border border-glass-edge bg-glass',
         stretch && 'w-full flex-nowrap',
         className,

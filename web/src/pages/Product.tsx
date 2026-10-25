@@ -1,28 +1,32 @@
-import { ExternalLink } from 'lucide-react';
-import { lazy, type ReactNode, Suspense, useEffect, useId, useMemo, useRef, useState } from 'react';
+import { ChevronDown, ExternalLink, Info, TrendingUp } from 'lucide-react';
+import { lazy, Suspense, useEffect, useId, useMemo, useRef, useState } from 'react';
 import { Link, Navigate, useLocation, useNavigate, useParams, useSearchParams } from 'react-router';
+import { Chip, type ChipTone } from '@/components/site/Chip';
 import { DayTable } from '@/components/site/DayTable';
 import { AlarmBanner, avoidFact, avoidKind, BlackFridayMark, NO_PRICE, PriceLine, tagProps } from '@/components/site/DealCard';
 import { Notice } from '@/components/site/DealList';
+import { Fold } from '@/components/site/Fold';
 import { GlassCard } from '@/components/site/GlassCard';
 import { useMode } from '@/components/site/ModeProvider';
+import type { PriceLine as ChartPriceLine } from '@/components/site/PriceChart';
 import { PriceTag } from '@/components/site/PriceTag';
 import { ProductImage, productPath } from '@/components/site/ProductResult';
 import { ReportButton } from '@/components/site/ReportButton';
+import { SegmentedControl } from '@/components/site/SegmentedControl';
 import { ShopBadge } from '@/components/site/ShopBadge';
-import { Button } from '@/components/ui/button';
-import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group';
+import { Button, buttonVariants } from '@/components/ui/button';
 import { ApiError, api, type Card, type ProductPage, type SellerView, type VariantView, useApi } from '@/lib/api';
 import { formatDay, formatEuro, signedPct } from '@/lib/format';
 import { type DayRow, dayRows, lastDays, recentChange } from '@/lib/history';
-import { hasWas, SERIES_MAX, seriesStyle, WAS_DASH } from '@/lib/sellerSeries';
+import { SERIES_MAX } from '@/lib/sellerSeries';
 import { useMediaQuery } from '@/lib/useMediaQuery';
 import { cn } from '@/lib/utils';
+import { SITE_CATEGORIES } from '../../../src/site/categories.js';
 import { withSpecs } from '../../../src/site/display.js';
 import { maltaDay, type VerdictFacts, wasTerms } from '../../../src/site/verdict.js';
 
-// Recharts is only downloaded when an Advanced product page shows the chart.
-const SellersChart = lazy(() => import('@/components/site/SellersChart'));
+// The chart (and its motion library) is only downloaded when the chart is opened.
+const PriceChart = lazy(() => import('@/components/site/PriceChart'));
 
 const RANGES = { '7': 7, '30': 30 } as const;
 type Range = keyof typeof RANGES;
@@ -33,9 +37,6 @@ const DAY = /^\d{4}-\d{2}-\d{2}$/;
 const positive = (n: unknown): n is number => typeof n === 'number' && Number.isFinite(n) && n > 0;
 const finite = (n: unknown): n is number => typeof n === 'number' && Number.isFinite(n);
 const euroOr = (cents: number | null | undefined, none: string) => (positive(cents) ? formatEuro(cents) : none);
-
-const TOGGLE =
-  'min-h-11 rounded-xl px-3 font-semibold text-muted-foreground hover:bg-secondary hover:text-ink motion-reduce:transition-none data-[state=on]:bg-ink data-[state=on]:text-background data-[state=on]:hover:bg-ink data-[state=on]:hover:text-background';
 
 /** A seller as a deal card, so its tag, alarm and change fact are the deal lists' own (Ruling R35). */
 export function sellerCard(s: SellerView): Card {
@@ -124,20 +125,26 @@ function shownFor(s: SellerView, variants: VariantView[], option: string | null,
   };
 }
 
-function Section({ title, children, className }: { title: string; children: ReactNode; className?: string }) {
-  const id = useId();
-  return (
-    <section aria-labelledby={id} className={cn('glass flex flex-col gap-3 p-4', className)}>
-      <h2 id={id} className="text-lg font-semibold">
-        {title}
-      </h2>
-      {children}
-    </section>
-  );
+/** A seller's verdict in a word, for the quiet rows and the advice chip. */
+function verdictWord(s: SellerView, shown: Shown): { word: string; tone: ChipTone; text: string } {
+  if (!shown.checked) return { word: 'Not checked', tone: 'neutral', text: 'text-muted-foreground' };
+  switch (s.verdict.label) {
+    case 'good':
+      return { word: 'Real deal', tone: 'good', text: 'text-good' };
+    case 'avoid':
+      return { word: 'Deal to avoid', tone: 'bad', text: 'text-bad' };
+    case 'none':
+      return { word: 'Regular price', tone: 'neutral', text: 'text-muted-foreground' };
+    default:
+      return { word: 'Not judged yet', tone: 'neutral', text: 'text-muted-foreground' };
+  }
 }
+
+const stockText = (shown: Shown) => (shown.lastSeen ? null : shown.inStock === false ? 'Out of stock' : shown.inStock === true ? 'In stock' : null);
 
 /** Advanced: every stored fact behind one seller's verdict. "Days worth buying" only for a judged verdict (R44). */
 function NumbersPanel({ title, facts, judged, wasLabel }: { title: string; facts: VerdictFacts; judged: boolean; wasLabel?: string }) {
+  const id = useId();
   const was = wasTerms(wasLabel).start;
   const at = (v: { price: number; at: string } | undefined) =>
     v && positive(v.price) && typeof v.at === 'string' && DAY.test(v.at) ? `${formatEuro(v.price)} on ${formatDay(v.at)}` : null;
@@ -159,24 +166,27 @@ function NumbersPanel({ title, facts, judged, wasLabel }: { title: string; facts
     ['Days worth buying', judged && finite(facts.daysWorthBuying) && finite(facts.historyDays) ? `${facts.daysWorthBuying} of ${facts.historyDays}` : null],
   ];
   return (
-    <Section title={title}>
+    <section aria-labelledby={id} className="flex flex-col gap-2">
+      <h3 id={id} className="text-[17px] font-bold">
+        {title}
+      </h3>
       <dl className="m-0 flex flex-col text-sm">
         {rows
           .filter((r): r is [string, string, string?] => r[1] !== null)
           .map(([label, value, tone]) => (
-            <div key={label} className="flex items-baseline justify-between gap-3 border-t border-line py-1.5 first:border-t-0">
+            <div key={label} className="flex items-baseline justify-between gap-3 border-t border-line py-[7px]">
               <dt className="text-muted-foreground">{label}</dt>
               <dd className={cn('m-0 text-right font-semibold tabular-nums', tone)}>{value}</dd>
             </div>
           ))}
       </dl>
-    </Section>
+    </section>
   );
 }
 
 const days = (n: number) => `${n} ${n === 1 ? 'day' : 'days'}`;
 
-/** Simple: lowest 30 days, usual price and real change, from one seller's stored verdict facts. */
+/** Lowest 30 days, usual price and real change, from one seller's stored verdict facts. */
 function ThreeNumbers({ shop, facts }: { shop: string; facts: VerdictFacts }) {
   const real = facts.realPct;
   const items: [string, string, string?][] = [
@@ -187,9 +197,9 @@ function ThreeNumbers({ shop, facts }: { shop: string; facts: VerdictFacts }) {
   return (
     <ul aria-label={`Price facts at ${shop}`} className="m-0 grid list-none grid-cols-3 gap-2 p-0">
       {items.map(([label, value, tone]) => (
-        <li key={label} className="flex flex-col gap-0.5 rounded-xl bg-secondary p-3">
+        <li key={label} className="frost flex flex-col gap-0.5 rounded-xl p-3">
           <span className="text-xs text-muted-foreground">{label}</span>
-          <span className={cn('text-base font-bold tabular-nums', tone)}>{value}</span>
+          <span className={cn('t-num text-lg', tone)}>{value}</span>
         </li>
       ))}
     </ul>
@@ -206,9 +216,22 @@ function PriceChangeLine({ change }: { change: { row: DayRow; from: number } }) 
   );
 }
 
+/** "View on <shop>", opening the shop's own page in a new tab. */
+function ShopLink({ url, shop, primary = false }: { url: string; shop: string; primary?: boolean }) {
+  return (
+    <a href={url} target="_blank" rel="noopener noreferrer nofollow" className={cn(buttonVariants({ variant: primary ? 'default' : 'outline', size: primary ? 'default' : 'sm' }), 'w-fit')}>
+      View on {shop}
+      <ExternalLink className="size-4" aria-hidden="true" />
+      <span className="sr-only"> (opens in a new tab)</span>
+    </a>
+  );
+}
+
 /**
- * One seller: shop, price and was price, that shop's own tag and verdict sentence (a was price is one shop's
- * claim, so verdicts are never merged), "View on <shop>" and "Something wrong?". The cheapest seller is marked.
+ * One seller as a quiet row: shop, stock, its verdict in a word and its price. Its details (that shop's own tag
+ * and verdict sentence, a recent change, a cheaper shop, its price facts, "View on <shop>" and "Something wrong?")
+ * open with the row's Details button, and are always open in Advanced mode. A was price is one shop's claim, so
+ * verdicts are never merged.
  */
 function SellerRow({
   seller,
@@ -220,9 +243,11 @@ function SellerRow({
   history,
   raiseWindowDays,
   option,
+  advanced,
   factsOpen,
   onToggleFacts,
   selected,
+  bestPrice,
 }: {
   seller: SellerView;
   shown: Shown;
@@ -238,14 +263,19 @@ function SellerRow({
   raiseWindowDays: number;
   /** the seller's option when it sells one (a colour listed on its own) and the product has several */
   option: string | null;
+  advanced: boolean;
   /** the three numbers are shown for this seller (Simple; one seller at a time) */
   factsOpen: boolean;
   /** opens or closes the three numbers here; null when this seller has none to show (R44: only a judged verdict) */
   onToggleFacts: (() => void) | null;
   /** the listing the visitor came from (?seller=) */
   selected: boolean;
+  /** the advice's price, to say how much more or less this shop asks */
+  bestPrice: number | null;
 }) {
   const titleId = useId();
+  const detailsId = useId();
+  const [open, setOpen] = useState(selected);
   const base = sellerCard(seller);
   const card: Card = { ...base, priceCents: positive(shown.priceCents) ? shown.priceCents : null, wasCents: positive(shown.wasCents) ? shown.wasCents : null };
   const checked = shown.checked;
@@ -259,6 +289,9 @@ function SellerRow({
   const factsId = useId();
   const panel = useRef<HTMLDivElement>(null);
   const openedHere = useRef(false);
+  const word = verdictWord(seller, shown);
+  const stock = stockText(shown);
+  const detailsOpen = advanced || open;
   // the facts the visitor opened get the focus, so the button that opened them does not leave it behind
   useEffect(() => {
     if (factsOpen && openedHere.current) panel.current?.focus();
@@ -272,6 +305,8 @@ function SellerRow({
     const rows = dayRows(history, shown.variantId, null);
     return checked ? recentChange(rows, raiseWindowDays) : recentChange(rows, raiseWindowDays, maltaDay(new Date()));
   }, [history, shown.variantId, shown.lastSeen, raiseWindowDays, checked, priceRise]);
+  const diff = bestPrice !== null && positive(card.priceCents) && !shown.lastSeen ? card.priceCents - bestPrice : null;
+
   return (
     <li
       aria-labelledby={titleId}
@@ -279,129 +314,142 @@ function SellerRow({
       data-verdict={checked ? seller.verdict.label : undefined}
       data-alarm={alarm ? 'true' : undefined}
       data-selected={selected ? 'true' : undefined}
-      className={cn('glass overflow-hidden', cheapest && 'border-2 border-good', selected && 'border-2 border-brand', alarm && 'border-2 border-bad')}
+      className="border-t border-line py-3 first:border-t-0"
     >
-      {alarm && <AlarmBanner card={base} />}
-      <div className={cn('relative flex flex-col gap-1.5 p-4', tag && 'pr-24')}>
-        {tag && (
-          <div className="absolute top-2 right-4">
-            <PriceTag {...tag} size="sm" />
+      <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
+        <ShopBadge name={seller.shop} logoUrl={seller.logoUrl} logoAspect={seller.logoAspect} size="sm" decorative />
+        <div className="flex min-w-0 flex-[1_1_200px] flex-col gap-0.5">
+          <div className="flex min-w-0 flex-wrap items-center gap-2">
+            <h3 id={titleId} className="min-w-0 font-semibold break-words">
+              <Link to={`/shops/${encodeURIComponent(seller.shopSlug)}`} className="rounded-sm text-ink outline-none hover:underline focus-visible:ring-[3px] focus-visible:ring-ring/50">
+                {seller.shop}
+              </Link>
+            </h3>
+            {cheapest && <Chip tone="neutral">Cheapest</Chip>}
           </div>
-        )}
-        <div className="flex min-w-0 flex-wrap items-center gap-2">
-          <ShopBadge name={seller.shop} logoUrl={seller.logoUrl} logoAspect={seller.logoAspect} size="sm" decorative />
-          <h3 id={titleId} className="min-w-0 font-semibold break-words">
-            <Link
-              to={`/shops/${encodeURIComponent(seller.shopSlug)}`}
-              className="rounded-sm outline-none hover:underline focus-visible:ring-[3px] focus-visible:ring-ring/50"
-            >
-              {seller.shop}
-            </Link>
-          </h3>
-          {cheapest && <span className="rounded-full border border-good px-2 py-0.5 text-xs font-bold text-good">Cheapest</span>}
+          {selected && <p className="text-[13px] text-muted-foreground">The listing you came from</p>}
+          {option && (
+            <p data-option className="text-sm font-medium">
+              {option}
+            </p>
+          )}
         </div>
-        {selected && <p className="text-xs font-semibold text-brand">The listing you came from</p>}
-        {option && (
-          <p data-option className="text-sm font-medium">
-            {option}
-          </p>
-        )}
-        {/* the shop's own title stays visible, so a clean name never hides what the shop wrote */}
-        <p className="text-xs break-words text-muted-foreground">{seller.title}</p>
-        {shown.lastSeen ? (
-          <p className="text-lg font-semibold">Last seen on {formatDay(shown.lastSeen)}</p>
-        ) : (
-          <PriceLine card={card} className="[&>span:first-child]:text-2xl" />
-        )}
-        {shown.inStock === false && !shown.lastSeen && <p className="text-sm text-muted-foreground">Out of stock</p>}
-        {checked && seller.bf && !alarm && <BlackFridayMark />}
-        {fact && <p className="font-semibold text-bad">{fact}</p>}
-        {change && <PriceChangeLine change={change} />}
-        {seller.cheaper && checked && (
-          <p className="text-sm font-semibold">
-            Cheaper at {seller.cheaper.shop}, <span className="text-good tabular-nums">{formatEuro(seller.cheaper.priceCents)}</span>
-          </p>
-        )}
-        {!checked ? (
-          <p className="text-sm text-muted-foreground">{`Our deal check at ${seller.shop} is for ${verdictOption ?? 'another option'}.`}</p>
-        ) : tooNew ? (
-          <p className="text-sm">
-            Not enough price history yet.{finite(minHistoryDays) && ` We judge a deal after ${days(minHistoryDays)} of prices`}
-            {tracked !== null && `; we have ${days(tracked)} so far`}.
-          </p>
-        ) : (
-          seller.verdict.reason && <p className="text-[15px] leading-relaxed">{seller.verdict.reason}</p>
-        )}
-        {onToggleFacts && (
-          <Button
-            variant="outline"
-            className="min-h-11 w-fit"
-            aria-expanded={factsOpen}
-            aria-controls={factsId}
-            onClick={() => {
-              openedHere.current = !factsOpen;
-              onToggleFacts();
-            }}
-          >
-            {`${factsOpen ? 'Hide' : 'Show'} the price facts at ${seller.shop}`}
+        {stock && <span className={cn('min-w-24 text-[13px] font-semibold', shown.inStock === false ? 'text-muted-foreground' : 'text-ink')}>{stock}</span>}
+        <span className={cn('min-w-32 text-[13px] font-semibold', word.text)}>{word.word}</span>
+        <div className="flex min-w-24 flex-col items-end gap-0.5 text-right">
+          {shown.lastSeen ? (
+            <p className="font-semibold">Last seen on {formatDay(shown.lastSeen)}</p>
+          ) : (
+            <PriceLine card={card} className="justify-end" priceClassName="text-xl" />
+          )}
+          {diff !== null && !cheapest && (
+            <span className="text-[13px] text-muted-foreground">{diff > 0 ? `${formatEuro(diff)} more` : diff < 0 ? `${formatEuro(-diff)} less` : 'Same price'}</span>
+          )}
+        </div>
+        {!advanced && (
+          <Button variant="ghost" size="sm" aria-expanded={open} aria-controls={detailsId} onClick={() => setOpen((o) => !o)} className="-mr-2">
+            Details
+            <ChevronDown aria-hidden="true" className="chev" />
           </Button>
         )}
-        <div id={factsId} ref={panel} tabIndex={-1} hidden={!(factsOpen && seller.verdict.facts)} className="rounded-xl outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50">
-          {factsOpen && seller.verdict.facts && <ThreeNumbers shop={seller.shop} facts={seller.verdict.facts} />}
-        </div>
-        <div className="flex flex-wrap items-center gap-x-4">
-          {shopUrl && (
-            <a
-              href={shopUrl}
-              target="_blank"
-              rel="noopener noreferrer nofollow"
-              className="inline-flex min-h-11 w-fit items-center gap-1.5 rounded-sm font-semibold text-brand outline-none hover:underline focus-visible:ring-[3px] focus-visible:ring-ring/50"
-            >
-              View on {seller.shop}
-              <ExternalLink className="size-4" aria-hidden="true" />
-              <span className="sr-only"> (opens in a new tab)</span>
-            </a>
-          )}
-          {/* the report target is the seller's verdict variant, products.id (Ruling R20) */}
-          {seller.productId !== null && (
-            <ReportButton targetType="product" targetId={seller.productId} about={`${seller.title} at ${seller.shop}`} ariaLabel={`Something wrong? ${seller.shop}`} compact />
-          )}
-          {matchReport && (
-            <ReportButton
-              targetType="match"
-              targetId={seller.id}
-              title="Not the same product?"
-              ariaLabel={`Not the same product? Report ${seller.shop}`}
-              about={`${seller.title} at ${seller.shop}`}
-              compact
-            />
-          )}
-        </div>
       </div>
+      <Fold open={detailsOpen} id={detailsId}>
+        <div className="flex flex-col gap-2 pt-3 sm:pl-11">
+          {alarm && <AlarmBanner card={base} />}
+          <div className="flex items-start gap-4">
+            <div className="flex min-w-0 flex-1 flex-col gap-2">
+              {/* the shop's own title stays visible, so a clean name never hides what the shop wrote */}
+              <p className="text-[13px] break-words text-muted-foreground">{seller.title}</p>
+              {checked && seller.bf && !alarm && <BlackFridayMark />}
+              {fact && <p className="text-sm font-semibold text-bad">{fact}</p>}
+              {change && <PriceChangeLine change={change} />}
+              {seller.cheaper && checked && (
+                <p className="text-sm font-semibold">
+                  Cheaper at {seller.cheaper.shop}, <span className="text-good tabular-nums">{formatEuro(seller.cheaper.priceCents)}</span>
+                </p>
+              )}
+              {!checked ? (
+                <p className="text-sm text-muted-foreground">{`Our deal check at ${seller.shop} is for ${verdictOption ?? 'another option'}.`}</p>
+              ) : tooNew ? (
+                <p className="text-sm">
+                  Not enough price history yet.{finite(minHistoryDays) && ` We judge a deal after ${days(minHistoryDays)} of prices`}
+                  {tracked !== null && `; we have ${days(tracked)} so far`}.
+                </p>
+              ) : (
+                seller.verdict.reason && <p className="text-sm leading-relaxed">{seller.verdict.reason}</p>
+              )}
+            </div>
+            {tag && <PriceTag {...tag} size="sm" className="mt-1 mr-2" />}
+          </div>
+          {onToggleFacts && (
+            <Button
+              variant="outline"
+              size="sm"
+              className="w-fit"
+              aria-expanded={factsOpen}
+              aria-controls={factsId}
+              onClick={() => {
+                openedHere.current = !factsOpen;
+                onToggleFacts();
+              }}
+            >
+              {`${factsOpen ? 'Hide' : 'Show'} the price facts at ${seller.shop}`}
+            </Button>
+          )}
+          <div id={factsId} ref={panel} tabIndex={-1} hidden={!(factsOpen && seller.verdict.facts)} className="rounded-xl outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50">
+            {factsOpen && seller.verdict.facts && <ThreeNumbers shop={seller.shop} facts={seller.verdict.facts} />}
+          </div>
+          <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+            {shopUrl && <ShopLink url={shopUrl} shop={seller.shop} />}
+            {/* the report target is the seller's verdict variant, products.id (Ruling R20) */}
+            {seller.productId !== null && (
+              <ReportButton targetType="product" targetId={seller.productId} about={`${seller.title} at ${seller.shop}`} ariaLabel={`Something wrong? ${seller.shop}`} compact />
+            )}
+            {matchReport && (
+              <ReportButton
+                targetType="match"
+                targetId={seller.id}
+                title="Not the same product?"
+                ariaLabel={`Not the same product? Report ${seller.shop}`}
+                about={`${seller.title} at ${seller.shop}`}
+                compact
+              />
+            )}
+          </div>
+        </div>
+      </Fold>
     </li>
   );
 }
 
-/** Advanced: one price line per seller (lazy Recharts), the day table of one chosen seller, both cut to 7 / 30 days. */
+/**
+ * The price chart: a line per seller (each one variant, never a mix), cut to 7 / 30 days, then a "Show price by day"
+ * part with one chosen seller's day table and numbers.
+ */
 function History({
   data,
   sellers,
   shownBy,
   options,
   start,
+  open,
 }: {
   data: ProductPage;
   sellers: SellerView[];
   shownBy: Map<number, Shown>;
   /** how many options the product has: lines and numbers name theirs when it has several */
   options: number;
-  /** the seller whose price by day shows first */
+  /** the seller whose price by day shows first, and whose line is drawn first */
   start: number | null;
+  /** the chart is shown (Advanced, or opened in Simple): until then nothing is drawn */
+  open: boolean;
 }) {
   const [range, setRange] = useState<Range>('30');
+  const [daysOpen, setDaysOpen] = useState(false);
   const reduced = useMediaQuery('(prefers-reduced-motion: reduce)');
   const tableId = useId();
   const headingId = useId();
+  const daysId = useId();
   const [chosen, setChosen] = useState<number | null>(start);
   const seller = sellers.find((s) => s.id === chosen) ?? sellers[0];
 
@@ -412,21 +460,21 @@ function History({
     return m;
   }, [data.variants]);
 
-  // one line per seller, each one variant (the chosen option's, else the verdict's): never a mix of variants
-  const lines = useMemo(
-    () =>
-      sellers
-        .map((s) => {
-          const variant = shownBy.get(s.id)?.variantId ?? null;
-          const rows = variant === null ? [] : lastDays(dayRows(data.history.filter((h) => h.sellerId === s.id), variant, null), RANGES[range]);
-          // seller and option, so two listings of one shop (each colour on its own) are told apart
-          const label = variant !== null && (options > 1 || (variantsPer.get(s.id) ?? 0) > 1) ? labelOf.get(variant) : null;
-          return { id: s.id, shop: s.shop, legend: label ? `${s.shop} (${label})` : s.shop, rows, wasName: wasTerms(s.wasLabel).inner };
-        })
-        .filter((l) => l.rows.length > 0)
-        .slice(0, SERIES_MAX),
-    [sellers, shownBy, data.history, range, variantsPer, labelOf, options],
-  );
+  // one line per seller, each one variant (the chosen option's, else the verdict's): never a mix of variants; the
+  // start seller (the advice's) first, so it is the main line
+  const lines = useMemo(() => {
+    const ordered = [...sellers].sort((a, b) => Number(b.id === start) - Number(a.id === start));
+    return ordered
+      .map((s): ChartPriceLine => {
+        const variant = shownBy.get(s.id)?.variantId ?? null;
+        const rows = variant === null ? [] : lastDays(dayRows(data.history.filter((h) => h.sellerId === s.id), variant, null), RANGES[range]);
+        // seller and option, so two listings of one shop (each colour on its own) are told apart
+        const label = variant !== null && (options > 1 || (variantsPer.get(s.id) ?? 0) > 1) ? labelOf.get(variant) : null;
+        return { id: s.id, legend: label ? `${s.shop} (${label})` : s.shop, rows, wasName: wasTerms(s.wasLabel).inner };
+      })
+      .filter((l) => l.rows.length > 0)
+      .slice(0, SERIES_MAX);
+  }, [sellers, start, shownBy, data.history, range, variantsPer, labelOf, options]);
 
   const shown = seller ? shownBy.get(seller.id) : undefined;
   const variant = shown?.variantId ?? null;
@@ -437,121 +485,214 @@ function History({
     () => (seller && variant !== null ? lastDays(dayRows(data.history.filter((h) => h.sellerId === seller.id), variant, low30), RANGES[range]) : []),
     [seller, variant, data.history, low30, range],
   );
+  const best = lines[0]?.legend;
 
   return (
-    <>
-      <section aria-labelledby={headingId} className="glass flex flex-col gap-3 p-4">
-        <div className="flex flex-wrap items-center gap-3">
-          <h2 id={headingId} className="text-lg font-semibold">
+    <section aria-labelledby={headingId} className="glass flex flex-col gap-4 p-[22px]">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div className="flex flex-col gap-0.5">
+          <h2 id={headingId} className="text-[17px] font-bold">
             Price at each shop
           </h2>
-          <ToggleGroup
-            type="single"
-            aria-label="Chart range"
-            value={range}
-            onValueChange={(v) => {
-              if (v === '7' || v === '30') setRange(v);
-            }}
-            className="glass ml-auto gap-1 rounded-2xl p-1"
-          >
-            <ToggleGroupItem value="7" className={TOGGLE}>
-              7 days
-            </ToggleGroupItem>
-            <ToggleGroupItem value="30" className={TOGGLE}>
-              30 days
-            </ToggleGroupItem>
-          </ToggleGroup>
-        </div>
-        {lines.length === 0 ? (
-          <p className="text-sm text-muted-foreground">No prices tracked in the last 60 days.</p>
-        ) : (
-          <>
-            <div
-              data-testid="sellers-chart"
-              data-lines={lines.length}
-              role="img"
-              aria-label={`Chart of each shop's price over the last ${RANGES[range]} days. The prices are in the price by day table, one shop at a time.`}
-              aria-describedby={tableId}
-              className="min-h-[240px]"
-            >
-              <Suspense fallback={<div aria-hidden="true" className="h-[240px] rounded-xl bg-secondary opacity-60" />}>
-                <SellersChart lines={lines.map((l) => ({ id: l.id, shop: l.shop, rows: l.rows }))} animate={!reduced} />
-              </Suspense>
-            </div>
-            <ul aria-label="Chart lines" className="m-0 flex list-none flex-wrap gap-x-4 gap-y-1 p-0 text-xs text-muted-foreground">
-              {lines.map((l, i) => {
-                const { stroke, dash } = seriesStyle(i);
-                return (
-                  <li key={l.id} className="flex items-center gap-1.5">
-                    <svg aria-hidden="true" width="18" height="6" className="flex-none">
-                      <line x1="0" y1="3" x2="18" y2="3" stroke={stroke} strokeWidth="2.4" strokeDasharray={dash || undefined} />
-                    </svg>
-                    {l.legend}
-                  </li>
-                );
-              })}
-              {lines.map((l, i) =>
-                hasWas(l) ? (
-                  <li key={`w${l.id}`} className="flex items-center gap-1.5">
-                    <svg aria-hidden="true" width="18" height="6" className="flex-none">
-                      <line x1="0" y1="3" x2="18" y2="3" stroke={seriesStyle(i).stroke} strokeOpacity="0.6" strokeWidth="1.4" strokeDasharray={WAS_DASH} />
-                    </svg>
-                    {`${l.legend} ${l.wasName}`}
-                  </li>
-                ) : null,
-              )}
-            </ul>
-            {sellers.filter((s) => (shownBy.get(s.id)?.variantId ?? null) !== null).length > SERIES_MAX && (
-              <p className="text-xs text-muted-foreground">{`The chart shows the first ${SERIES_MAX} shops of the list.`}</p>
-            )}
-          </>
-        )}
-      </section>
-      <div className="glass flex flex-col gap-3 p-4">
-        {sellers.length > 1 && (
-          <ToggleGroup
-            type="single"
-            aria-label="Shop for the price by day"
-            value={seller ? String(seller.id) : ''}
-            onValueChange={(v) => {
-              if (v) setChosen(Number(v));
-            }}
-            className="glass w-full flex-wrap justify-start gap-1 rounded-2xl p-1"
-          >
-            {sellers.map((s) => (
-              <ToggleGroupItem key={s.id} value={String(s.id)} className={TOGGLE}>
-                {s.shop}
-              </ToggleGroupItem>
-            ))}
-          </ToggleGroup>
-        )}
-        {rows.length === 0 ? (
-          <p id={tableId} className="text-sm text-muted-foreground">
-            {seller ? `No prices tracked at ${seller.shop} in the last 60 days.` : 'No prices tracked.'}
+          <p className="text-[13px] text-muted-foreground">
+            {`Last ${RANGES[range]} days.${best && lines.length > 1 ? ` ${best} is the main line;` : ''} dashed lines are the shops' was prices.`}
           </p>
-        ) : (
-          <DayTable id={tableId} rows={rows} judged={judged} low30={low30} wasLabel={seller?.wasLabel} />
-        )}
-      </div>
-      {seller?.verdict.facts && (
-        <NumbersPanel
-          // the numbers are about the option the verdict checked: say so when another one is chosen
-          title={shown && !shown.checked ? `Numbers at ${seller.shop}, for ${labelOf.get(seller.productId ?? -1) ?? 'another option'}` : `Numbers at ${seller.shop}`}
-          facts={seller.verdict.facts}
-          judged={seller.verdict.label === 'good' || seller.verdict.label === 'avoid'}
-          wasLabel={seller.wasLabel}
+        </div>
+        <SegmentedControl
+          label="Chart range"
+          items={[
+            { value: '7', label: '7 days' },
+            { value: '30', label: '30 days' },
+          ]}
+          value={range}
+          onValueChange={(v) => setRange(v)}
         />
+      </div>
+      {lines.length === 0 ? (
+        <p className="text-sm text-muted-foreground">No prices tracked in the last 60 days.</p>
+      ) : !open ? (
+        <div aria-hidden="true" className="min-h-[286px]" />
+      ) : (
+        <div data-testid="sellers-chart" data-lines={lines.length} className="min-h-[286px]">
+          <Suspense fallback={<div aria-hidden="true" className="h-[286px] rounded-xl bg-fill" />}>
+            <PriceChart
+              lines={lines}
+              animate={!reduced}
+              label={`Each shop's price over the last ${RANGES[range]} days. Use the left and right arrow keys to read each day; the same prices are in the price by day table.`}
+            />
+          </Suspense>
+          {sellers.filter((s) => (shownBy.get(s.id)?.variantId ?? null) !== null).length > SERIES_MAX && (
+            <p className="mt-2 text-xs text-muted-foreground">{`The chart shows the first ${SERIES_MAX} shops of the list.`}</p>
+          )}
+        </div>
       )}
-    </>
+      <div className="border-t border-line pt-3">
+        <Button variant="ghost" size="sm" className="-ml-3.5" aria-expanded={daysOpen} aria-controls={daysId} onClick={() => setDaysOpen((o) => !o)}>
+          {daysOpen ? 'Hide price by day' : 'Show price by day'}
+          <ChevronDown aria-hidden="true" className="chev" />
+        </Button>
+        <Fold open={daysOpen} id={daysId}>
+          <div className="flex flex-wrap items-start gap-6 pt-3">
+            <div className="flex min-w-0 flex-[999_1_520px] flex-col gap-3">
+              {sellers.length > 1 && (
+                <SegmentedControl
+                  label="Shop for the price by day"
+                  items={sellers.map((s) => ({ value: String(s.id), label: s.shop }))}
+                  value={seller ? String(seller.id) : ''}
+                  onValueChange={(v) => setChosen(Number(v))}
+                  className="max-w-full"
+                />
+              )}
+              {rows.length === 0 ? (
+                <p id={tableId} className="text-sm text-muted-foreground">
+                  {seller ? `No prices tracked at ${seller.shop} in the last 60 days.` : 'No prices tracked.'}
+                </p>
+              ) : (
+                <DayTable id={tableId} rows={rows} judged={judged} low30={low30} wasLabel={seller?.wasLabel} className="max-h-[400px] overflow-y-auto" />
+              )}
+            </div>
+            <div className="flex min-w-0 flex-[1_1_260px] flex-col">
+              {seller?.verdict.facts ? (
+                <NumbersPanel
+                  // the numbers are about the option the verdict checked: say so when another one is chosen
+                  title={shown && !shown.checked ? `Numbers at ${seller.shop}, for ${labelOf.get(seller.productId ?? -1) ?? 'another option'}` : `Numbers at ${seller.shop}`}
+                  facts={seller.verdict.facts}
+                  judged={seller.verdict.label === 'good' || seller.verdict.label === 'avoid'}
+                  wasLabel={seller.wasLabel}
+                />
+              ) : (
+                seller && <p className="text-[13px] text-muted-foreground">{`Numbers are shown only for a judged deal. ${seller.shop} does not mark this product Black Friday or claim a discount.`}</p>
+              )}
+            </div>
+          </div>
+        </Fold>
+      </div>
+    </section>
+  );
+}
+
+/**
+ * Our advice: where to buy (the cheapest shop not known out of stock, at the chosen option) for how much, its
+ * verdict in one chip, its stock and one line of why, and a neutral word on the listing the visitor came from.
+ */
+function Advice({
+  best,
+  shown,
+  shops,
+  cameFrom,
+  cameShown,
+  minHistoryDays,
+  advanced,
+  verdictOption,
+}: {
+  best: SellerView;
+  shown: Shown;
+  shops: number;
+  cameFrom: SellerView | null;
+  cameShown: Shown | null;
+  minHistoryDays: number;
+  advanced: boolean;
+  verdictOption: string | null;
+}) {
+  const id = useId();
+  const card: Card = { ...sellerCard(best), priceCents: positive(shown.priceCents) ? shown.priceCents : null, wasCents: positive(shown.wasCents) ? shown.wasCents : null };
+  const word = verdictWord(best, shown);
+  const stock = stockText(shown);
+  const url = webAddress(best.url);
+  const tracked = finite(best.verdict.facts?.historyDays) ? best.verdict.facts.historyDays : null;
+  const why = !shown.checked
+    ? `Our deal check at ${best.shop} is for ${verdictOption ?? 'another option'}.`
+    : best.verdict.label === 'insufficient'
+      ? `Not enough price history yet to judge a deal. We judge a deal after ${days(minHistoryDays)} of prices${tracked !== null ? `; we have ${days(tracked)} so far` : ''}.`
+      : best.verdict.label === 'none'
+        ? 'It is not on sale, so this is its regular price.'
+        : (best.verdict.reason ?? '');
+  const lead = shops > 1 && card.priceCents !== null ? 'The lowest price at any shop we track today. ' : '';
+  const title = card.priceCents !== null ? `Buy it at ${best.shop} for ${formatEuro(card.priceCents)}` : `Sold at ${best.shop}`;
+
+  let came: string | null = null;
+  if (cameFrom && cameShown && cameFrom.id !== best.id) {
+    const p = positive(cameShown.priceCents) ? cameShown.priceCents : null;
+    const diff = p !== null && card.priceCents !== null ? p - card.priceCents : null;
+    came =
+      p === null
+        ? `${cameFrom.shop} does not show a price for it.`
+        : `${cameFrom.shop} sells it for ${formatEuro(p)}${diff !== null && diff > 0 ? `, ${formatEuro(diff)} more than ${best.shop}` : diff !== null && diff < 0 ? `, ${formatEuro(-diff)} less than ${best.shop}, which is out of stock or not priced` : ''}.`;
+    if (cameShown.checked && cameFrom.verdict.label === 'avoid' && cameFrom.verdict.reason) came += ` Its discount is not real: ${cameFrom.verdict.reason}`;
+  }
+
+  return (
+    <section aria-labelledby={id} className="glass flex flex-col gap-3.5 p-[22px]">
+      <p className="t-lbl">Our advice</p>
+      <div className="flex flex-wrap items-start justify-between gap-4">
+        <div className="flex min-w-0 flex-[1_1_360px] items-start gap-3.5">
+          <ShopBadge name={best.shop} logoUrl={best.logoUrl} logoAspect={best.logoAspect} decorative />
+          <div className="flex min-w-0 flex-col gap-1.5">
+            <h2 id={id} className="text-2xl leading-tight font-bold">
+              {title}
+            </h2>
+            <p className="flex flex-wrap items-center gap-2 text-sm">
+              <Chip tone={word.tone}>{word.word}</Chip>
+              {stock && <span className={cn('font-semibold', shown.inStock === false ? 'text-muted-foreground' : 'text-ink')}>{stock}</span>}
+            </p>
+            {(lead || why) && <p className="max-w-[620px] text-[15px] text-muted-foreground">{`${lead}${why}`}</p>}
+          </div>
+        </div>
+        <div className="flex flex-col items-end gap-2.5">
+          {card.priceCents !== null ? (
+            <PriceLine card={card} className="justify-end" priceClassName="text-[40px] leading-none" />
+          ) : (
+            <p className="text-sm font-medium text-muted-foreground">{NO_PRICE}</p>
+          )}
+          {url && <ShopLink url={url} shop={best.shop} primary />}
+          {advanced && best.productId !== null && (
+            <ReportButton targetType="product" targetId={best.productId} about={`${best.title} at ${best.shop}`} ariaLabel={`Something wrong with the advice? ${best.shop}`} compact />
+          )}
+        </div>
+      </div>
+      {came && (
+        <div className="flex items-start gap-3 border-t border-line pt-3.5">
+          <Info aria-hidden="true" className="mt-0.5 size-5 flex-none text-muted-foreground" />
+          <div className="flex flex-col gap-0.5">
+            <p className="font-semibold">About the listing you came from</p>
+            <p className="max-w-[720px] text-sm text-muted-foreground">{came}</p>
+          </div>
+        </div>
+      )}
+    </section>
+  );
+}
+
+function Breadcrumb({ category, name }: { category: string | null; name: string }) {
+  const cat = SITE_CATEGORIES.find((c) => c.slug === category);
+  return (
+    <nav aria-label="Breadcrumb" className="flex flex-wrap items-center gap-2 text-[13px] text-muted-foreground">
+      <Link to="/" className="font-medium text-brand hover:underline">
+        Search
+      </Link>
+      {cat && (
+        <>
+          <span aria-hidden="true">/</span>
+          <Link to={`/deals?category=${encodeURIComponent(cat.slug)}`} className="font-medium text-brand hover:underline">
+            {cat.name}
+          </Link>
+        </>
+      )}
+      <span aria-hidden="true">/</span>
+      <span className="max-w-[40ch] truncate">{name}</span>
+    </nav>
   );
 }
 
 function ProductContent({ data, selectedId }: { data: ProductPage; selectedId: number | null }) {
-  const { mode } = useMode();
+  const { mode, setMode } = useMode();
   const advanced = mode === 'advanced';
   const titleId = useId();
   const listId = useId();
+  const chartId = useId();
   const [option, setOption] = useState<string | null>(null);
+  const [chartOpen, setChartOpen] = useState(false);
+  const [chartSeen, setChartSeen] = useState(advanced);
   // Simple: the seller whose three numbers are shown, the cheapest by default (one seller at a time)
   const selected = selectedId !== null && data.sellers.some((s) => s.id === selectedId) ? selectedId : null;
   const [factsFor, setFactsFor] = useState<number | null>(selected ?? data.cheapestId);
@@ -559,6 +700,10 @@ function ProductContent({ data, selectedId }: { data: ProductPage; selectedId: n
   const [today] = useState(() => maltaDay(new Date()));
   const [announcement, setAnnouncement] = useState('');
   const { product } = data;
+  const showChart = advanced || chartOpen;
+  useEffect(() => {
+    if (showChart) setChartSeen(true);
+  }, [showChart]);
 
   const options = useMemo(() => optionsOf(data.variants), [data.variants]);
   const shownBy = useMemo(() => {
@@ -587,52 +732,60 @@ function ProductContent({ data, selectedId }: { data: ProductPage; selectedId: n
   const shops = new Set(data.sellers.map((s) => s.shopSlug)).size;
   const summary = shops > 1 ? (lowest !== null ? `from ${formatEuro(lowest)} at ${shops} shops` : `at ${shops} shops`) : `at ${data.sellers[0]!.shop}`;
 
+  // the advice: the cheapest shown seller with a current price that is not known out of stock
+  const priced = sellers.filter((s) => {
+    const sh = shownBy.get(s.id)!;
+    return positive(sh.priceCents) && sh.inStock !== false && !sh.lastSeen;
+  });
+  const best =
+    priced.length > 0
+      ? priced.reduce((a, b) => ((shownBy.get(b.id)!.priceCents as number) < (shownBy.get(a.id)!.priceCents as number) ? b : a))
+      : (sellers[0] ?? data.sellers[0]!);
+  const bestShown = shownBy.get(best.id) ?? shownFor(best, data.variants, null, today)!;
+  const bestPrice = positive(bestShown.priceCents) ? bestShown.priceCents : null;
+  const came = selected !== null ? (data.sellers.find((s) => s.id === selected) ?? null) : null;
+
   const choose = (key: string | null) => {
     setOption(key);
-    const label = key === null ? 'All options' : (options.find((o) => o.key === key)?.label ?? '');
+    const label = key === null ? 'All variants' : (options.find((o) => o.key === key)?.label ?? '');
     const n = key === null ? data.sellers.length : data.sellers.filter((s) => shownFor(s, data.variants, key, today) !== null).length;
     setAnnouncement(`${label}: ${n} ${n === 1 ? 'shop' : 'shops'}`);
   };
 
   return (
-    <div className="flex flex-col gap-4">
-      <article aria-labelledby={titleId} className="glass flex flex-col gap-3 p-4">
-        <div className="flex items-start gap-4">
-          <ProductImage url={product.imageUrl} alt="" size={96} className="size-24" />
-          <div className="flex min-w-0 flex-col gap-1">
-            {product.brand && <p className="text-sm text-muted-foreground">{product.brand}</p>}
-            <h1 id={titleId} className="text-xl leading-snug font-bold tracking-tight break-words sm:text-2xl">
+    <>
+      <Breadcrumb category={product.category} name={product.name} />
+
+      <article aria-labelledby={titleId} className="glass flex flex-col gap-4 p-[22px]">
+        <div className="flex items-start gap-[18px]">
+          <ProductImage url={product.imageUrl} alt="" size={112} className="size-20 sm:size-28" />
+          <div className="flex min-w-0 flex-col gap-1.5">
+            {product.brand && <p className="text-[13px] text-muted-foreground">{product.brand}</p>}
+            <h1 id={titleId} className="text-[22px] leading-tight font-bold tracking-[-0.01em] break-words sm:text-[26px]">
               {withSpecs(product.name, product.specs)}
             </h1>
-            <p className="text-sm text-muted-foreground">{summary}</p>
+            <p className="text-[15px] text-muted-foreground">{summary}</p>
             {/* one option only (a shop that lists each colour on its own): say which one this is */}
-            {options.length === 1 && <p className="text-sm font-medium">{`Option: ${options[0]!.label}`}</p>}
+            {options.length === 1 && <p className="text-sm font-medium">{`Variant: ${options[0]!.label}`}</p>}
           </div>
         </div>
         {options.length > 1 && (
-          <div className="flex flex-col gap-1">
-            <p id={`${titleId}-option`} className="text-xs font-medium text-muted-foreground">
-              Option
+          <div className="flex flex-col gap-1.5">
+            <p id={`${titleId}-option`} className="ml-[15px] text-[13px] font-semibold text-muted-foreground">
+              Variant
             </p>
-            <ToggleGroup
-              type="single"
-              aria-labelledby={`${titleId}-option`}
+            <SegmentedControl
+              labelledBy={`${titleId}-option`}
+              items={[{ value: '__all', label: 'All' }, ...options.map((o) => ({ value: o.key, label: o.label }))]}
               value={option ?? '__all'}
-              onValueChange={(v) => {
-                if (v) choose(v === '__all' ? null : v);
-              }}
-              className="glass w-full flex-wrap justify-start gap-1 rounded-2xl p-1"
-            >
-              <ToggleGroupItem value="__all" className={TOGGLE}>
-                All
-              </ToggleGroupItem>
-              {options.map((o) => (
-                <ToggleGroupItem key={o.key} value={o.key} className={TOGGLE}>
-                  {o.label}
-                </ToggleGroupItem>
-              ))}
-            </ToggleGroup>
-            {option !== null && <p className="text-xs text-muted-foreground">Shops that do not name this option are left out.</p>}
+              onValueChange={(v) => choose(v === '__all' ? null : v)}
+              className="w-fit max-w-full"
+            />
+            <div className="opt-note" data-on={option !== null ? 'true' : undefined}>
+              <p aria-hidden={option === null ? true : undefined} className="text-[13px] text-muted-foreground">
+                Shops that do not name this variant are left out.
+              </p>
+            </div>
           </div>
         )}
         {/* announced politely when the option changes; always rendered so the change is heard */}
@@ -641,11 +794,32 @@ function ProductContent({ data, selectedId }: { data: ProductPage; selectedId: n
         </p>
       </article>
 
-      <section aria-labelledby={listId} className="flex flex-col gap-3">
-        <h2 id={listId} className="text-lg font-semibold">
-          {data.sellers.length > 1 ? 'Where to buy, cheapest first' : 'Where to buy'}
+      <Advice
+        best={best}
+        shown={bestShown}
+        shops={shops}
+        cameFrom={came}
+        cameShown={came ? (shownBy.get(came.id) ?? null) : null}
+        minHistoryDays={data.minHistoryDays}
+        advanced={advanced}
+        verdictOption={labelOf(best.productId)}
+      />
+
+      <Fold open={showChart} id={chartId} stacked>
+        <History data={data} sellers={sellers} shownBy={shownBy} options={options.length} start={best.id} open={chartSeen} />
+      </Fold>
+      {!advanced && (
+        <Button variant="outline" className="self-start" aria-expanded={chartOpen} aria-controls={chartId} onClick={() => setChartOpen((o) => !o)}>
+          <TrendingUp aria-hidden="true" />
+          {chartOpen ? 'Hide price chart' : 'View price chart'}
+        </Button>
+      )}
+
+      <section aria-labelledby={listId} className="glass flex flex-col gap-1 px-[22px] py-[18px]">
+        <h2 id={listId} className="mb-1 text-[17px] font-bold">
+          {data.sellers.length > 1 ? 'Every shop, cheapest first' : 'Where to buy'}
         </h2>
-        <ol aria-label="Shops selling this product" className="m-0 flex list-none flex-col gap-3 p-0">
+        <ol aria-label="Shops selling this product" className="m-0 flex list-none flex-col p-0">
           {sellers.map((s) => (
             <SellerRow
               key={s.id}
@@ -658,42 +832,57 @@ function ProductContent({ data, selectedId }: { data: ProductPage; selectedId: n
               history={data.history.filter((h) => h.sellerId === s.id)}
               raiseWindowDays={data.raiseWindowDays}
               option={ownOption(s)}
+              advanced={advanced}
               factsOpen={!advanced && factsFor === s.id && hasFacts(s)}
               onToggleFacts={!advanced && hasFacts(s) ? () => setFactsFor((cur) => (cur === s.id ? null : s.id)) : null}
               selected={s.id === selected}
+              bestPrice={bestPrice}
             />
           ))}
         </ol>
+        {!advanced && (
+          <Button variant="ghost" size="sm" className="-ml-3.5 self-start" onClick={() => setMode('advanced')}>
+            Show how each shop was judged
+          </Button>
+        )}
       </section>
 
-      {advanced && (
-        <>
-          <History data={data} sellers={sellers} shownBy={shownBy} options={options.length} start={selected ?? data.cheapestId} />
-          {product.attributes.length > 0 && (
-            <Section title="Product details">
-              <dl className="m-0 flex flex-col text-sm">
-                {product.attributes.map((a) => (
-                  <div key={a.key} className="flex items-baseline justify-between gap-3 border-t border-line py-1.5 first:border-t-0">
-                    <dt className="text-muted-foreground">{a.label}</dt>
-                    <dd className="m-0 text-right font-semibold break-words">{a.value}</dd>
-                  </div>
-                ))}
-              </dl>
-            </Section>
-          )}
-        </>
+      {product.attributes.length > 0 && (
+        <Fold open={advanced} stacked>
+          <ProductDetails attributes={product.attributes} />
+        </Fold>
       )}
-    </div>
+      <p className="text-center text-[13px] text-muted-foreground">Prices recorded every night from each shop's website.</p>
+    </>
+  );
+}
+
+function ProductDetails({ attributes }: { attributes: ProductPage['product']['attributes'] }) {
+  const id = useId();
+  return (
+    <section aria-labelledby={id} className="glass flex flex-col gap-1.5 p-[22px]">
+      <h2 id={id} className="text-[17px] font-bold">
+        Product details
+      </h2>
+      <dl className="m-0 grid grid-cols-[repeat(auto-fit,minmax(240px,1fr))] gap-x-8 text-sm">
+        {attributes.map((a) => (
+          <div key={a.key} className="flex items-baseline justify-between gap-3 border-t border-line py-[7px]">
+            <dt className="text-muted-foreground">{a.label}</dt>
+            <dd className="m-0 text-right font-semibold break-words">{a.value}</dd>
+          </div>
+        ))}
+      </dl>
+    </section>
   );
 }
 
 function NotFound() {
   return (
     <GlassCard className="p-6">
-      <h1 className="text-2xl font-bold tracking-tight">Product not found</h1>
+      <h1 className="text-[26px] font-bold tracking-tight">Product not found</h1>
       <p className="mt-2 text-muted-foreground">
         No product is listed under that address.{' '}
-        <Link to="/" className="font-medium text-brand underline underline-offset-4">
+        <Link to="/" className="font-semibold text-brand underline underline-offset-4">
           Back to the home page
         </Link>
       </p>
@@ -703,28 +892,28 @@ function NotFound() {
 
 function Failed({ retry }: { retry: () => void }) {
   return (
-    <div className="flex flex-col gap-4">
-      <h1 className="text-2xl font-bold tracking-tight">Product</h1>
+    <>
+      <h1 className="text-[26px] font-bold tracking-tight">Product</h1>
       <Notice
         title="This product could not be loaded."
         action={
-          <Button variant="outline" className="min-h-11" onClick={retry}>
+          <Button variant="outline" onClick={retry}>
             Try again
           </Button>
         }
       >
         Check your connection and try again.
       </Notice>
-    </div>
+    </>
   );
 }
 
 function Loading() {
   return (
-    <div role="status" aria-label="Loading product" className="flex flex-col gap-4">
+    <div role="status" aria-label="Loading product" className="flex flex-col gap-6">
       <h1 className="sr-only">Product</h1>
       <div aria-hidden="true" className="glass h-48 opacity-60" />
-      <div aria-hidden="true" className="glass h-20 opacity-60" />
+      <div aria-hidden="true" className="glass h-40 opacity-60" />
     </div>
   );
 }
@@ -733,9 +922,9 @@ const notFound = (state: { status: string; error?: unknown }) =>
   state.status === 'error' && state.error instanceof ApiError && (state.error.status === 404 || state.error.status === 400);
 
 /**
- * A product (design Part 3): its clean name, picture and options, and every shop that sells it, cheapest first,
- * each with its own verdict. Advanced adds a price line per shop, the price by day of one shop, its numbers and
- * the product's attributes.
+ * A product (design Part 3): its clean name, picture and variants, our advice on where to buy, a price chart
+ * (collapsed in Simple, open in Advanced) with the price by day, and every shop that sells it, cheapest first, each
+ * with its own verdict. Advanced opens every shop's details and adds the product's attributes.
  */
 export function ProductPage() {
   const { key } = useParams();

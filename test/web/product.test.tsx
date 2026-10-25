@@ -189,8 +189,16 @@ async function openProduct(data: ProductPage = page()) {
 }
 
 const sellerItem = (shop: string) => screen.getByRole('listitem', { name: shop });
+/** Simple mode: a shop's row is quiet until its Details button opens it. */
+const openDetails = (shop: string) => {
+  const button = within(sellerItem(shop)).getByRole('button', { name: 'Details' });
+  if (button.getAttribute('aria-expanded') !== 'true') fireEvent.click(button);
+  return sellerItem(shop);
+};
+/** The price by day part of the chart section starts closed. */
+const openDays = () => fireEvent.click(screen.getByRole('button', { name: 'Show price by day' }));
 
-/** Recharts sizes itself with ResizeObserver, which jsdom lacks. */
+/** The chart sizes itself with ResizeObserver, which jsdom lacks. */
 class FakeResizeObserver {
   observe() {}
   unobserve() {}
@@ -267,7 +275,8 @@ describe('product page, Simple', () => {
 
   it("keeps each seller's own verdict: Alpha's raised tag, alarm and earlier price, Beta's sentence", async () => {
     await openProduct();
-    const a = sellerItem('Alpha');
+    const a = openDetails('Alpha');
+    openDetails('Beta');
     expect(within(a).getByRole('img', { name: 'Raised from €709.00 to €799.00' })).toBeTruthy();
     expect(within(a).getByText('Marked Black Friday, price raised')).toBeTruthy();
     expect(within(a).getByText('Price on 21 Oct: €709.00')).toBeTruthy();
@@ -298,6 +307,8 @@ describe('product page, Simple', () => {
 
   it('links to each shop page in a new tab, only for web addresses', async () => {
     await openProduct();
+    openDetails('Alpha');
+    openDetails('Gamma');
     const link = within(sellerItem('Alpha')).getByRole('link', { name: /^View on Alpha/ });
     expect(link.textContent).toContain('(opens in a new tab)');
     expect(link.getAttribute('href')).toBe('https://alpha.example/v15');
@@ -308,6 +319,8 @@ describe('product page, Simple', () => {
 
   it("has a \"Something wrong?\" button per seller for that seller's listing (R20)", async () => {
     await openProduct();
+    openDetails('Alpha');
+    openDetails('Beta');
     const button = within(sellerItem('Alpha')).getByRole('button', { name: /^Something wrong\?/ });
     expect(button.getAttribute('data-report-target')).toBe(`product:${REP}`);
     expect(within(sellerItem('Beta')).getByRole('button', { name: /^Something wrong\?/ }).getAttribute('data-report-target')).toBe('product:80');
@@ -324,6 +337,41 @@ describe('product page, Simple', () => {
     expect(within(g).getByText('Lenovo V15 <b>G5</b>')).toBeTruthy();
   });
 
+  it('keeps every shop quiet until its details are opened', async () => {
+    await openProduct();
+    const button = within(sellerItem('Alpha')).getByRole('button', { name: 'Details' });
+    expect(button.getAttribute('aria-expanded')).toBe('false');
+    expect(within(sellerItem('Alpha')).queryByRole('link', { name: /^View on Alpha/ })).toBeNull();
+    fireEvent.click(button);
+    expect(button.getAttribute('aria-expanded')).toBe('true');
+    expect(within(sellerItem('Alpha')).getByRole('link', { name: /^View on Alpha/ })).toBeTruthy();
+  });
+
+  it('advises where to buy: the cheapest shop in stock, its verdict, stock and a link to the shop', async () => {
+    await openProduct();
+    const advice = screen.getByRole('region', { name: 'Buy it at Beta for €699.00' });
+    expect(within(advice).getByText('Regular price')).toBeTruthy();
+    expect(within(advice).getByText('In stock')).toBeTruthy();
+    expect(within(advice).getByRole('link', { name: /^View on Beta/ }).getAttribute('href')).toBe('https://beta.example/p/v15');
+  });
+
+  it('says calmly what is different about the listing the visitor came from', async () => {
+    mockApi(() => json(page()));
+    renderAt('/product/c5?seller=1');
+    await screen.findByRole('heading', { level: 1, name: TITLE });
+    const advice = screen.getByRole('region', { name: 'Buy it at Beta for €699.00' });
+    expect(within(advice).getByText('About the listing you came from')).toBeTruthy();
+    expect(within(advice).getByText(/^Alpha sells it for €799\.00, €100\.00 more than Beta\./)).toBeTruthy();
+  });
+
+  it('shows the price chart only when asked', async () => {
+    await openProduct();
+    expect(screen.queryByTestId('sellers-chart')).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: 'View price chart' }));
+    expect(await screen.findByTestId('sellers-chart')).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Hide price chart' }).getAttribute('aria-expanded')).toBe('true');
+  });
+
   it('shows no chart, day table or attributes', async () => {
     await openProduct();
     expect(screen.queryByRole('table', { name: /Price by day/ })).toBeNull();
@@ -335,72 +383,78 @@ describe('product page, Simple', () => {
 describe('product page, variant options', () => {
   it('offers the options of every seller once (case aside), and none for a product with one option', async () => {
     await openProduct();
-    const group = screen.getByRole('radiogroup', { name: 'Option' });
+    const group = screen.getByRole('radiogroup', { name: 'Variant' });
     expect(within(group).getAllByRole('radio').map((r) => r.textContent)).toEqual(['All', 'Black', 'Grey']);
     cleanup();
     await openProduct(page({ variants: [{ id: 80, sellerId: 2, label: 'Black', priceCents: 69900, inStock: true, seenAt: null }] }));
-    expect(screen.queryByRole('radiogroup', { name: 'Option' })).toBeNull();
+    expect(screen.queryByRole('radiogroup', { name: 'Variant' })).toBeNull();
     // the one option is named, so a shop that lists each colour on its own shows which one this is
-    expect(screen.getByText('Option: Black')).toBeTruthy();
+    expect(screen.getByText('Variant: Black')).toBeTruthy();
   });
 
   it("choosing an option lists the sellers that have it, at that option's price", async () => {
     await openProduct();
-    fireEvent.click(within(screen.getByRole('radiogroup', { name: 'Option' })).getByRole('radio', { name: 'Grey' }));
+    fireEvent.click(within(screen.getByRole('radiogroup', { name: 'Variant' })).getByRole('radio', { name: 'Grey' }));
     const list = screen.getByRole('list', { name: 'Shops selling this product' });
     expect(within(list).getAllByRole('heading', { level: 3 }).map((h) => h.textContent)).toEqual(['Alpha']);
-    const a = sellerItem('Alpha');
+    const a = openDetails('Alpha');
     expect(within(a).getByText('€759.00')).toBeTruthy();
     expect(within(a).getByText('Out of stock')).toBeTruthy();
     // the deal check is about another option of this listing: no tag, no alarm
     expect(within(a).queryByRole('img', { name: /Raised/ })).toBeNull();
     expect(within(a).getByText('Our deal check at Alpha is for Black.')).toBeTruthy();
-    expect(screen.getByText('Shops that do not name this option are left out.')).toBeTruthy();
+    expect(screen.getByText('Shops that do not name this variant are left out.').getAttribute('aria-hidden')).toBeNull();
   });
 
   it('choosing Black keeps the verdict of the seller whose checked option it is', async () => {
     await openProduct();
-    fireEvent.click(within(screen.getByRole('radiogroup', { name: 'Option' })).getByRole('radio', { name: 'Black' }));
+    fireEvent.click(within(screen.getByRole('radiogroup', { name: 'Variant' })).getByRole('radio', { name: 'Black' }));
     const list = screen.getByRole('list', { name: 'Shops selling this product' });
     expect(within(list).getAllByRole('heading', { level: 3 }).map((h) => h.textContent)).toEqual(['Beta', 'Alpha']);
-    expect(within(sellerItem('Alpha')).getByRole('img', { name: 'Raised from €709.00 to €799.00' })).toBeTruthy();
-    fireEvent.click(within(screen.getByRole('radiogroup', { name: 'Option' })).getByRole('radio', { name: 'All' }));
+    expect(within(openDetails('Alpha')).getByRole('img', { name: 'Raised from €709.00 to €799.00' })).toBeTruthy();
+    fireEvent.click(within(screen.getByRole('radiogroup', { name: 'Variant' })).getByRole('radio', { name: 'All' }));
     expect(within(list).getAllByRole('heading', { level: 3 })).toHaveLength(3);
   });
 });
 
 describe('product page, Advanced', () => {
-  // the first import of Recharts is slow in the test runner; load it once up front
+  // the first import of the chart (and motion) is slow in the test runner; load it once up front
   beforeAll(async () => {
-    await import('@/components/site/SellersChart');
+    await import('@/components/site/PriceChart');
   }, 30_000);
   beforeEach(() => localStorage.setItem('mode', 'advanced'));
 
-  it('draws one line per seller with prices, each its verdict variant, named in a legend', async () => {
+  it('draws one line per seller with prices, each its verdict variant, the advised shop first, named in a legend', async () => {
     await openProduct();
     const chart = await screen.findByTestId('sellers-chart');
     expect(chart.getAttribute('data-lines')).toBe('2');
-    expect(chart.getAttribute('role')).toBe('img');
-    const legend = screen.getByRole('list', { name: 'Chart lines' });
-    expect(within(legend).getAllByRole('listitem').map((l) => l.textContent)).toEqual(['Beta (black)', 'Alpha (Black)', 'Alpha (Black) was price']);
+    expect(await screen.findByRole('group', { name: /^Each shop's price over the last 30 days/ })).toBeTruthy();
+    const legend = await screen.findByRole('list', { name: 'Lines on the chart' });
+    expect(within(legend).getAllByRole('listitem').map((l) => l.textContent)).toEqual(['Beta (black)', 'Alpha (Black)', 'Was prices']);
   });
 
   it('also draws the was price of each seller that shows one, as its own named line', async () => {
     await openProduct();
     const chart = await screen.findByTestId('sellers-chart');
     // Alpha's readings carry a was price, Beta's never do
-    expect(chart.querySelector('[data-was-lines]')?.getAttribute('data-was-lines')).toBe('1');
-    const legend = screen.getByRole('list', { name: 'Chart lines' });
-    expect(within(legend).getByText('Alpha (Black) was price')).toBeTruthy();
-    expect(within(legend).queryByText(/Beta.*was price/)).toBeNull();
+    await waitFor(() => expect(chart.querySelector('[data-was-lines]')?.getAttribute('data-was-lines')).toBe('1'));
+    // every was price line hides and shows together, under one legend button
+    const legend = screen.getByRole('list', { name: 'Lines on the chart' });
+    const was = within(legend).getByRole('button', { name: 'Was prices' });
+    expect(was.getAttribute('aria-pressed')).toBe('true');
+    fireEvent.click(was);
+    expect(was.getAttribute('aria-pressed')).toBe('false');
   });
 
   it('never mixes variants: choosing Grey draws Alpha from the Grey readings', async () => {
     await openProduct();
-    fireEvent.click(within(screen.getByRole('radiogroup', { name: 'Option' })).getByRole('radio', { name: 'Grey' }));
-    const legend = await screen.findByRole('list', { name: 'Chart lines' });
-    expect(within(legend).getAllByRole('listitem').map((l) => l.textContent)).toEqual(['Alpha (Grey)']);
+    fireEvent.click(within(screen.getByRole('radiogroup', { name: 'Variant' })).getByRole('radio', { name: 'Grey' }));
+    // one line, so no legend: the plot is named instead
+    await screen.findByRole('group', { name: /^Each shop's price/ });
+    expect(screen.queryByRole('list', { name: 'Lines on the chart' })).toBeNull();
+    expect(screen.getByTestId('sellers-chart').getAttribute('data-lines')).toBe('1');
     // the numbers are about the checked option, and say so
+    openDays();
     expect(screen.getByRole('region', { name: 'Numbers at Alpha, for Black' })).toBeTruthy();
   });
 
@@ -418,12 +472,13 @@ describe('product page, Advanced', () => {
         history: [...betaHistory.map((h) => ({ ...h, productId: 40, sellerId: 4 })), ...betaHistory.map((h) => ({ ...h, productId: 50, sellerId: 5 }))],
       }),
     );
-    const legend = await screen.findByRole('list', { name: 'Chart lines' });
+    const legend = await screen.findByRole('list', { name: 'Lines on the chart' });
     expect(within(legend).getAllByRole('listitem').map((l) => l.textContent)).toEqual(['AtoZ (Blue)', 'AtoZ (Black)']);
   });
 
   it("shows the day table of the chosen seller: the cheapest first, another by choice, with R44's column", async () => {
     await openProduct();
+    openDays();
     let table = await screen.findByRole('table', { name: /Price by day/ });
     expect(within(table).getAllByRole('row')).toHaveLength(6);
     // Beta's verdict is none: no worth-buying column (R44)
@@ -439,6 +494,7 @@ describe('product page, Advanced', () => {
 
   it('switching to 7 days keeps only the last 7 days in the table', async () => {
     await openProduct();
+    openDays();
     fireEvent.click(within(screen.getByRole('radiogroup', { name: 'Shop for the price by day' })).getByRole('radio', { name: 'Alpha' }));
     fireEvent.click(within(screen.getByRole('radiogroup', { name: 'Chart range' })).getByRole('radio', { name: '7 days' }));
     const rows = within(await screen.findByRole('table', { name: /Price by day/ })).getAllByRole('row').slice(1);
@@ -448,6 +504,7 @@ describe('product page, Advanced', () => {
 
   it("shows the chosen seller's numbers and the product's attributes", async () => {
     await openProduct();
+    openDays();
     fireEvent.click(within(screen.getByRole('radiogroup', { name: 'Shop for the price by day' })).getByRole('radio', { name: 'Alpha' }));
     const numbers = screen.getByRole('region', { name: 'Numbers at Alpha' });
     expect(within(numbers).getByText('Lowest 30 days').nextElementSibling!.textContent).toBe('€709.00');
@@ -558,7 +615,7 @@ describe('product page, Simple, price changes and facts per seller', () => {
 
   it('a Black Friday price rise stands out on its seller: alarm banner, raised tag with the real earlier price, and the fact', async () => {
     await openProduct();
-    const a = sellerItem('Alpha');
+    const a = openDetails('Alpha');
     expect(a.getAttribute('data-alarm')).toBe('true');
     expect(within(a).getByText('Marked Black Friday, price raised')).toBeTruthy();
     expect(within(a).getByRole('img', { name: 'Raised from €709.00 to €799.00' })).toBeTruthy();
@@ -569,6 +626,7 @@ describe('product page, Simple, price changes and facts per seller', () => {
 
   it('shows the three numbers of the cheapest seller when its verdict is judged', async () => {
     await openProduct(page({ sellers: [goodBeta, alpha, gamma] }));
+    openDetails('Beta');
     const facts = within(sellerItem('Beta')).getByRole('list', { name: 'Price facts at Beta' });
     expect(within(facts).getByText('Lowest 30 days').nextElementSibling!.textContent).toBe('€720.00');
     expect(within(facts).getByText('Usual price').nextElementSibling!.textContent).toBe('€725.00');
@@ -577,6 +635,8 @@ describe('product page, Simple, price changes and facts per seller', () => {
 
   it("shows another judged seller's three numbers when asked, one seller at a time", async () => {
     await openProduct(page({ sellers: [goodBeta, alpha, gamma] }));
+    openDetails('Beta');
+    openDetails('Alpha');
     // the cheapest seller's facts are open: its button says so
     expect(within(sellerItem('Beta')).getByRole('button', { name: 'Hide the price facts at Beta' }).getAttribute('aria-expanded')).toBe('true');
     const button = within(sellerItem('Alpha')).getByRole('button', { name: 'Show the price facts at Alpha' });
@@ -600,7 +660,7 @@ describe('product page, Simple, price changes and facts per seller', () => {
     const data = page();
     data.variants = data.variants.map((v) => (v.id === SMALL ? { ...v, seenAt: '2026-09-01T18:00:00.000Z' } : v));
     await openProduct(data);
-    fireEvent.click(within(screen.getByRole('radiogroup', { name: 'Option' })).getByRole('radio', { name: 'Grey' }));
+    fireEvent.click(within(screen.getByRole('radiogroup', { name: 'Variant' })).getByRole('radio', { name: 'Grey' }));
     const a = sellerItem('Alpha');
     expect(within(a).getByText('Last seen on 1 Sep')).toBeTruthy();
     expect(a.textContent).not.toContain('€759.00');
@@ -633,7 +693,7 @@ describe('product page, Simple, price changes and facts per seller', () => {
 
   it('shows no three numbers for an option the deal check is not about', async () => {
     await openProduct();
-    fireEvent.click(within(screen.getByRole('radiogroup', { name: 'Option' })).getByRole('radio', { name: 'Grey' }));
+    fireEvent.click(within(screen.getByRole('radiogroup', { name: 'Variant' })).getByRole('radio', { name: 'Grey' }));
     expect(within(sellerItem('Alpha')).queryByRole('button', { name: /price facts/ })).toBeNull();
     expect(within(sellerItem('Alpha')).queryByRole('list', { name: /Price facts/ })).toBeNull();
   });
@@ -658,7 +718,7 @@ describe('product page, Simple, price changes and facts per seller', () => {
         history: [],
       }),
     );
-    expect(within(screen.getByRole('radiogroup', { name: 'Option' })).getAllByRole('radio').map((r) => r.textContent)).toEqual(['All', 'Blue', 'Black']);
+    expect(within(screen.getByRole('radiogroup', { name: 'Variant' })).getAllByRole('radio').map((r) => r.textContent)).toEqual(['All', 'Blue', 'Black']);
     const rows = within(screen.getByRole('list', { name: 'Shops selling this product' })).getAllByRole('listitem');
     expect(rows.map((r) => r.querySelector('[data-option]')?.textContent)).toEqual(['Blue', 'Black']);
     expect(screen.getByText('at AtoZ')).toBeTruthy();
@@ -702,8 +762,9 @@ describe("product page, the shop's own term for its reference price (was_label)"
     localStorage.setItem('mode', 'advanced');
     // the listing alone, so its numbers are the ones shown
     await openProduct({ ...listedPage(), sellers: [listed], cheapestId: 1, history: listedHistory.map((h) => ({ ...h, sellerId: 1 })) });
-    const legend = await screen.findByRole('list', { name: 'Chart lines' });
-    expect(within(legend).getByText('Alpha (Black) list price')).toBeTruthy();
+    // one shop: no legend; its tooltip names the line "Alpha (Black) list price"
+    await screen.findByRole('group', { name: /^Each shop's price/ });
+    openDays();
     expect(screen.getByText('List price changes')).toBeTruthy();
     // the day table: the column takes the shop's term, and a night whose reference price was not recorded says so
     const table = screen.getByRole('table', { name: 'Price by day' });
