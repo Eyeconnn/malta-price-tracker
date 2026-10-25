@@ -155,10 +155,10 @@ describe('POST /api/admin/shop-requests', () => {
 
   it('a host already in shops or already requested gives 409; a full queue gives 429', async () => {
     const w = setup();
-    w.store.createShopRequest.mockResolvedValueOnce({ duplicate: 'shop', slug: 'klikk' } as never);
+    w.store.createShopRequest.mockResolvedValueOnce({ duplicate: 'shop', slug: 'klikk', active: true, note: null } as never);
     let res = await w.send('POST', '/api/admin/shop-requests', { url: 'https://klikk.com.mt' });
     expect(res.status).toBe(409);
-    expect(await res.json()).toEqual({ error: 'duplicate', field: 'url', reason: 'shop', slug: 'klikk' });
+    expect(await res.json()).toEqual({ error: 'duplicate', field: 'url', reason: 'shop', slug: 'klikk', active: true, note: null });
     w.store.createShopRequest.mockResolvedValueOnce({ duplicate: 'request', status: 'failed' } as never);
     res = await w.send('POST', '/api/admin/shop-requests', { url: 'https://shop.example.mt' });
     expect(res.status).toBe(409);
@@ -258,9 +258,12 @@ describe('shop request store on PGlite as site_admin', () => {
     await pg.exec(`
       grant usage on schema public to site_admin;
       grant select on shops to site_admin;
-      insert into shops (id, slug, name, base_url, adapter, active) values
-        (1, 'klikk', 'Klikk', 'https://www.klikk.com.mt', 'shopify', true),
-        (2, 'scan', 'Scan', 'https://www.scanmalta.com/shop', 'magento', true);
+      insert into shops (id, slug, name, base_url, adapter, active, notes) values
+        (1, 'klikk', 'Klikk', 'https://www.klikk.com.mt', 'shopify', true, 'Runs nightly.'),
+        (2, 'scan', 'Scan', 'https://www.scanmalta.com/shop', 'magento', true, null),
+        (3, 'homemate', 'Homemate', 'https://www.homemate.com.mt', 'html', false, '  Custom ASP.NET behind Cloudflare;
+prices in HTML.  '),
+        (4, 'agenda', 'Agenda', 'https://agenda.example.mt', 'shopify', false, '');
     `);
     store = createAdminStore(adminRunner(pg));
   }, 60_000);
@@ -280,8 +283,16 @@ describe('shop request store on PGlite as site_admin', () => {
   });
 
   it('refuses a host already in shops (with or without www.) or already requested', async () => {
-    expect(await store.createShopRequest({ origin: 'https://klikk.com.mt', host: 'klikk.com.mt', name: null, category: null })).toEqual({ duplicate: 'shop', slug: 'klikk' });
-    expect(await store.createShopRequest({ origin: 'https://scanmalta.com', host: 'scanmalta.com', name: null, category: null })).toEqual({ duplicate: 'shop', slug: 'scan' });
+    expect(await store.createShopRequest({ origin: 'https://klikk.com.mt', host: 'klikk.com.mt', name: null, category: null })).toEqual({ duplicate: 'shop', slug: 'klikk', active: true, note: null });
+    expect(await store.createShopRequest({ origin: 'https://scanmalta.com', host: 'scanmalta.com', name: null, category: null })).toEqual({ duplicate: 'shop', slug: 'scan', active: true, note: null });
+    // a switched-off shop says so with its note (whitespace tidied); an active one never sends its note
+    expect(await store.createShopRequest({ origin: 'https://homemate.com.mt', host: 'homemate.com.mt', name: null, category: null })).toEqual({
+      duplicate: 'shop',
+      slug: 'homemate',
+      active: false,
+      note: 'Custom ASP.NET behind Cloudflare; prices in HTML.',
+    });
+    expect(await store.createShopRequest({ origin: 'https://agenda.example.mt', host: 'agenda.example.mt', name: null, category: null })).toEqual({ duplicate: 'shop', slug: 'agenda', active: false, note: null });
     expect(await store.createShopRequest({ origin: 'https://www.shop.example.mt', host: 'shop.example.mt', name: null, category: null })).toEqual({ duplicate: 'request', status: 'pending' });
   });
 

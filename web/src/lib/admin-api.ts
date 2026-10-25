@@ -11,7 +11,8 @@ export type { AdminReport, AdminShop, AdminShopRequest, MatchGroup, ReportStatus
 /** POST /api/admin/shop-requests: the stored request, or what the Worker refused (field, reason, slug, current status). */
 export type CreateShopRequestResult =
   | { ok: true; request: AdminShopRequest }
-  | { ok: false; status: number; field?: string; reason?: string; slug?: string; current?: ShopRequestStatus };
+  /** active / note: for an address already in the shop list, whether that shop is scraped and why not when it is off */
+  | { ok: false; status: number; field?: string; reason?: string; slug?: string; current?: ShopRequestStatus; active?: boolean; note?: string };
 
 async function createShopRequest(body: { url: string; name: string | null; category: string | null }): Promise<CreateShopRequestResult> {
   const res = await fetch('/api/admin/shop-requests', {
@@ -27,7 +28,17 @@ async function createShopRequest(body: { url: string; name: string | null; categ
   }
   if (res.status === 201 && data.request) return { ok: true, request: data.request as AdminShopRequest };
   const s = (v: unknown) => (typeof v === 'string' ? v : undefined);
-  return { ok: false, status: res.status, field: s(data.field), reason: s(data.reason), slug: s(data.slug), current: s(data.status) as ShopRequestStatus | undefined };
+  return {
+    ok: false,
+    status: res.status,
+    field: s(data.field),
+    reason: s(data.reason),
+    slug: s(data.slug),
+    current: s(data.status) as ShopRequestStatus | undefined,
+    // an existing shop: whether it is scraped, and why not when it is switched off
+    active: typeof data.active === 'boolean' ? data.active : undefined,
+    note: s(data.note),
+  };
 }
 export type Paged = { total: number; page: number; pageSize: number };
 

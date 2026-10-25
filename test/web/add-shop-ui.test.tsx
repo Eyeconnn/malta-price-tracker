@@ -159,7 +159,8 @@ describe('admin Add shop page', () => {
 
   it('shows the server refusal next to the field: already a shop, already requested, queue full', async () => {
     const answers = [
-      json({ error: 'duplicate', field: 'url', reason: 'shop', slug: 'klikk' }, 409),
+      json({ error: 'duplicate', field: 'url', reason: 'shop', slug: 'klikk', active: true, note: null }, 409),
+      json({ error: 'duplicate', field: 'url', reason: 'shop', slug: 'homemate', active: false, note: 'Custom ASP.NET behind Cloudflare; prices in HTML.' }, 409),
       json({ error: 'duplicate', field: 'url', reason: 'request', status: 'failed' }, 409),
       json({ error: 'too many pending', max: 20 }, 429),
     ];
@@ -171,6 +172,13 @@ describe('admin Add shop page', () => {
     fireEvent.click(submit);
     expect(await screen.findByText('This shop is already in the shop list (klikk).')).toBeTruthy();
     expect(input.getAttribute('aria-invalid')).toBe('true');
+    // a switched-off shop: say it is not scraped or shown, and why
+    fireEvent.click(submit);
+    expect(
+      await screen.findByText(
+        'This shop is already in the shop list (homemate) but switched off, so it is not scraped or shown on the site. Reason: Custom ASP.NET behind Cloudflare; prices in HTML.',
+      ),
+    ).toBeTruthy();
     fireEvent.click(submit);
     expect(await screen.findByText('This address was already requested (now: Failed). Use Retry or Reject in the list below.')).toBeTruthy();
     fireEvent.click(submit);

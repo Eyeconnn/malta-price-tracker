@@ -55,7 +55,15 @@ function refusalText(r: Extract<Awaited<ReturnType<typeof adminApi.createShopReq
   if (r.status === 400 && r.field === 'url') return { field: 'url', text: ADDRESS_PROBLEM_TEXT[(r.reason as AddressProblem) ?? 'malformed'] ?? ADDRESS_PROBLEM_TEXT.malformed };
   if (r.status === 400 && r.field === 'name') return { field: 'name', text: `Use at most ${NAME_MAX} characters.` };
   if (r.status === 400 && r.field === 'category') return { field: 'category', text: 'Choose a category from the list.' };
-  if (r.status === 409 && r.reason === 'shop') return { field: 'url', text: `This shop is already in the shop list (${r.slug ?? 'unknown'}).` };
+  if (r.status === 409 && r.reason === 'shop') {
+    const slug = r.slug ?? 'unknown';
+    if (r.active === false) {
+      // a switched-off shop is never scraped, so it is not on the Shops page: say so, and why
+      const why = r.note ? ` Reason: ${r.note}` : '';
+      return { field: 'url', text: `This shop is already in the shop list (${slug}) but switched off, so it is not scraped or shown on the site.${why}` };
+    }
+    return { field: 'url', text: `This shop is already in the shop list (${slug}).` };
+  }
   if (r.status === 409) {
     const now = r.current ? STATUS_LABELS[r.current] : 'open';
     return { field: 'url', text: `This address was already requested (now: ${now}). Use Retry or Reject in the list below.` };

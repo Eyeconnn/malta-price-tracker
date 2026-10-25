@@ -52,7 +52,8 @@ export type AdminShopRequest = {
 
 export type CreateResult =
   | { request: AdminShopRequest }
-  | { duplicate: 'shop'; slug: string }
+  /** active: the shop is scraped every night; a switched-off one carries its note (why it is off), null when none */
+  | { duplicate: 'shop'; slug: string; active: boolean; note: string | null }
   | { duplicate: 'request'; status: ShopRequestStatus }
   | { full: true };
 
@@ -67,6 +68,8 @@ export interface ShopRequestStore {
 type Row = Record<string, unknown>;
 const LIST_MAX = 200;
 const TEXT_MAX = 500;
+/** The longest note of a switched-off shop sent back to the Add shop form. */
+const NOTE_MAX = 300;
 
 // ---------------------------------------------------------------- reshaping stored JSON
 
@@ -170,12 +173,16 @@ export function shopRequestStore(db: AdminRunner): ShopRequestStore {
 
     async createShopRequest({ origin, host, name, category }) {
       const [shops, open] = await db.transaction([
-        { text: 'select slug, base_url from shops', params: [] },
+        { text: 'select slug, base_url, active, notes from shops', params: [] },
         { text: `select origin, status from shop_requests where status <> 'rejected'`, params: [] },
       ]);
       const key = hostKey(host);
       const shop = shops!.find((s) => hostKey(String(s.base_url)) === key);
-      if (shop) return { duplicate: 'shop', slug: String(shop.slug) };
+      if (shop) {
+        const active = Boolean(shop.active);
+        const note = typeof shop.notes === 'string' ? shop.notes.replace(/\s+/g, ' ').trim().slice(0, NOTE_MAX) : '';
+        return { duplicate: 'shop', slug: String(shop.slug), active, note: active || note === '' ? null : note };
+      }
       const req = open!.find((r) => hostKey(String(r.origin)) === key);
       if (req) return { duplicate: 'request', status: req.status as ShopRequestStatus };
       let rows: Row[];
@@ -252,7 +259,12 @@ export async function handleShopRequests(req: Request, env: Env, url: URL, store
     const out = await store().createShopRequest({ origin: address.origin, host: address.host, name, category });
     if ('full' in out) return json({ error: 'too many pending', max: MAX_QUEUED }, 429);
     if ('duplicate' in out) {
-      return json(out.duplicate === 'shop' ? { error: 'duplicate', field: 'url', reason: 'shop', slug: out.slug } : { error: 'duplicate', field: 'url', reason: 'request', status: out.status }, 409);
+      return json(
+        out.duplicate === 'shop'
+          ? { error: 'duplicate', field: 'url', reason: 'shop', slug: out.slug, active: out.active, note: out.note }
+          : { error: 'duplicate', field: 'url', reason: 'request', status: out.status },
+        409,
+      );
     }
     return json({ request: out.request }, 201);
   }
