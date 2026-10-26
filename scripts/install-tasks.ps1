@@ -1,5 +1,6 @@
 # Creates (or replaces) the Windows scheduled tasks that run the local part of the price tracker.
-#   MTP Nightly Local Scrape  every night 02:30, wakes the PC, catches up if the PC was off
+#   MTP Nightly Local Scrape  every night 02:30, wakes the PC, catches up if the PC was off (at most 5 hours:
+#                             Gamebreaker at its 10 s gap needs about 1h45 to scrape plus up to 2h10 for photos)
 #   MTP Hourly Local Rechecks hourly at :41 from 1 Nov 2026 (adaptive re-checks for local shops)
 #   MTP Shop Requests         every 15 minutes, hidden window: checks shops added on the admin Add shop page
 #                             (does not wake the PC; a run that is still going makes the next one skip)
@@ -30,7 +31,7 @@ function Install($name, $script, $trigger, $limit, [switch]$Hidden, [switch]$NoW
   Get-ScheduledTask -TaskName $name | Select-Object TaskName, State
 }
 
-Install 'MTP Nightly Local Scrape' 'run-local.ps1' (New-ScheduledTaskTrigger -Daily -At '02:30') (New-TimeSpan -Hours 4)
+Install 'MTP Nightly Local Scrape' 'run-local.ps1' (New-ScheduledTaskTrigger -Daily -At '02:30') (New-TimeSpan -Hours 5)
 
 $hourly = New-ScheduledTaskTrigger -Once -At ([datetime]'2026-11-01T00:41:00') -RepetitionInterval (New-TimeSpan -Hours 1)
 Install 'MTP Hourly Local Rechecks' 'run-local-due.ps1' $hourly (New-TimeSpan -Minutes 55)

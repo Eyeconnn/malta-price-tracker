@@ -28,7 +28,9 @@
           "label_selector": ".atoz-price__name",
           "ignore_selector": ".atoz-price__teaser",
           "was_label": "List price"
-        }
+        },
+        "images_per_run": 600,
+        "images_minutes": 45
       },
       "notes": "~5,250 products; very slow server. SKUs often real UPC/EAN barcodes. Refuses GitHub Actions (datacenter) IPs with 202/403 (tested 20 Oct): runs from the local machine."
     },
@@ -43,7 +45,9 @@
       "config": {
         "page_size": 100,
         "mpn_from_sku": "^[A-Z]{2,4}-[A-Z0-9]{1,5}-([A-Z0-9][A-Z0-9.-/]{3,})$",
-        "runner": "local"
+        "runner": "local",
+        "images_per_run": 600,
+        "images_minutes": 45
       },
       "notes": "~1,480 products. House SKUs embed part numbers. Refuses GitHub Actions (datacenter) IPs with 202/403 (tested 20 Oct): runs from the local machine."
     },
@@ -62,7 +66,9 @@
         ],
         "min_delay_ms": 2500,
         "max_delay_ms": 5000,
-        "runner": "local"
+        "runner": "local",
+        "images_per_run": 600,
+        "images_minutes": 45
       },
       "notes": "~3,000 products. GraphQL errors, no sitemap: category crawl only. Refuses GitHub Actions (datacenter) IPs with 202/403 (tested 20 Oct): runs from the local machine."
     },
@@ -81,7 +87,9 @@
         ],
         "graphql": true,
         "page_size": 100,
-        "mpn_from_sku": "^(.+)$"
+        "mpn_from_sku": "^(.+)$",
+        "images_per_run": 600,
+        "images_minutes": 45
       },
       "notes": "Magento 2. Storefront GraphQL allowed by robots.txt: whole catalogue (~4,250) via products(category_id 2). robots.txt Crawl-delay 5."
     },
@@ -93,7 +101,10 @@
       "adapter": "shopify",
       "tier": "P1",
       "active": true,
-      "config": {},
+      "config": {
+        "images_per_run": 1000,
+        "images_minutes": 150
+      },
       "notes": null
     },
     {
@@ -147,7 +158,9 @@
           }
         },
         "sku_is_gtin": true,
-        "runner": "local"
+        "runner": "local",
+        "images_per_run": 600,
+        "images_minutes": 45
       },
       "notes": "Custom shop. Sitemap has no products; categories from /en/shop.htm, 24 per page. \"Not Available Online\" products show prices but count as out of stock. Refuses GitHub Actions IPs (403, 20 Oct): runs locally."
     },
@@ -173,7 +186,10 @@
       "adapter": "shopify",
       "tier": "P1",
       "active": true,
-      "config": {},
+      "config": {
+        "images_per_run": 1000,
+        "images_minutes": 150
+      },
       "notes": "M&S, LC Waikiki, ALDO, GEOX, Punt Roma."
     },
     {
@@ -184,7 +200,10 @@
       "adapter": "shopify",
       "tier": "P1",
       "active": true,
-      "config": {},
+      "config": {
+        "images_per_run": 1000,
+        "images_minutes": 150
+      },
       "notes": null
     },
     {
@@ -195,7 +214,10 @@
       "adapter": "shopify",
       "tier": "P1",
       "active": true,
-      "config": {},
+      "config": {
+        "images_per_run": 1000,
+        "images_minutes": 150
+      },
       "notes": "Keep tags (some products tagged Black Friday 30%)."
     },
     {
@@ -206,7 +228,10 @@
       "adapter": "shopify",
       "tier": "P1",
       "active": true,
-      "config": {},
+      "config": {
+        "images_per_run": 1000,
+        "images_minutes": 150
+      },
       "notes": null
     },
     {
@@ -217,7 +242,10 @@
       "adapter": "shopify",
       "tier": "P1",
       "active": true,
-      "config": {},
+      "config": {
+        "images_per_run": 1000,
+        "images_minutes": 150
+      },
       "notes": "Leaves SKUs blank."
     },
     {
@@ -228,7 +256,10 @@
       "adapter": "shopify",
       "tier": "P1",
       "active": true,
-      "config": {},
+      "config": {
+        "images_per_run": 1000,
+        "images_minutes": 150
+      },
       "notes": "Keep tags (e.g. NOTINCBF25)."
     },
     {
@@ -239,7 +270,10 @@
       "adapter": "shopify",
       "tier": "P1",
       "active": true,
-      "config": {},
+      "config": {
+        "images_per_run": 1000,
+        "images_minutes": 150
+      },
       "notes": null
     },
     {
@@ -265,7 +299,9 @@
       "active": true,
       "config": {
         "page_size": 100,
-        "runner": "local"
+        "runner": "local",
+        "images_per_run": 600,
+        "images_minutes": 45
       },
       "notes": "Refuses GitHub Actions (datacenter) IPs with 202/403 (tested 20 Oct): runs from the local machine."
     },
@@ -277,7 +313,10 @@
       "adapter": "shopify",
       "tier": "P1",
       "active": true,
-      "config": {},
+      "config": {
+        "images_per_run": 1000,
+        "images_minutes": 150
+      },
       "notes": null
     },
     {
@@ -289,7 +328,9 @@
       "tier": "P1",
       "active": true,
       "config": {
-        "page_size": 100
+        "page_size": 100,
+        "images_per_run": 600,
+        "images_minutes": 45
       },
       "notes": "~16,700 products."
     },
@@ -306,7 +347,9 @@
         "min_delay_ms": 10000,
         "max_delay_ms": 12000,
         "max_requests_per_hour": 300,
-        "runner": "local"
+        "runner": "local",
+        "images_per_run": 600,
+        "images_minutes": 130
       },
       "notes": "Crawl-delay 10 s. ~41,500 products. Refuses GitHub Actions (datacenter) IPs with 202/403 (tested 20 Oct): runs from the local machine."
     },
@@ -320,7 +363,9 @@
       "active": true,
       "config": {
         "page_size": 100,
-        "runner": "local"
+        "runner": "local",
+        "images_per_run": 600,
+        "images_minutes": 45
       },
       "notes": "robots.txt blocks ?type= so variations cannot be listed. Refuses GitHub Actions (datacenter) IPs with 202/403 (tested 20 Oct): runs from the local machine."
     },
@@ -362,7 +407,9 @@
             "price": ".product-price span[id^=\"price-value-\"]",
             "old_price": ".old-product-price span"
           }
-        }
+        },
+        "images_per_run": 600,
+        "images_minutes": 45
       },
       "notes": "nopCommerce. Listing tiles carry prices; no JSON-LD (microdata gtin/mpn empty, availability unreliable), so stock is left unknown. Use https."
     },
@@ -374,7 +421,10 @@
       "adapter": "shopify",
       "tier": "P1",
       "active": true,
-      "config": {},
+      "config": {
+        "images_per_run": 1000,
+        "images_minutes": 150
+      },
       "notes": "Swarovski, Furla, DKNY, Birkenstock and more."
     },
     {
@@ -385,7 +435,10 @@
       "adapter": "shopify",
       "tier": "P1",
       "active": true,
-      "config": {},
+      "config": {
+        "images_per_run": 1000,
+        "images_minutes": 150
+      },
       "notes": null
     },
     {
@@ -396,7 +449,10 @@
       "adapter": "shopify",
       "tier": "P1",
       "active": true,
-      "config": {},
+      "config": {
+        "images_per_run": 1000,
+        "images_minutes": 150
+      },
       "notes": null
     },
     {
@@ -407,7 +463,10 @@
       "adapter": "shopify",
       "tier": "P1",
       "active": true,
-      "config": {},
+      "config": {
+        "images_per_run": 1000,
+        "images_minutes": 150
+      },
       "notes": null
     },
     {
@@ -418,7 +477,10 @@
       "adapter": "shopify",
       "tier": "P1",
       "active": true,
-      "config": {},
+      "config": {
+        "images_per_run": 1000,
+        "images_minutes": 150
+      },
       "notes": null
     },
     {
@@ -429,7 +491,10 @@
       "adapter": "shopify",
       "tier": "P1",
       "active": true,
-      "config": {},
+      "config": {
+        "images_per_run": 1000,
+        "images_minutes": 150
+      },
       "notes": null
     },
     {
@@ -440,7 +505,10 @@
       "adapter": "shopify",
       "tier": "P1",
       "active": true,
-      "config": {},
+      "config": {
+        "images_per_run": 1000,
+        "images_minutes": 150
+      },
       "notes": null
     },
     {
@@ -463,7 +531,9 @@
       "tier": "P2",
       "active": true,
       "config": {
-        "page_size": 100
+        "page_size": 100,
+        "images_per_run": 600,
+        "images_minutes": 45
       },
       "notes": "~2,400 products."
     },
@@ -487,7 +557,9 @@
       "tier": "P2",
       "active": true,
       "config": {
-        "page_size": 100
+        "page_size": 100,
+        "images_per_run": 600,
+        "images_minutes": 45
       },
       "notes": "~1,300 products. Test before enabling."
     },
@@ -500,7 +572,9 @@
       "tier": "P2",
       "active": true,
       "config": {
-        "page_size": 100
+        "page_size": 100,
+        "images_per_run": 600,
+        "images_minutes": 45
       },
       "notes": "Small device catalogue (~64); prices may be instalment-adjusted."
     },
@@ -512,7 +586,10 @@
       "adapter": "shopify",
       "tier": "P2",
       "active": true,
-      "config": {},
+      "config": {
+        "images_per_run": 1000,
+        "images_minutes": 150
+      },
       "notes": null
     },
     {
@@ -523,7 +600,10 @@
       "adapter": "shopify",
       "tier": "P2",
       "active": true,
-      "config": {},
+      "config": {
+        "images_per_run": 1000,
+        "images_minutes": 150
+      },
       "notes": null
     },
     {
@@ -534,7 +614,10 @@
       "adapter": "shopify",
       "tier": "P2",
       "active": true,
-      "config": {},
+      "config": {
+        "images_per_run": 1000,
+        "images_minutes": 150
+      },
       "notes": null
     },
     {
@@ -545,7 +628,10 @@
       "adapter": "shopify",
       "tier": "P2",
       "active": true,
-      "config": {},
+      "config": {
+        "images_per_run": 1000,
+        "images_minutes": 150
+      },
       "notes": "Wines and spirits."
     },
     {
@@ -589,7 +675,10 @@
       "adapter": "shopify",
       "tier": "P2",
       "active": true,
-      "config": {},
+      "config": {
+        "images_per_run": 1000,
+        "images_minutes": 150
+      },
       "notes": null
     },
     {
@@ -611,7 +700,10 @@
       "adapter": "shopify",
       "tier": "P2",
       "active": true,
-      "config": {},
+      "config": {
+        "images_per_run": 1000,
+        "images_minutes": 150
+      },
       "notes": null
     },
     {
@@ -623,7 +715,9 @@
       "tier": "P2",
       "active": true,
       "config": {
-        "page_size": 100
+        "page_size": 100,
+        "images_per_run": 600,
+        "images_minutes": 45
       },
       "notes": null
     },
@@ -637,7 +731,9 @@
       "active": true,
       "config": {
         "page_size": 100,
-        "runner": "local"
+        "runner": "local",
+        "images_per_run": 600,
+        "images_minutes": 45
       },
       "notes": "Blocks full runs from GitHub Actions IPs (403/202, 20 Oct): runs locally."
     },
@@ -651,7 +747,9 @@
       "active": true,
       "config": {
         "page_size": 100,
-        "runner": "local"
+        "runner": "local",
+        "images_per_run": 600,
+        "images_minutes": 45
       },
       "notes": "Blocks full runs from GitHub Actions IPs (403/202, 20 Oct): runs locally."
     },
@@ -675,7 +773,9 @@
       "tier": "P2",
       "active": true,
       "config": {
-        "page_size": 100
+        "page_size": 100,
+        "images_per_run": 600,
+        "images_minutes": 45
       },
       "notes": null
     },
@@ -687,7 +787,10 @@
       "adapter": "shopify",
       "tier": "P2",
       "active": true,
-      "config": {},
+      "config": {
+        "images_per_run": 1000,
+        "images_minutes": 150
+      },
       "notes": "Celio, Tom Tailor, Flormar."
     },
     {
@@ -703,7 +806,9 @@
         "min_delay_ms": 10000,
         "max_delay_ms": 12000,
         "max_requests_per_hour": 300,
-        "runner": "local"
+        "runner": "local",
+        "images_per_run": 600,
+        "images_minutes": 130
       },
       "notes": "Crawl-delay 10 s. Refuses GitHub Actions IPs (20 Oct): runs locally."
     },
@@ -717,7 +822,9 @@
       "active": true,
       "config": {
         "page_size": 100,
-        "runner": "local"
+        "runner": "local",
+        "images_per_run": 600,
+        "images_minutes": 45
       },
       "notes": "Blocks full runs from GitHub Actions IPs (403/202, 20 Oct): runs locally."
     },
@@ -744,7 +851,9 @@
         "page_size": 100,
         "min_delay_ms": 30000,
         "max_delay_ms": 32000,
-        "max_requests_per_hour": 100
+        "max_requests_per_hour": 100,
+        "images_per_run": 600,
+        "images_minutes": 130
       },
       "notes": "Crawl-delay 30 s. Apex homepage behind Cloudflare challenge but Store API answers."
     },
@@ -758,7 +867,9 @@
       "active": true,
       "config": {
         "page_size": 100,
-        "runner": "local"
+        "runner": "local",
+        "images_per_run": 600,
+        "images_minutes": 45
       },
       "notes": "Some variable products return price 0. Blocks full runs from GitHub Actions IPs (403/202, 20 Oct): runs locally."
     },
@@ -772,7 +883,9 @@
       "active": true,
       "config": {
         "page_size": 100,
-        "sku_is_gtin": true
+        "sku_is_gtin": true,
+        "images_per_run": 600,
+        "images_minutes": 45
       },
       "notes": "SKUs are EANs."
     },
@@ -801,7 +914,10 @@
       "adapter": "shopify",
       "tier": "P2",
       "active": true,
-      "config": {},
+      "config": {
+        "images_per_run": 1000,
+        "images_minutes": 150
+      },
       "notes": "Vendor field holds numeric codes."
     },
     {
@@ -812,7 +928,10 @@
       "adapter": "shopify",
       "tier": "P2",
       "active": true,
-      "config": {},
+      "config": {
+        "images_per_run": 1000,
+        "images_minutes": 150
+      },
       "notes": null
     },
     {
@@ -824,7 +943,9 @@
       "tier": "P2",
       "active": true,
       "config": {
-        "page_size": 100
+        "page_size": 100,
+        "images_per_run": 600,
+        "images_minutes": 45
       },
       "notes": "Local franchise site, ~115 products."
     },
@@ -836,7 +957,10 @@
       "adapter": "shopify",
       "tier": "P2",
       "active": true,
-      "config": {},
+      "config": {
+        "images_per_run": 1000,
+        "images_minutes": 150
+      },
       "notes": null
     },
     {
@@ -849,7 +973,9 @@
       "active": true,
       "config": {
         "page_size": 100,
-        "runner": "local"
+        "runner": "local",
+        "images_per_run": 600,
+        "images_minutes": 45
       },
       "notes": "Blocks full runs from GitHub Actions IPs (403/202, 20 Oct): runs locally."
     },
@@ -861,7 +987,10 @@
       "adapter": "shopify",
       "tier": "P2",
       "active": true,
-      "config": {},
+      "config": {
+        "images_per_run": 1000,
+        "images_minutes": 150
+      },
       "notes": "Base URL carries the /en-mt path prefix."
     }
   ]
