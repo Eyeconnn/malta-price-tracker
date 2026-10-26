@@ -343,6 +343,7 @@
           "last_page": "div.pager li.individual-page a, div.pager li.last-page a",
           "tile": "div.item-box .product-item",
           "link": ".product-title a",
+          "image": "img.product-image",
           "id": {
             "attr": "data-productid"
           },

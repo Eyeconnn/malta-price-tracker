@@ -35,6 +35,35 @@ describe('documentBase', () => {
   });
 });
 
+describe('tile pictures', () => {
+  // Eurosport (nopCommerce): a 1px data: placeholder in src, the real address in data-lazyloadsrc, and a hover
+  // picture before the main one
+  const tile = cheerio.load(`<div class="item-box"><div class="product-item">
+    <img class="second-product-image" src="data:image/gif;base64,R0lGOD" data-lazyloadsrc="https://eurosport.com.mt/images/thumbs/1_hover.jpeg">
+    <img class="product-image" src="data:image/gif;base64,R0lGOD" data-lazyloadsrc="https://eurosport.com.mt/images/thumbs/1_main.png">
+    <h2 class="product-title"><a href="/leather-workbag">Leather Workbag</a></h2>
+    <span class="price">€59.00</span>
+  </div></div>`);
+  const page = 'https://www.eurosport.com.mt/men?pagesize=72&pagenumber=1';
+  const euro = { tile: 'div.item-box .product-item', link: '.product-title a', price: '.price' } as never;
+
+  it('reads a lazy-loaded address and never the data: placeholder', () => {
+    const [r] = parseTiles(tile, page, euro);
+    expect(r!.image_url).toBe('https://eurosport.com.mt/images/thumbs/1_hover.jpeg');
+  });
+
+  it('takes the main picture when the config names it', () => {
+    const [r] = parseTiles(tile, page, { ...(euro as object), image: 'img.product-image' } as never);
+    expect(r!.image_url).toBe('https://eurosport.com.mt/images/thumbs/1_main.png');
+  });
+
+  it('has no picture when only a placeholder is there', () => {
+    const $ = cheerio.load('<div class="t"><a href="/x">X</a><img src="data:image/gif;base64,R0lGOD"></div>');
+    const [r] = parseTiles($, page, { tile: 'div.t', link: 'a' } as never);
+    expect(r!.image_url).toBeNull();
+  });
+});
+
 describe('parseTiles with a base href', () => {
   it('resolves relative product links and images against the base', () => {
     const [r] = parseTiles(page('<base href="https://www.telecom.com.mt/" />'), PAGE, config);

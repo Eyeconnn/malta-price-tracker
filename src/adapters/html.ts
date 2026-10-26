@@ -15,6 +15,8 @@ import { firstLdProduct } from './jsonld.js';
  *                    given as [regex, replacement-with-{page}]
  *   last_page        selector whose numbers (text or data-page) give the last page number
  *   tile, link, title, brand, sku, price, old_price, stock   selectors inside a listing tile
+ *   image            optional selector of the tile's main picture (default: its first img); lazy-loaded addresses are
+ *                    read from data-src, data-lazysrc or data-lazyloadsrc before src
  *   id               { attr: "data-productid" } on the tile, or { url_regex: "/webshop/(\\d+)/" }
  *   in_stock / out_of_stock   regexes for the stock text
  *   own_text         list of field names whose value is the element's own text (no child elements)
@@ -43,6 +45,7 @@ interface HtmlConfig extends Fields {
   max_categories?: number;
   tile: string;
   link: string;
+  image?: string;
   id?: { attr?: string; url_regex?: string };
   in_stock?: string;
   out_of_stock?: string;
@@ -97,6 +100,15 @@ function text($: cheerio.CheerioAPI, scope: cheerio.Cheerio<never>, sel: string 
   return emptyToNull(t.replace(/\s+/g, ' '));
 }
 
+/** A tile picture's address: a lazy-loading attribute first (nopCommerce writes data-lazyloadsrc), never a data: placeholder. */
+export function tileImage(img: { attr(name: string): string | undefined }): string | undefined {
+  for (const attr of ['data-src', 'data-lazysrc', 'data-lazyloadsrc', 'src']) {
+    const v = img.attr(attr)?.trim();
+    if (v && !v.startsWith('data:')) return v;
+  }
+  return undefined;
+}
+
 function stockFrom(t: string | null, c: HtmlConfig): boolean | null {
   if (!t) return null;
   if (c.out_of_stock && new RegExp(c.out_of_stock, 'i').test(t)) return false;
@@ -145,8 +157,7 @@ export function parseTiles($: cheerio.CheerioAPI, page: string, c: HtmlConfig): 
     r.was_price_cents = old && r.price_cents !== null && old > r.price_cents ? old : null;
     r.on_sale = r.was_price_cents !== null;
     r.in_stock = stockFrom(text($, t, c.stock, own.has('stock')), c);
-    const img = t.find('img').first();
-    r.image_url = abs(img.attr('data-src') ?? img.attr('data-lazysrc') ?? (img.attr('src')?.startsWith('data:') ? undefined : img.attr('src')), base);
+    r.image_url = abs(tileImage(c.image ? t.find(c.image).first() : t.find('img').first()), base);
     out.push(r);
   });
   return out;
