@@ -115,8 +115,15 @@ class StorageError extends Error {}
  * tries its next URL only when the one before failed. Only a small copy is stored (photo.ts: WebP, 480 px,
  * no metadata) under img/<sha256 of the original>.webp; the same original is stored once. An image URL is fetched
  * at most once: later products with the same URL are linked to the stored row.
+ *
+ * opts (the daytime catch-up, src/pipeline/catchUp.ts): perRun replaces the shop's images_per_run and until (epoch
+ * ms) replaces its images_minutes deadline. The pace is always the fetcher's: no delay is shortened.
  */
-export async function downloadImagesForShop(shop: Shop, deps: Partial<ImageDeps> = {}): Promise<{ downloaded: number; linked: number }> {
+export async function downloadImagesForShop(
+  shop: Shop,
+  deps: Partial<ImageDeps> = {},
+  opts: { perRun?: number; until?: number } = {},
+): Promise<{ downloaded: number; linked: number }> {
   // off until IMAGES_ENABLED=on is set for the scrape (to go in scripts/run-local.ps1 and the scrape workflows)
   if (!/^(1|on|true|yes)$/i.test(process.env.IMAGES_ENABLED ?? '')) {
     console.log(`[${shop.slug}] images skipped: IMAGES_ENABLED is not on`);
@@ -145,8 +152,8 @@ export async function downloadImagesForShop(shop: Shop, deps: Partial<ImageDeps>
     console.error(`[${shop.slug}] images skipped: R2 holds ${(stored / 1e9).toFixed(2)} GB, the cap is ${PHOTO_STORAGE_CAP_BYTES / 1e9} GB`);
     return { downloaded: 0, linked };
   }
-  const budget = Number(shop.config.images_per_run ?? 300);
-  const deadline = Date.now() + Number(shop.config.images_minutes ?? 20) * 60_000;
+  const budget = opts.perRun ?? Number(shop.config.images_per_run ?? 300);
+  const deadline = opts.until ?? Date.now() + Number(shop.config.images_minutes ?? 20) * 60_000;
   // more groups than requests: a fetcher that gives up leaves its groups for the next run, and others may follow
   const groups = await photoCandidates(sql, shop.id, budget * 3);
   if (!groups.length) return { downloaded: 0, linked };
@@ -228,6 +235,26 @@ export async function downloadImagesForShop(shop: Shop, deps: Partial<ImageDeps>
   await linkProducts(sql, shop.id);
   console.log(`[${shop.slug}] images: ${downloaded} groups got a photo, ${failed} failed, ${requests} requests`);
   return { downloaded, linked };
+}
+
+/**
+ * Gives the shop's site rows that have no photo yet the stored copy of one of their variants (the row's own
+ * variant first, then the most recently seen), so a photo stored during the day shows on the site before the next
+ * site-build, which recomputes every row. Only image_key changes (never updated_at, which decides what is shown).
+ */
+export async function refreshSiteImageKeys(sql: postgres.Sql, shopId: number): Promise<number> {
+  const res = await sql`
+    update site_products sp set image_key = x.r2_key
+    from (
+      select distinct on (s2.id) s2.id, i.r2_key
+      from site_products s2
+      join products p on p.shop_id = s2.shop_id and coalesce(p.parent_external_id, p.external_id) = s2.group_key
+      join images i on i.id = p.image_id and i.r2_key like 'img/%'
+      where s2.shop_id = ${shopId} and s2.image_key is null
+      order by s2.id, (p.id = s2.rep_product_id) desc, p.last_seen desc, p.id
+    ) x
+    where sp.id = x.id`;
+  return res.count;
 }
 
 /**

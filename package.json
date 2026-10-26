@@ -13,6 +13,7 @@
     "seed": "tsx src/cli/seed.ts",
     "scrape": "tsx src/cli/scrape.ts",
     "scrape-due": "tsx src/cli/scrape-due.ts",
+    "photos": "tsx src/cli/photos.ts",
     "summary": "tsx src/cli/summary.ts",
     "snapshot": "tsx src/cli/snapshot.ts",
     "site-build": "tsx src/cli/site-build.ts",

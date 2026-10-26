@@ -6,9 +6,11 @@
 #                             (does not wake the PC; a run that is still going makes the next one skip)
 #   MTP Name Normaliser       every day 05:00 (after the scrape), hidden window, clean names for new or changed
 #                             groups, capped by batches and cost (does not wake the PC; at most 4 hours)
+#   MTP Daytime Photos        every day 08:00 until midnight, hidden window: the product photos of local shops the
+#                             nightly scrape had no time for, at each shop's own pace (does not wake the PC)
 # Run from the main checkout (the tasks run the scripts of the checkout this file is in):
 #   powershell -ExecutionPolicy Bypass -File scripts\install-tasks.ps1
-# Remove: Unregister-ScheduledTask -TaskName 'MTP Nightly Local Scrape','MTP Hourly Local Rechecks','MTP Shop Requests','MTP Name Normaliser'
+# Remove: Unregister-ScheduledTask -TaskName 'MTP Nightly Local Scrape','MTP Hourly Local Rechecks','MTP Shop Requests','MTP Name Normaliser','MTP Daytime Photos'
 $repo = Split-Path -Parent $PSScriptRoot
 $ps = "$env:SystemRoot\System32\WindowsPowerShell\v1.0\powershell.exe"
 
@@ -43,3 +45,7 @@ Install 'MTP Shop Requests' 'run-shop-requests.ps1' $quarterly (New-TimeSpan -Ho
 
 Install 'MTP Name Normaliser' 'run-names-nightly.ps1' (New-ScheduledTaskTrigger -Daily -At '05:00') (New-TimeSpan -Hours 4) -Hidden -NoWake `
   -description 'Malta price tracker (MTPIndex): nightly clean product names with Claude Code (capped by batches and cost)'
+
+# the photo catch-up stops itself at midnight Malta time (pnpm photos --until 24:00); 16 hours is a backstop
+Install 'MTP Daytime Photos' 'run-photos.ps1' (New-ScheduledTaskTrigger -Daily -At '08:00') (New-TimeSpan -Hours 16) -Hidden -NoWake `
+  -description 'Malta price tracker (MTPIndex): daytime catch-up of product photos for local shops, at each shop''s own pace'

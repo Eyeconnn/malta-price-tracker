@@ -15,7 +15,7 @@ vi.mock('../../src/http/safeNet.js', () => ({
     return net.route(url);
   }),
 }));
-const { downloadImagesForShop, photoCandidates, photoStorage, PHOTO_STORAGE_CAP_BYTES } = await import('../../src/pipeline/images.js');
+const { downloadImagesForShop, photoCandidates, photoStorage, refreshSiteImageKeys, PHOTO_STORAGE_CAP_BYTES } = await import('../../src/pipeline/images.js');
 const { ShopAbortError, ShopFetcher } = await import('../../src/http/fetcher.js');
 
 const PORT = 55481;
@@ -142,6 +142,39 @@ describe.skipIf(!process.env.SITE_BUILD_TEST_DB)('photo downloader on PGlite', (
     const { fetchImage, put } = fakes();
     await downloadImagesForShop({ ...shop, config: { images_per_run: 1 } } as Shop, { sql, fetchImage, put });
     expect(fetchImage).toHaveBeenCalledTimes(1);
+  });
+
+  it('the catch-up options replace the shop budget and deadline', async () => {
+    const { fetchImage, put } = fakes();
+    // the shop allows one request a run, the catch-up asks for more
+    await downloadImagesForShop({ ...shop, config: { images_per_run: 1 } } as Shop, { sql, fetchImage, put }, { perRun: 3, until: Date.now() + 60_000 });
+    expect(fetchImage).toHaveBeenCalledTimes(3);
+    fetchImage.mockClear();
+    // a deadline that has passed: no request at all
+    await sql`delete from images where r2_key is null`;
+    await downloadImagesForShop(shop, { sql, fetchImage, put }, { perRun: 100, until: Date.now() - 1 });
+    expect(fetchImage).not.toHaveBeenCalled();
+  });
+
+  it('shows a stored photo on the site row at once: the row variant first, only rows without one, updated_at kept', async () => {
+    const { fetchImage, put } = fakes();
+    await downloadImagesForShop(shop, { sql, fetchImage, put });
+    await sql`insert into site_products (shop_id, group_key, title, verdict, rep_product_id, image_key, updated_at)
+              values (1, 'G2', 'G2', 'none', 60, null, now() - interval '1 day'),
+                     (1, 'G4', 'G4', 'none', 40, 'img/kept.webp', now() - interval '1 day'),
+                     (1, 'G5', 'G5', 'none', 50, null, now() - interval '1 day')`;
+    await sql`update products set parent_external_id = 'G2' where id = 60`;
+    const before = await sql<{ group_key: string; updated_at: Date }[]>`select group_key, updated_at from site_products order by group_key`;
+    const n = await refreshSiteImageKeys(sql, 1);
+    const rows = await sql<{ group_key: string; image_key: string | null; updated_at: Date }[]>`select group_key, image_key, updated_at from site_products order by group_key`;
+    const by = Object.fromEntries(rows.map((r) => [r.group_key, r]));
+    // G1 (its 1a variant stored) and G2 got their copies; G4 keeps its own; G5 has none stored
+    expect(n).toBe(2);
+    expect(by.G1!.image_key).toBe(put.mock.calls[0]![0]);
+    expect(by.G2!.image_key).toBe(put.mock.calls[1]![0]);
+    expect(by.G4!.image_key).toBe('img/kept.webp');
+    expect(by.G5!.image_key).toBeNull();
+    for (const b of before) expect(by[b.group_key]!.updated_at.getTime()).toBe(b.updated_at.getTime());
   });
 
   it('stores the same original once', async () => {

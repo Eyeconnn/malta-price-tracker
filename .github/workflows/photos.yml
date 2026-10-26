@@ -1,0 +1,52 @@
+# Daytime photo catch-up for the cloud shops (src/cli/photos.ts): the photos the nightly scrape had no time for,
+# at each shop's own pace (Shopify photos from Shopify's image servers), until midnight Malta time. A job may run
+# 6 hours, so three runs cover 08:00 to midnight in winter (UTC+1): 07:00, 12:45 and 18:30 UTC. In summer they
+# start an hour later in Malta time and the last one still stops at midnight. A shop with nothing left returns at
+# once, so the runs end early once the backlog is clear.
+name: photos
+
+on:
+  schedule:
+    - cron: '0 7 * * *'
+    - cron: '45 12 * * *'
+    - cron: '30 18 * * *'
+  workflow_dispatch:
+    inputs:
+      shop:
+        description: 'Only this shop slug (optional)'
+        required: false
+
+concurrency:
+  group: photos
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  photos:
+    runs-on: ubuntu-latest
+    timeout-minutes: 350
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Photo catch-up
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
+          R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          R2_BUCKET: ${{ secrets.R2_BUCKET }}
+          IMAGES_ENABLED: 'on'
+          SCRAPER_USER_AGENT: ${{ vars.SCRAPER_USER_AGENT }}
+          SHOP_INPUT: ${{ inputs.shop }}
+        run: |
+          # --runner cloud stays: shops marked local never run from GitHub; stop 10 minutes before the job timeout
+          ARGS="--runner cloud --until 24:00 --minutes 335"
+          if [ -n "$SHOP_INPUT" ]; then ARGS="$ARGS --shop $SHOP_INPUT"; fi
+          pnpm photos $ARGS
