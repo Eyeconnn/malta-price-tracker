@@ -35,7 +35,8 @@ begin
   if exists (select 1 from pg_roles where rolname = 'site_reporter') then
     grant select (id, slug, name, base_url, active, site_hidden, unavailable_reason) on shops to site_reporter;
     grant select (id, origin, status, reason, source, ip_hash, requested_at) on shop_requests to site_reporter;
-    grant insert (origin, display_name, source, ip_hash) on shop_requests to site_reporter;
+    -- never display_name: a visitor cannot name a shop that may go live on its own
+    grant insert (origin, source, ip_hash) on shop_requests to site_reporter;
     grant usage on sequence shop_requests_id_seq to site_reporter;
   end if;
 end

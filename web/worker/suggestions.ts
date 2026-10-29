@@ -5,9 +5,10 @@
 // A known address is answered at once: listed on the site, being checked, or why it cannot be tracked (a reason
 // code, shown as fixed text: never the raw error or the owner's notes). A new address becomes a shop request with
 // source 'visitor', checked by the PC task like the owner's; a shop that passes goes live on its own.
-// The Worker never fetches the address (as for the admin form). Responses are never cached.
+// The Worker never fetches the address (as for the admin form). A visitor cannot name the shop: a shop that passes
+// goes live under the name its own site gives, so no visitor text is ever published. Responses are never cached.
 import { neon } from '@neondatabase/serverless';
-import { NAME_MAX, cleanDisplayName, hostKey, parseShopAddress } from '../../src/shop-requests/address.js';
+import { hostKey, parseShopAddress } from '../../src/shop-requests/address.js';
 import { isUnavailableReason, REASON_TEXT, SCOPE_NOTE, type UnavailableReason } from '../../src/shop-requests/reasons.js';
 import { MAX_QUEUED, QUEUED } from '../../src/shop-requests/statuses.js';
 import type { Env } from './env.js';
@@ -43,7 +44,7 @@ export interface SuggestionStore {
   /** every shop, and every request newest first */
   known(): Promise<{ shops: KnownShop[]; requests: KnownRequest[] }>;
   /** inserts a visitor request unless the network or the queue is at its limit; retryAfter in seconds */
-  insert(s: { origin: string; name: string | null; ipHash: string }): Promise<InsertSuggestion>;
+  insert(s: { origin: string; ipHash: string }): Promise<InsertSuggestion>;
 }
 
 export interface SuggestionDeps {
@@ -96,7 +97,7 @@ export function createSuggestionStore(db: WriteRunner): SuggestionStore {
     // One transaction: a per-network advisory lock (parallel requests from one client cannot all pass the count),
     // the counts, and an insert that only happens while every count is under its limit. No RETURNING: the role
     // reads only the public columns.
-    async insert({ origin, name, ipHash: hash }) {
+    async insert({ origin, ipHash: hash }) {
       const day = `from shop_requests where source = 'visitor' and ip_hash = $1::text and requested_at > now() - interval '1 day'`;
       const open = `from shop_requests where status = any($2::text[])`;
       try {
@@ -110,12 +111,12 @@ export function createSuggestionStore(db: WriteRunner): SuggestionStore {
             params: [hash, [...QUEUED]],
           },
           {
-            text: `insert into shop_requests (origin, display_name, source, ip_hash)
-              select $3::text, $4::text, 'visitor', $1::text
-              where (select count(*) ${day}) < $5::int
-                and (select count(*) ${open} and source = 'visitor') < $6::int
-                and (select count(*) ${open}) < $7::int`,
-            params: [hash, [...QUEUED], origin, name, SUGGESTIONS_PER_DAY, MAX_VISITOR_QUEUED, MAX_QUEUED],
+            text: `insert into shop_requests (origin, source, ip_hash)
+              select $3::text, 'visitor', $1::text
+              where (select count(*) ${day}) < $4::int
+                and (select count(*) ${open} and source = 'visitor') < $5::int
+                and (select count(*) ${open}) < $6::int`,
+            params: [hash, [...QUEUED], origin, SUGGESTIONS_PER_DAY, MAX_VISITOR_QUEUED, MAX_QUEUED],
           },
         ]);
         const row = counted![0] ?? {};
@@ -156,13 +157,10 @@ export async function handleSuggestion(req: Request, env: Env, url: URL, deps: S
   if ('response' in read) return read.response;
   const b = read.body;
   if (typeof b !== 'object' || b === null || Array.isArray(b)) return bad('body');
-  const { url: raw, name: rawName, turnstileToken } = b as Record<string, unknown>;
+  const { url: raw, turnstileToken } = b as Record<string, unknown>;
   if (typeof raw !== 'string') return bad('url', { reason: 'empty' });
   const address = parseShopAddress(raw);
   if (!address.ok) return bad('url', { reason: address.problem });
-  if (rawName !== undefined && rawName !== null && typeof rawName !== 'string') return bad('name');
-  const name = cleanDisplayName(rawName as string | null | undefined);
-  if (name !== null && name.length > NAME_MAX) return bad('name');
   if (turnstileToken !== undefined && turnstileToken !== null && (typeof turnstileToken !== 'string' || turnstileToken.length > TOKEN_MAX)) return bad('turnstileToken');
 
   const ip = req.headers.get('cf-connecting-ip');
@@ -179,7 +177,7 @@ export async function handleSuggestion(req: Request, env: Env, url: URL, deps: S
 
   // no cf-connecting-ip only happens off Cloudflare (local dev): one shared bucket
   const hash = await ipHash(env.IP_SALT, ipBucket(ip || 'unknown'));
-  const out = await store.insert({ origin: address.origin, name, ipHash: hash });
+  const out = await store.insert({ origin: address.origin, ipHash: hash });
   if (out.ok) return json({ outcome: 'queued' } satisfies SuggestionAnswer, 201);
   if (out.limit === 'duplicate') return json({ outcome: 'checking' } satisfies SuggestionAnswer);
   if (out.limit === 'network') return json({ error: 'rate limited' }, 429, { 'retry-after': String(out.retryAfter) });

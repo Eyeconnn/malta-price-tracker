@@ -82,7 +82,7 @@ export function SuggestShop() {
     setSending(true);
     setShown(null);
     try {
-      const answer = await api.suggestShop({ url: address.trim(), name: null });
+      const answer = await api.suggestShop({ url: address.trim() });
       setShown({ answer, host: parsed.host });
       if (answer.outcome === 'queued') setAddress('');
     } catch (err) {

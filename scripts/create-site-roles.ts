@@ -21,7 +21,8 @@ const ROLES = [
       // Suggest a shop on /shops (migration 018)
       'select (id, slug, name, base_url, active, site_hidden, unavailable_reason) on shops',
       'select (id, origin, status, reason, source, ip_hash, requested_at) on shop_requests',
-      'insert (origin, display_name, source, ip_hash) on shop_requests',
+      // never display_name: a visitor cannot name a shop that may go live on its own
+      'insert (origin, source, ip_hash) on shop_requests',
       'usage on sequence shop_requests_id_seq',
     ],
   },

@@ -137,7 +137,7 @@ export type { SuggestionAnswer };
  * POST /api/shop-suggestions; resolves with the answer (200 or 201), otherwise throws ApiError (400: field and the
  * address problem as `reason`; 429: rate limited with retryAfter; 503: the check queue is full).
  */
-async function suggestShop(body: { url: string; name: string | null }): Promise<SuggestionAnswer> {
+async function suggestShop(body: { url: string }): Promise<SuggestionAnswer> {
   const res = await fetch('/api/shop-suggestions', {
     method: 'POST',
     headers: { 'content-type': 'application/json', accept: 'application/json' },

@@ -99,13 +99,13 @@ function setup(store: ReturnType<typeof fakeStore>, opts: { env?: Partial<Env>; 
 }
 
 describe('POST /api/shop-suggestions', () => {
-  it('queues a new address as its origin, with the name and a salted hash of the network', async () => {
+  it('queues a new address as its origin with a salted hash of the network; a visitor name is ignored', async () => {
     const store = fakeStore();
     const res = await setup(store).send({ url: '  Shop.Example.mt/some/page ', name: ' My  Shop ' });
     expect(res.status).toBe(201);
     expect(await res.json()).toEqual({ outcome: 'queued' });
     expect(res.headers.get('cache-control')).toBe('no-store');
-    expect(store.insert).toHaveBeenCalledWith({ origin: 'https://shop.example.mt', name: 'My Shop', ipHash: expect.stringMatching(/^[0-9a-f]{64}$/) });
+    expect(store.insert).toHaveBeenCalledWith({ origin: 'https://shop.example.mt', ipHash: expect.stringMatching(/^[0-9a-f]{64}$/) });
   });
 
   it('answers a known shop at once and stores nothing', async () => {
@@ -130,8 +130,6 @@ describe('POST /api/shop-suggestions', () => {
       expect(await res.json(), url).toEqual({ error: 'url', reason });
     }
     expect((await setup(store).send({ url: 42 })).status).toBe(400);
-    expect((await setup(store).send({ url: 'shop.example.mt', name: 7 })).status).toBe(400);
-    expect((await setup(store).send({ url: 'shop.example.mt', name: 'x'.repeat(81) })).status).toBe(400);
     expect(store.known).not.toHaveBeenCalled();
   });
 
@@ -228,21 +226,22 @@ describe('suggestion store on PGlite as site_reporter', () => {
     await expect(asReporter('select config from shops')).rejects.toThrow(/permission denied/);
     await expect(asReporter(`update shop_requests set status = 'pending'`)).rejects.toThrow(/permission denied/);
     await expect(asReporter(`insert into shop_requests (origin, status) values ('https://x.example.mt', 'active')`)).rejects.toThrow(/permission denied/);
+    await expect(asReporter(`insert into shop_requests (origin, display_name) values ('https://x.example.mt', 'Free money')`)).rejects.toThrow(/permission denied/);
   });
 
   it('inserts a visitor request as pending, then refuses the same shop with or without www.', async () => {
-    expect(await store.insert({ origin: 'https://one.example.mt', name: 'One', ipHash: 'h1' })).toEqual({ ok: true });
+    expect(await store.insert({ origin: 'https://one.example.mt', ipHash: 'h1' })).toEqual({ ok: true });
     const { rows } = await pg.query<Record<string, unknown>>(`select origin, display_name, status, source, ip_hash from shop_requests where origin = 'https://one.example.mt'`);
-    expect(rows).toEqual([{ origin: 'https://one.example.mt', display_name: 'One', status: 'pending', source: 'visitor', ip_hash: 'h1' }]);
-    expect(await store.insert({ origin: 'https://www.one.example.mt', name: null, ipHash: 'h9' })).toEqual({ ok: false, limit: 'duplicate' });
+    expect(rows).toEqual([{ origin: 'https://one.example.mt', display_name: null, status: 'pending', source: 'visitor', ip_hash: 'h1' }]);
+    expect(await store.insert({ origin: 'https://www.one.example.mt', ipHash: 'h9' })).toEqual({ ok: false, limit: 'duplicate' });
   });
 
   it(`allows ${SUGGESTIONS_PER_DAY} per network per day, ignoring older ones, with a retry time`, async () => {
     await pg.exec(`insert into shop_requests (origin, source, ip_hash, status, requested_at) values ('https://old.example.mt', 'visitor', 'h2', 'failed', now() - interval '25 hours')`);
     await pg.exec(`insert into shop_requests (origin, source, ip_hash, status, requested_at) values ('https://older.example.mt', 'visitor', 'h2', 'failed', now() - interval '20 hours')`);
-    expect(await store.insert({ origin: 'https://two.example.mt', name: null, ipHash: 'h2' })).toEqual({ ok: true });
-    expect(await store.insert({ origin: 'https://three.example.mt', name: null, ipHash: 'h2' })).toEqual({ ok: true });
-    const fourth = await store.insert({ origin: 'https://four.example.mt', name: null, ipHash: 'h2' });
+    expect(await store.insert({ origin: 'https://two.example.mt', ipHash: 'h2' })).toEqual({ ok: true });
+    expect(await store.insert({ origin: 'https://three.example.mt', ipHash: 'h2' })).toEqual({ ok: true });
+    const fourth = await store.insert({ origin: 'https://four.example.mt', ipHash: 'h2' });
     expect(fourth).toMatchObject({ ok: false, limit: 'network' });
     // the oldest counted one (20 hours ago) leaves the window in about 4 hours
     const retry = (fourth as { retryAfter: number }).retryAfter;
@@ -254,17 +253,17 @@ describe('suggestion store on PGlite as site_reporter', () => {
   it(`at most ${MAX_VISITOR_QUEUED} visitor suggestions wait at once; the owner's own requests are not counted against visitors`, async () => {
     const waiting = Number((await pg.query<{ n: number }>(`select count(*)::int as n from shop_requests where source = 'visitor' and status in ('pending', 'checking')`)).rows[0]!.n);
     for (let i = waiting; i < MAX_VISITOR_QUEUED; i++) {
-      expect(await store.insert({ origin: `https://fill${i}.example.mt`, name: null, ipHash: `fill${i}` })).toEqual({ ok: true });
+      expect(await store.insert({ origin: `https://fill${i}.example.mt`, ipHash: `fill${i}` })).toEqual({ ok: true });
     }
-    expect(await store.insert({ origin: 'https://over.example.mt', name: null, ipHash: 'h-over' })).toEqual({ ok: false, limit: 'queue' });
+    expect(await store.insert({ origin: 'https://over.example.mt', ipHash: 'h-over' })).toEqual({ ok: false, limit: 'queue' });
     await pg.exec(`update shop_requests set status = 'failed' where origin = 'https://fill9.example.mt'`);
-    expect(await store.insert({ origin: 'https://over.example.mt', name: null, ipHash: 'h-over' })).toEqual({ ok: true });
+    expect(await store.insert({ origin: 'https://over.example.mt', ipHash: 'h-over' })).toEqual({ ok: true });
   });
 
   it('the whole queue cap holds too', async () => {
     await pg.exec(`update shop_requests set status = 'failed' where source = 'visitor'`);
     const values = Array.from({ length: 20 }, (_, i) => `('https://admin${i}.example.mt')`).join(', ');
     await pg.exec(`insert into shop_requests (origin) values ${values}`);
-    expect(await store.insert({ origin: 'https://late.example.mt', name: null, ipHash: 'h-late' })).toEqual({ ok: false, limit: 'queue' });
+    expect(await store.insert({ origin: 'https://late.example.mt', ipHash: 'h-late' })).toEqual({ ok: false, limit: 'queue' });
   });
 });

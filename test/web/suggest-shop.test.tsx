@@ -40,7 +40,7 @@ describe('SuggestShop', () => {
     const [url, init] = fetch.mock.calls[0]!;
     expect(url).toBe('/api/shop-suggestions');
     expect(init?.method).toBe('POST');
-    expect(JSON.parse(String(init?.body))).toEqual({ url: 'www.newshop.com.mt', name: null });
+    expect(JSON.parse(String(init?.body))).toEqual({ url: 'www.newshop.com.mt' });
     expect((screen.getByRole('textbox', { name: 'Shop web address' }) as HTMLInputElement).value).toBe('');
   });
 
