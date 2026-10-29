@@ -13,9 +13,14 @@ Crawl4AI is only the renderer. Every rule of the project stays with the TypeScri
   page and data request the browser sends to the shop counts against the run's request caps.
 - backoff on 429 and 5xx, and the shop-only host list, are the fetcher's as for any request.
 - no stealth mode, no random user agents, no simulated user, no navigator overrides, no anti-bot retries, no
-  proxies. A bot check is returned as it is and the request fails; it is never worked around.
-- the browser loads no images, media or fonts, refuses any request to a private, loopback or link-local address,
-  and may navigate only on the shop's own hosts.
+  proxies. A bot check is returned as it is and the request fails; it is never worked around. Crawl4AI's built-in
+  launch flags that hide automation (`AutomationControlled`), skip certificate checks or turn off the sandbox are
+  removed, and HTTPS certificate errors are not ignored.
+- the network guard (`guard_proxy.py`): every browser connection, loopback included, goes through a local proxy that
+  allows only the shop's own hosts on ports 443 and 80, refuses private, loopback and link-local addresses, and
+  connects to the exact address it checked, so DNS rebinding, redirects, WebSockets and service workers cannot reach
+  this PC's network. The page's own routing also loads no images, media or fonts, nothing from other sites, and
+  closes WebSockets.
 
 ## Install (once, on the PC that runs the local shops)
 
@@ -41,4 +46,5 @@ on a machine without the renderer (GitHub's runners) stops at once with a clear 
 ## Tests
 
 - `pnpm vitest run test/renderer-fetcher.test.ts`: the fetcher's rules around a fake renderer.
-- `tools/renderer/.venv/Scripts/python.exe -m unittest tools/renderer/test_render.py`: the address filter.
+- `tools/renderer/.venv/Scripts/python.exe -m unittest tools/renderer/test_render.py`: the address filter, the
+  guard, and a real Chromium that must not reach a local server.

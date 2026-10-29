@@ -8,9 +8,13 @@ backoff on 429 and 5xx, request caps, and the shop-only host list. This process 
 - our SCRAPER_USER_AGENT, as given by the caller; no stealth, no random user agents, no simulated user, no
   navigator overrides, no anti-bot retries, no proxies, no fallback fetcher (all pinned off below). A page that
   answers with a bot check is returned as it is (its status) and is never worked around.
-- every browser request is filtered: images, media and fonts are not loaded (fewer requests to the shop); a
-  request to a private, loopback or link-local address is refused; a page navigation (including redirects) may go
-  only to the shop's own hosts.
+- the network guard (guard_proxy.py): every browser connection, loopback included, goes through a local proxy that
+  allows only the shop's own hosts, refuses private, loopback and link-local addresses, and connects to the exact
+  address it checked (no DNS rebinding). Redirects, WebSockets and service workers meet the same rule.
+- on top of that, the page's own request routing loads no images, media or fonts (fewer requests to the shop),
+  sends nothing to other sites, and closes every WebSocket.
+- Crawl4AI's built-in launch flags that hide automation (AutomationControlled), skip certificate checks or turn
+  off Chromium's sandbox are removed, and HTTPS certificate errors are not ignored.
 - Crawl4AI's own robots.txt check is off: it fetches robots.txt with a different user agent. The caller checks.
 - "Load more" (loadMore {button, items, maxClicks, gapMs: [min, max]}): the button is clicked at most maxClicks
   times, waiting a random gap in gapMs (the caller's 2 to 5 s or Crawl-delay) before each click, and stops when
@@ -24,11 +28,9 @@ Fetched pages are data: nothing in them is acted on here.
 """
 
 import asyncio
-import ipaddress
 import json
 import os
 import random
-import socket
 import sys
 from urllib.parse import urlsplit
 
@@ -37,6 +39,29 @@ OUT = sys.stdout
 sys.stdout = sys.stderr
 
 from crawl4ai import AsyncWebCrawler, BrowserConfig, CacheMode, CrawlerRunConfig  # noqa: E402
+from crawl4ai.browser_manager import BrowserManager  # noqa: E402
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from guard_proxy import GuardProxy, host_allowed, is_private  # noqa: E402
+
+# Crawl4AI launch flags this project never uses: hiding that the browser is automated is a way around bot
+# detection, and the others turn off certificate checks and the sandbox that protects this PC from a page
+DROPPED_FLAGS = {
+    "--disable-blink-features=AutomationControlled",
+    "--ignore-certificate-errors",
+    "--ignore-certificate-errors-spki-list",
+    "--no-sandbox",
+}
+_build_browser_args = BrowserManager._build_browser_args
+
+
+def _browser_args(self):
+    args = _build_browser_args(self)
+    args["args"] = [a for a in args["args"] if a not in DROPPED_FLAGS]
+    return args
+
+
+BrowserManager._build_browser_args = _browser_args
 
 BLOCKED_TYPES = {"image", "media", "font"}
 # the browser requests that count as requests to the shop (scripts and styles load like any visitor's)
@@ -56,24 +81,6 @@ current_load_more: dict | None = None
 clicks = 0
 
 
-def host_allowed(host: str, allowed: list[str]) -> bool:
-    host = host.lower().rstrip(".")
-    return any(host == h or host.endswith("." + h) for h in allowed)
-
-
-def is_private(host: str) -> bool:
-    """True when host is, or resolves to, any address that is not public. Fails closed."""
-    host = host.strip("[]")
-    try:
-        infos = [ipaddress.ip_address(host)]
-    except ValueError:
-        try:
-            infos = [ipaddress.ip_address(i[4][0].split("%")[0]) for i in socket.getaddrinfo(host, None)]
-        except OSError:
-            return True
-    return not infos or any(not ip.is_global or ip.is_multicast for ip in infos)
-
-
 async def on_route(route):
     global shop_requests
     req = route.request
@@ -84,13 +91,13 @@ async def on_route(route):
         if parts.scheme not in ("http", "https") or req.resource_type in BLOCKED_TYPES:
             return await route.abort()
         host = parts.hostname or ""
-        if req.is_navigation_request() and req.frame.parent_frame is None and not host_allowed(host, current_hosts):
-            print(f"refused navigation to {host}", file=sys.stderr)
+        # only the shop itself: other sites' scripts, trackers and frames are not loaded (the guard refuses them too)
+        if not host_allowed(host, current_hosts):
             return await route.abort()
         if await asyncio.to_thread(is_private, host):
             print(f"refused private address {host}", file=sys.stderr)
             return await route.abort()
-        if req.resource_type in COUNTED_TYPES and host_allowed(host, current_hosts):
+        if req.resource_type in COUNTED_TYPES:
             shop_requests += 1
         return await route.continue_()
     except Exception as e:  # a request that cannot be checked is not sent
@@ -147,9 +154,15 @@ async def before_retrieve(page, context=None, **_):
     return page
 
 
+async def close_socket(ws):
+    print(f"refused WebSocket {ws.url[:120]}", file=sys.stderr)
+    await ws.close()
+
+
 async def on_context(page, context, **_):
     if not getattr(context, "_mtp_route", False):
         await context.route("**/*", on_route)
+        await context.route_web_socket("**/*", close_socket)
         context._mtp_route = True
     if not getattr(page, "_mtp_status", False):
         page.on("response", on_response(page))
@@ -216,6 +229,8 @@ async def main():
     if not ua:
         print("MTP_USER_AGENT is not set", file=sys.stderr)
         sys.exit(2)
+    guard = GuardProxy(lambda: current_hosts)
+    port = await guard.start()
     browser = BrowserConfig(
         browser_type="chromium",
         headless=True,
@@ -224,6 +239,9 @@ async def main():
         user_agent_mode="",
         use_managed_browser=False,
         java_script_enabled=True,
+        ignore_https_errors=False,
+        # every connection through the guard; "<-loopback>" removes Chromium's own exception for local addresses
+        extra_args=[f"--proxy-server=http://127.0.0.1:{port}", "--proxy-bypass-list=<-loopback>"],
         verbose=False,
     )
     async with AsyncWebCrawler(config=browser) as crawler:
@@ -246,6 +264,7 @@ async def main():
             except Exception as e:
                 out = {"ok": False, "error": f"{type(e).__name__}: {e}"[:500]}
             send({"id": msg_id, **out})
+    await guard.close()
 
 
 if __name__ == "__main__":
