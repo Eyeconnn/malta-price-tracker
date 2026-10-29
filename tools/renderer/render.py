@@ -14,7 +14,8 @@ backoff on 429 and 5xx, request caps, and the shop-only host list. This process 
 - on top of that, the page's own request routing loads no images, media or fonts (fewer requests to the shop),
   sends nothing to other sites, and closes every WebSocket.
 - Crawl4AI's built-in launch flags that hide automation (AutomationControlled), skip certificate checks or turn
-  off Chromium's sandbox are removed, and HTTPS certificate errors are not ignored.
+  off Chromium's sandbox are removed, the sandbox is kept on (Playwright would otherwise add --no-sandbox), HTTPS
+  certificate errors are not ignored, and WebRTC may not send UDP outside the proxy.
 - Crawl4AI's own robots.txt check is off: it fetches robots.txt with a different user agent. The caller checks.
 - "Load more" (loadMore {button, items, maxClicks, gapMs: [min, max]}): the button is clicked at most maxClicks
   times, waiting a random gap in gapMs (the caller's 2 to 5 s or Crawl-delay) before each click, and stops when
@@ -58,6 +59,8 @@ _build_browser_args = BrowserManager._build_browser_args
 def _browser_args(self):
     args = _build_browser_args(self)
     args["args"] = [a for a in args["args"] if a not in DROPPED_FLAGS]
+    # Playwright adds --no-sandbox itself unless asked to keep the sandbox
+    args["chromium_sandbox"] = True
     return args
 
 
@@ -241,7 +244,13 @@ async def main():
         java_script_enabled=True,
         ignore_https_errors=False,
         # every connection through the guard; "<-loopback>" removes Chromium's own exception for local addresses
-        extra_args=[f"--proxy-server=http://127.0.0.1:{port}", "--proxy-bypass-list=<-loopback>"],
+        # WebRTC may only use the proxy, never UDP of its own, so it cannot go around the guard
+        extra_args=[
+            f"--proxy-server=http://127.0.0.1:{port}",
+            "--proxy-bypass-list=<-loopback>",
+            "--force-webrtc-ip-handling-policy=disable_non_proxied_udp",
+            "--webrtc-ip-handling-policy=disable_non_proxied_udp",
+        ],
         verbose=False,
     )
     async with AsyncWebCrawler(config=browser) as crawler:

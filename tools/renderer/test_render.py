@@ -34,9 +34,14 @@ class AddressFilter(unittest.TestCase):
         self.assertFalse(render.host_allowed("evilshop.example.mt", allowed))
 
     def test_launch_flags_that_hide_automation_or_skip_checks_are_dropped(self):
-        self.assertIn("--disable-blink-features=AutomationControlled", render.DROPPED_FLAGS)
-        self.assertIn("--ignore-certificate-errors", render.DROPPED_FLAGS)
-        self.assertIn("--no-sandbox", render.DROPPED_FLAGS)
+        from crawl4ai import BrowserConfig
+        from crawl4ai.browser_manager import BrowserManager
+
+        args = BrowserManager(browser_config=BrowserConfig(headless=True, extra_args=["--x"]))._build_browser_args()
+        for flag in ["--disable-blink-features=AutomationControlled", "--ignore-certificate-errors", "--ignore-certificate-errors-spki-list", "--no-sandbox"]:
+            self.assertNotIn(flag, args["args"])
+        self.assertIs(args["chromium_sandbox"], True)
+        self.assertIn("--x", args["args"])
 
 
 async def ask(port: int, head: str) -> bytes:
