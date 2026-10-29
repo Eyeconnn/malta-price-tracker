@@ -46,6 +46,8 @@ export type AdminShopRequest = {
   attempts: number;
   /** a request rate limited by the shop waits until then before it is checked again */
   nextCheckAt: string | null;
+  /** admin: added on this page; visitor: suggested on the public Shops page */
+  source: 'admin' | 'visitor';
   /** the shop this request created, with its stored name; null until a supported shop was saved */
   shop: { slug: string; name: string; active: boolean } | null;
 };
@@ -133,7 +135,7 @@ const iso = (v: unknown): string | null => (v === null || v === undefined ? null
 const numOrNull = (v: unknown): number | null => (v === null || v === undefined ? null : Number(v));
 
 const SELECT = `select r.id, r.origin, r.display_name, r.shop_category, r.status, r.requested_at, r.started_at, r.checked_at,
-    r.platform, r.robots, r.products_found, r.sample, r.details, r.error, r.attempts, r.next_check_at,
+    r.platform, r.robots, r.products_found, r.sample, r.details, r.error, r.attempts, r.next_check_at, r.source,
     s.slug as shop_slug, s.name as shop_name, s.active as shop_active
   from shop_requests r left join shops s on s.id = r.shop_id`;
 
@@ -155,6 +157,7 @@ function toRequest(r: Row): AdminShopRequest {
     error: str(r.error),
     attempts: Number(r.attempts ?? 0),
     nextCheckAt: iso(r.next_check_at),
+    source: r.source === 'visitor' ? 'visitor' : 'admin',
     shop:
       r.shop_slug === null || r.shop_slug === undefined
         ? null

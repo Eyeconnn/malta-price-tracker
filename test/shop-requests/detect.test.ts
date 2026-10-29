@@ -138,11 +138,11 @@ describe('probeShop', () => {
 
   it('unreachable home page or a redirect to another site is an error, not a guess', async () => {
     const f403 = fakeFetcher(O, { [`${O}/`]: { status: 403, body: 'Just a moment...' } });
-    expect(await probeShop(f403, O)).toMatchObject({ kind: 'unreachable', reason: expect.stringMatching(/HTTP 403/) });
+    expect(await probeShop(f403, O)).toMatchObject({ kind: 'unreachable', reason: expect.stringMatching(/HTTP 403/), cause: 'bot_protection' });
     const away = fakeFetcher(O, { [`${O}/`]: { redirectTo: 'https://elsewhere.example.com/' } });
-    expect(await probeShop(away, O)).toMatchObject({ kind: 'unreachable', reason: expect.stringMatching(/another site/) });
+    expect(await probeShop(away, O)).toMatchObject({ kind: 'unreachable', reason: expect.stringMatching(/another site/), cause: 'not_found' });
     const away403 = fakeFetcher(O, { [`${O}/`]: { status: 202, body: '<html>checking your browser</html>' } });
-    expect(await probeShop(away403, O)).toMatchObject({ kind: 'unreachable', reason: expect.stringMatching(/HTTP 202.*not worked around/) });
+    expect(await probeShop(away403, O)).toMatchObject({ kind: 'unreachable', reason: expect.stringMatching(/HTTP 202.*not worked around/), cause: 'bot_protection' });
   });
 
   it('robots.txt unreachable: blocked, nothing else fetched', async () => {
@@ -179,7 +179,7 @@ describe('probeShop: rate limits, bot checks, slow shops and Magento product lis
   it('a 403 from a probe is a bot check: failed, nothing more fetched', async () => {
     const f = fakeFetcher(O, { [`${O}/`]: page(fixture('unknown-home.html')), [`${O}${PROBE_PATHS.shopify}`]: { status: 403, body: 'denied' } });
     const d = await probeShop(f, O);
-    expect(d).toMatchObject({ kind: 'unreachable', reason: expect.stringMatching(/HTTP 403.*not worked around/) });
+    expect(d).toMatchObject({ kind: 'unreachable', reason: expect.stringMatching(/HTTP 403.*not worked around/), cause: 'bot_protection' });
     expect(f.requests).toHaveLength(3);
   });
 
@@ -195,7 +195,7 @@ describe('probeShop: rate limits, bot checks, slow shops and Magento product lis
   it('a Crawl-delay above 30 s needs setup, before the home page is read', async () => {
     const f = fakeFetcher(O, { [`${O}/`]: page(fixture('shopify-home.html')) }, { [O]: 'User-agent: *\nCrawl-delay: 45\n' });
     const d = await probeShop(f, O);
-    expect(d).toMatchObject({ kind: 'unsupported', platform: null, reason: expect.stringMatching(/crawl delay too long for the check/i) });
+    expect(d).toMatchObject({ kind: 'unsupported', platform: null, reason: expect.stringMatching(/crawl delay too long for the check/i), cause: 'crawl_delay' });
     expect(d.robots).toMatchObject({ crawlDelaySeconds: 45 });
     expect(f.requests).toEqual([`${O}/robots.txt`]);
   });

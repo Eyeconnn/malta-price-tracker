@@ -190,7 +190,7 @@ export async function ipHash(salt: string, bucket: string): Promise<string> {
 }
 
 /** Hostnames a Turnstile token may have been issued on: SITE_ORIGIN's and the request's own. */
-function allowedHosts(env: Env, url: URL): string[] {
+export function allowedHosts(env: Env, url: URL): string[] {
   const hosts = [url.hostname];
   try {
     hosts.push(new URL(env.SITE_ORIGIN).hostname);
@@ -204,7 +204,7 @@ function allowedHosts(env: Env, url: URL): string[] {
  * True only when siteverify answers in time with success and a hostname of this site. Every failure (network,
  * timeout, HTTP error, non-JSON, wrong host) is false: the report is refused with 400, never stored.
  */
-async function turnstileOk(secret: string, token: string, ip: string | null, hosts: string[], doFetch: typeof fetch): Promise<boolean> {
+export async function turnstileOk(secret: string, token: string, ip: string | null, hosts: string[], doFetch: typeof fetch): Promise<boolean> {
   const form = new URLSearchParams({ secret, response: token });
   if (ip) form.set('remoteip', ip);
   try {

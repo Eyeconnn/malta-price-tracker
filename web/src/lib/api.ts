@@ -1,4 +1,4 @@
-// The one typed client for the public API (web/worker/api.ts, reports.ts), and useApi for components.
+// The one typed client for the public API (web/worker/api.ts, reports.ts, suggestions.ts), and useApi for components.
 // Response types are built from the Worker's own types, so a change there breaks the build here.
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { PhraseSlot, Thresholds } from '../../../src/site/settings.js';
@@ -19,6 +19,7 @@ import type {
 } from '../../worker/data.js';
 import type { ProductPage, ProductResult, SellerCheaper, SellerView, VariantView } from '../../worker/api.js';
 import type { ReportBody, ReportReason, ReportTarget } from '../../worker/reports.js';
+import type { SuggestionAnswer } from '../../worker/suggestions.js';
 
 export type {
   Card,
@@ -130,6 +131,42 @@ async function postReport(body: ReportBody): Promise<void> {
   }
 }
 
+export type { SuggestionAnswer };
+
+/**
+ * POST /api/shop-suggestions; resolves with the answer (200 or 201), otherwise throws ApiError (400: field and the
+ * address problem as `reason`; 429: rate limited with retryAfter; 503: the check queue is full).
+ */
+async function suggestShop(body: { url: string; name: string | null }): Promise<SuggestionAnswer> {
+  const res = await fetch('/api/shop-suggestions', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', accept: 'application/json' },
+    body: JSON.stringify(body),
+  });
+  let data: Record<string, unknown> | null = null;
+  try {
+    data = (await res.json()) as Record<string, unknown>;
+  } catch {
+    // not JSON
+  }
+  if ((res.status === 200 || res.status === 201) && typeof data?.outcome === 'string') return data as unknown as SuggestionAnswer;
+  const retry = res.headers.get('retry-after');
+  const field = typeof data?.error === 'string' ? data.error : undefined;
+  throw new SuggestionError(res.status, field, typeof data?.reason === 'string' ? data.reason : null, retry !== null && /^\d{1,9}$/.test(retry.trim()) ? Number(retry) : null);
+}
+
+/** A refused suggestion: reason is the address problem of a 400 on `url` (src/shop-requests/address.ts). */
+export class SuggestionError extends ApiError {
+  constructor(
+    status: number,
+    field: string | undefined,
+    readonly reason: string | null,
+    retryAfter: number | null,
+  ) {
+    super(status, field, retryAfter);
+  }
+}
+
 export const api = {
   home: (signal?: AbortSignal) => get<HomeResponse>('/api/home', signal),
   /** results are empty for a query under 2 characters (the server checks too) */
@@ -144,6 +181,7 @@ export const api = {
   categories: (signal?: AbortSignal) => get<CategoriesResponse>('/api/categories', signal),
   thresholds: (signal?: AbortSignal) => get<ThresholdsResponse>('/api/thresholds', signal),
   report: postReport,
+  suggestShop,
 };
 
 export type ApiState<T> =

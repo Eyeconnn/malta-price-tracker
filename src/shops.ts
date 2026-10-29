@@ -1,5 +1,6 @@
 import { readFile } from 'node:fs/promises';
 import { db } from './db.js';
+import type { UnavailableReason } from './shop-requests/reasons.js';
 import type { AdapterName, Shop } from './types.js';
 
 export interface ShopFilter {
@@ -13,7 +14,8 @@ export interface ShopFilter {
 
 export interface SeedFile {
   do_not_scrape: string[];
-  shops: (Omit<Shop, 'id'> & { notes?: string | null })[];
+  /** unavailable_reason: why a switched-off shop is off, as visitors are told (src/shop-requests/reasons.ts) */
+  shops: (Omit<Shop, 'id'> & { notes?: string | null; unavailable_reason?: UnavailableReason | null })[];
 }
 
 export async function readSeed(): Promise<SeedFile> {

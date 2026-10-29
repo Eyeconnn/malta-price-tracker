@@ -68,9 +68,11 @@ export interface SetupDetails {
 export type Detection = (
   | { kind: 'supported'; platform: Platform; adapter: AdapterName; config: ShopConfig; baseUrl: string; siteName: string | null; robots: RobotsSummary }
   | { kind: 'blocked'; platform: Platform | null; reason: string; robots: RobotsSummary }
-  | { kind: 'unsupported'; platform: Platform | null; reason: string; baseUrl: string; siteName: string | null; details: SetupDetails; robots: RobotsSummary }
+  /** crawl_delay: unsupported only because robots.txt asks for a longer Crawl-delay than a check can keep to */
+  | { kind: 'unsupported'; platform: Platform | null; reason: string; baseUrl: string; siteName: string | null; details: SetupDetails; robots: RobotsSummary; cause?: 'crawl_delay' }
   | { kind: 'rate_limited'; reason: string; retryAfterMs: number | null; robots: RobotsSummary | null }
-  | { kind: 'unreachable'; reason: string; robots: RobotsSummary | null }
+  /** cause: what a visitor is told (bot_protection: 202, 401 or 403; not_found: no working shop); none when our own check stopped */
+  | { kind: 'unreachable'; reason: string; robots: RobotsSummary | null; cause?: 'bot_protection' | 'not_found' }
 ) & { requests?: number };
 
 const UNSUPPORTED_REASON = 'The platform is not Shopify, WooCommerce or Magento, so this shop needs a custom setup in a later session.';
@@ -218,7 +220,7 @@ function stopFor(e: unknown, what: string, robots: RobotsSummary | null): Detect
     const wait = e.retryAfterMs !== null ? ` and asked to wait ${Math.round(e.retryAfterMs / 1000)} s` : '';
     return { kind: 'rate_limited', reason: `${what} answered HTTP ${e.status}${wait}.`, retryAfterMs: e.retryAfterMs, robots };
   }
-  if (e instanceof HttpError && [202, 401, 403].includes(e.status)) return { kind: 'unreachable', reason: describeFailure(e, what), robots };
+  if (e instanceof HttpError && [202, 401, 403].includes(e.status)) return { kind: 'unreachable', reason: describeFailure(e, what), robots, cause: 'bot_protection' };
   if (e instanceof ShopAbortError) return { kind: 'unreachable', reason: `The check stopped: ${e.message}.`, robots };
   return null;
 }
@@ -246,6 +248,7 @@ export async function probeShop(f: ProbeFetcher, origin: string, log: (m: string
       siteName: null,
       details: emptyDetails(),
       robots: homeRobots,
+      cause: 'crawl_delay',
     };
   }
 
@@ -254,9 +257,9 @@ export async function probeShop(f: ProbeFetcher, origin: string, log: (m: string
     home = await f.get(homeUrl, { accept: 'text/html,application/xhtml+xml', retries: 0 });
   } catch (e) {
     if (e instanceof DisallowedError) return { kind: 'blocked', platform: null, reason: `robots.txt blocks the page the home page redirects to (${e.url.slice(0, 200)}).`, robots: homeRobots };
-    return stopFor(e, 'The home page', homeRobots) ?? { kind: 'unreachable', reason: describeFailure(e, 'The home page'), robots: homeRobots };
+    return stopFor(e, 'The home page', homeRobots) ?? { kind: 'unreachable', reason: describeFailure(e, 'The home page'), robots: homeRobots, cause: 'not_found' };
   }
-  if (home.status !== 200) return { kind: 'unreachable', reason: `The home page could not be read (HTTP ${home.status}).`, robots: homeRobots };
+  if (home.status !== 200) return { kind: 'unreachable', reason: `The home page could not be read (HTTP ${home.status}).`, robots: homeRobots, cause: 'not_found' };
 
   // a redirect within the shop (apex to www.) moves the base address
   const base = new URL(home.url).origin;

@@ -13,6 +13,7 @@ import { NAME_MAX, SHOP_CATEGORIES, cleanDisplayName, hostKey, parseShopAddress 
 import type { Detection } from './detect.js';
 import { slugFromHost } from './naming.js';
 import { CHECK_MAX_REQUESTS, DETECTION_MAX_REQUESTS, TEST_MAGENTO_CATEGORIES, TEST_SCRAPE_MAX_REQUESTS, judgeTestScrape } from './passRule.js';
+import type { UnavailableReason } from './reasons.js';
 import type { ShopRequestStatus } from './statuses.js';
 
 type Row = Record<string, unknown>;
@@ -64,6 +65,8 @@ const ERROR_MAX = 500;
 interface Outcome {
   status: Exclude<ShopRequestStatus, 'checking' | 'rejected'>;
   error: string | null;
+  /** why the shop was not added, as a visitor is told (reasons.ts); none for active, pending and our own errors */
+  reason?: UnavailableReason;
   platform?: string | null;
   robots?: unknown;
   productsFound?: number | null;
@@ -82,7 +85,7 @@ const clipError = (s: string | null) => (s === null ? null : s.length > ERROR_MA
 
 async function resetStuck(db: Db): Promise<number> {
   const rows = await db.query(
-    `update shop_requests set status = 'failed', checked_at = now(), next_check_at = null,
+    `update shop_requests set status = 'failed', checked_at = now(), next_check_at = null, reason = null,
        error = 'The check was interrupted (it stayed in checking for over an hour). Retry it.'
      where status = 'checking' and coalesce(started_at, requested_at) < now() - ($1::int * interval '1 minute')
      returning id`,
@@ -148,7 +151,7 @@ async function existingShop(db: Db, address: string, ownShopId: unknown): Promis
 function rateLimited(req: Row, reason: string, retryAfterMs: number | null, extra: Partial<Outcome> = {}): Outcome {
   const n = Number(req.rate_limited_count ?? 0) + 1;
   if (n > RATE_LIMIT_WAITS_MS.length) {
-    return { ...extra, status: 'failed', error: `Rate-limited repeatedly (${n} checks in a row): ${reason} Retry it by hand later.`, rateLimitedCount: n };
+    return { ...extra, status: 'failed', error: `Rate-limited repeatedly (${n} checks in a row): ${reason} Retry it by hand later.`, reason: 'rate_limited', rateLimitedCount: n };
   }
   const wait = Math.max(retryAfterMs ?? 0, RATE_LIMIT_WAITS_MS[n - 1]!);
   return { ...extra, status: 'pending', error: `${reason} Checking again automatically (${n} of ${RATE_LIMIT_WAITS_MS.length}).`, retryInMs: wait, rateLimitedCount: n };
@@ -165,9 +168,11 @@ async function check(d: ProcessDeps, req: Row, log: (m: string) => void): Promis
   const det = await d.probe(origin);
   log(`${origin}: ${det.kind}${'platform' in det && det.platform ? ` (${det.platform})` : ''}`);
   if (det.kind === 'rate_limited') return rateLimited(req, det.reason, det.retryAfterMs, { robots: det.robots });
-  if (det.kind === 'unreachable') return { status: 'failed', error: det.reason, robots: det.robots };
-  if (det.kind === 'blocked') return { status: 'blocked', error: det.reason, platform: det.platform, robots: det.robots };
-  if (det.kind === 'unsupported') return { status: 'needs_setup', error: det.reason, platform: det.platform, robots: det.robots, details: det.details };
+  if (det.kind === 'unreachable') return { status: 'failed', error: det.reason, reason: det.cause, robots: det.robots };
+  if (det.kind === 'blocked') return { status: 'blocked', error: det.reason, reason: 'robots', platform: det.platform, robots: det.robots };
+  if (det.kind === 'unsupported') {
+    return { status: 'needs_setup', error: det.reason, reason: det.cause ?? 'needs_setup', platform: det.platform, robots: det.robots, details: det.details };
+  }
 
   // the home page may have moved the base address (apex to www.)
   const dupBase = det.baseUrl === origin ? null : await existingShop(d.db, det.baseUrl, req.shop_id);
@@ -187,7 +192,7 @@ async function check(d: ProcessDeps, req: Row, log: (m: string) => void): Promis
   if (!verdict.pass && result.rateLimited && result.rateLimited.count > 0) {
     return rateLimited(req, `The test scrape was slowed down by the shop (${result.rateLimited.count} requests answered 429 or a server error).`, result.rateLimited.retryAfterMs, found);
   }
-  if (!verdict.pass) return { ...found, status: 'failed', error: verdict.reason };
+  if (!verdict.pass) return { ...found, status: 'failed', error: verdict.reason, reason: 'not_readable' };
   return { ...found, status: 'active', error: verdict.reason, activates: { shop: { ...shop, active: true }, detection: det } };
 }
 
@@ -195,7 +200,7 @@ async function check(d: ProcessDeps, req: Row, log: (m: string) => void): Promis
 async function finish(db: Db, id: unknown, o: Outcome): Promise<boolean> {
   const [row] = await db.query<{ updated: number }>(
     `with r as (
-       update shop_requests set status = $2, checked_at = now(), error = $3,
+       update shop_requests set status = $2, checked_at = now(), error = $3, reason = $13,
          platform = coalesce($4, platform), robots = coalesce($5::text::jsonb, robots), products_found = $6,
          sample = $7::text::jsonb, details = $8::text::jsonb, shop_id = coalesce($9::int, shop_id),
          next_check_at = case when $11::bigint is null then null else now() + $11::bigint * interval '1 millisecond' end,
@@ -220,6 +225,7 @@ async function finish(db: Db, id: unknown, o: Outcome): Promise<boolean> {
       o.status === 'active',
       o.retryInMs === undefined ? null : Math.round(o.retryInMs),
       o.rateLimitedCount ?? null,
+      o.reason ?? null,
     ],
   );
   return Number(row?.updated ?? 0) > 0;

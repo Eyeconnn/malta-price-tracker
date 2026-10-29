@@ -7,13 +7,13 @@ async function main() {
   const sql = db();
   for (const s of seed.shops) {
     await sql`
-      insert into shops (slug, name, base_url, category, adapter, config, tier, active, notes)
+      insert into shops (slug, name, base_url, category, adapter, config, tier, active, notes, unavailable_reason)
       values (${s.slug}, ${s.name}, ${s.base_url}, ${s.category}, ${s.adapter}, ${sql.json((s.config ?? {}) as never)},
-              ${s.tier}, ${s.active}, ${s.notes ?? null})
+              ${s.tier}, ${s.active}, ${s.notes ?? null}, ${s.unavailable_reason ?? null})
       on conflict (slug) do update set
         name = excluded.name, base_url = excluded.base_url, category = excluded.category,
         adapter = excluded.adapter, config = excluded.config, tier = excluded.tier,
-        active = excluded.active, notes = excluded.notes, updated_at = now()`;
+        active = excluded.active, notes = excluded.notes, unavailable_reason = excluded.unavailable_reason, updated_at = now()`;
   }
   console.log(`seeded ${seed.shops.length} shops`);
 }

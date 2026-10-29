@@ -176,7 +176,8 @@
         "min_delay_ms": 3000,
         "max_delay_ms": 6000
       },
-      "notes": "Inactive: every HTML page answers with a Cloudflare challenge (403, cf-mitigated) to our crawler (20 Oct). Sitemaps list ~22,500 products. Needs an allowlist or feed from Decathlon; do not work around the challenge."
+      "notes": "Inactive: every HTML page answers with a Cloudflare challenge (403, cf-mitigated) to our crawler (20 Oct). Sitemaps list ~22,500 products. Needs an allowlist or feed from Decathlon; do not work around the challenge.",
+      "unavailable_reason": "bot_protection"
     },
     {
       "slug": "retail",
@@ -287,7 +288,8 @@
       "config": {
         "page_size": 100
       },
-      "notes": "Store API responses padded with HTML. Inactive: Cloudflare bot challenge (403) to our scraper; re-enable if the shop allowlists our user agent."
+      "notes": "Store API responses padded with HTML. Inactive: Cloudflare bot challenge (403) to our scraper; re-enable if the shop allowlists our user agent.",
+      "unavailable_reason": "bot_protection"
     },
     {
       "slug": "soundvision",
@@ -520,7 +522,8 @@
       "tier": "P1",
       "active": false,
       "config": {},
-      "notes": "ASP.NET postback pagination; needs Playwright (later session)."
+      "notes": "ASP.NET postback pagination; needs Playwright (later session).",
+      "unavailable_reason": "needs_setup"
     },
     {
       "slug": "topchoice",
@@ -546,7 +549,8 @@
       "tier": "P2",
       "active": false,
       "config": {},
-      "notes": "WooCommerce theme but Store API returns 404 (rest_no_route); needs HTML selectors. Test before enabling."
+      "notes": "WooCommerce theme but Store API returns 404 (rest_no_route); needs HTML selectors. Test before enabling.",
+      "unavailable_reason": "needs_setup"
     },
     {
       "slug": "ultimate",
@@ -643,7 +647,8 @@
       "tier": "P2",
       "active": false,
       "config": {},
-      "notes": "Custom PHP shop, no JSON-LD; categories under /shop/category/. No robots.txt."
+      "notes": "Custom PHP shop, no JSON-LD; categories under /shop/category/. No robots.txt.",
+      "unavailable_reason": "needs_setup"
     },
     {
       "slug": "browns",
@@ -654,7 +659,8 @@
       "tier": "P2",
       "active": false,
       "config": {},
-      "notes": "Headless SvelteKit front end; Store API not on this host. Needs investigation before enabling."
+      "notes": "Headless SvelteKit front end; Store API not on this host. Needs investigation before enabling.",
+      "unavailable_reason": "needs_setup"
     },
     {
       "slug": "agenda",
@@ -762,7 +768,8 @@
       "tier": "P2",
       "active": false,
       "config": {},
-      "notes": "Website not found (TLS mismatch). Needs a manual domain lookup."
+      "notes": "Website not found (TLS mismatch). Needs a manual domain lookup.",
+      "unavailable_reason": "not_found"
     },
     {
       "slug": "olimpus",
@@ -837,7 +844,8 @@
       "tier": "P2",
       "active": false,
       "config": {},
-      "notes": "Custom ASP.NET behind Cloudflare; prices in HTML."
+      "notes": "Custom ASP.NET behind Cloudflare; prices in HTML.",
+      "unavailable_reason": "needs_setup"
     },
     {
       "slug": "crosscraft",
@@ -904,7 +912,8 @@
           "?(?!p=d+$)"
         ]
       },
-      "notes": "robots.txt blocks /rest, /graphql and query strings except ?p=. Crawl-delay 2."
+      "notes": "robots.txt blocks /rest, /graphql and query strings except ?p=. Crawl-delay 2.",
+      "unavailable_reason": "robots"
     },
     {
       "slug": "womensecret",

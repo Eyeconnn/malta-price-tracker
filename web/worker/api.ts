@@ -3,7 +3,8 @@
 // errors propagate to the handler's generic 500.
 // Search gives one result per product (design Part 3); /api/product/:key is the product page (every trusted
 // seller of one product), /api/products/:id the older one-listing page (its `key` leads to the product page).
-// The one public write, POST /api/reports, is handed to reports.ts before any read routing and is never cached.
+// The public writes, POST /api/reports and POST /api/shop-suggestions, are handed to reports.ts and suggestions.ts
+// before any read routing and are never cached.
 // /api/admin/* goes to admin.ts (its own auth check, the site_admin role, never cached).
 import { SITE_CATEGORIES } from '../../src/site/categories.js';
 import { computeRating } from '../../src/site/rating.js';
@@ -18,6 +19,7 @@ import type { Env } from './env.js';
 import { json } from './http.js';
 import { sitePhoto } from './photo.js';
 import { DEFAULT_REPORTS, handleReport, type ReportDeps } from './reports.js';
+import { DEFAULT_SUGGESTIONS, handleSuggestion, type SuggestionDeps } from './suggestions.js';
 import type { AccessSettings } from './settings.js';
 
 export interface ApiDeps {
@@ -25,6 +27,8 @@ export interface ApiDeps {
   cache: () => ResponseCache | null;
   /** report store (site_reporter role) and Turnstile fetch; defaults to Neon and the global fetch */
   reports?: ReportDeps;
+  /** shop suggestion store (site_reporter role) and Turnstile fetch; defaults to Neon and the global fetch */
+  suggestions?: SuggestionDeps;
   /** admin store (site_admin role); defaults to Neon */
   admin?: AdminDeps;
 }
@@ -368,6 +372,7 @@ async function categories(data: Data): Promise<Response> {
 export async function handleApi(req: Request, env: Env, url: URL, deps: ApiDeps, access: AccessSettings = { public: true }): Promise<Response> {
   const p = url.pathname;
   if (p === '/api/reports') return handleReport(req, env, url, deps.reports ?? DEFAULT_REPORTS);
+  if (p === '/api/shop-suggestions') return handleSuggestion(req, env, url, deps.suggestions ?? DEFAULT_SUGGESTIONS);
   if (p === '/api/admin' || p.startsWith('/api/admin/')) return handleAdmin(req, env, url, deps.admin ?? DEFAULT_ADMIN);
   const productMatch = /^\/api\/products\/([^/]*)$/.exec(p);
   const productKeyMatch = /^\/api\/product\/([^/]*)$/.exec(p);

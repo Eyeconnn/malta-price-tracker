@@ -39,6 +39,7 @@ const sample: AdminShopRequest = {
   error: null,
   attempts: 0,
   nextCheckAt: null,
+  source: 'admin',
   shop: null,
 };
 

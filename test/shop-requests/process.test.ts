@@ -145,7 +145,7 @@ describe('processShopRequests', () => {
     expect(during).toMatchObject({ requestStatus: 'checking', shopActive: false });
     expect(during.shop).toMatchObject({ adapter: 'shopify', tier: 'P2', active: false, config: { runner: 'local' } });
     const r = await request(SHOPIFY);
-    expect(r).toMatchObject({ status: 'active', platform: 'shopify', products_found: 50, error: null });
+    expect(r).toMatchObject({ status: 'active', platform: 'shopify', products_found: 50, error: null, reason: null });
     expect(r.robots).toMatchObject({ allowed: true, crawlDelaySeconds: 0 });
     expect((r.sample as unknown[]).length).toBe(10);
     expect((r.sample as unknown[])[0]).toEqual({ title: 'Robot 0', priceCents: 3999, url: 'https://shop.example.mt/products/r0' });
@@ -169,33 +169,34 @@ describe('processShopRequests', () => {
 
   it('an unknown platform needs setup, with what was found, and no shop is created', async () => {
     const r = await request(UNKNOWN);
-    expect(r).toMatchObject({ status: 'needs_setup', platform: 'unknown', shop_id: null });
+    expect(r).toMatchObject({ status: 'needs_setup', platform: 'unknown', shop_id: null, reason: 'needs_setup' });
     expect(r.details).toMatchObject({ server: 'nginx', generator: ['PrestaShop'] });
     expect(r.error).toMatch(/not Shopify, WooCommerce or Magento/);
   });
 
   it('robots.txt blocking the feed: blocked with the rule, crawl delay recorded, no shop', async () => {
     const r = await request(BLOCKED);
-    expect(r).toMatchObject({ status: 'blocked', platform: 'shopify', shop_id: null });
+    expect(r).toMatchObject({ status: 'blocked', platform: 'shopify', shop_id: null, reason: 'robots' });
     expect(r.error).toMatch(/Disallow: \/products\.json \(line 3\)/);
     expect(r.robots).toMatchObject({ allowed: false, crawlDelaySeconds: 4 });
   });
 
   it('a thin test scrape fails with the reason; its shop stays inactive', async () => {
     const r = await request(THIN);
-    expect(r).toMatchObject({ status: 'failed', products_found: 4 });
+    expect(r).toMatchObject({ status: 'failed', products_found: 4, reason: 'not_readable' });
     expect(r.error).toMatch(/Only 4 products/);
     expect((await shopById(r.shop_id)).active).toBe(false);
   });
 
   it('a crash leaves the request failed with the error, never checking', async () => {
     const r = await request(CRASH);
-    expect(r).toMatchObject({ status: 'failed', error: 'The check stopped with an error: socket hang up' });
+    // our own error, so a visitor gets no reason for it
+    expect(r).toMatchObject({ status: 'failed', error: 'The check stopped with an error: socket hang up', reason: null });
   });
 
   it('a host that is already a shop fails without creating another', async () => {
     const r = await request(TAKEN);
-    expect(r).toMatchObject({ status: 'failed', shop_id: null });
+    expect(r).toMatchObject({ status: 'failed', shop_id: null, reason: null });
     expect(r.error).toMatch(/already a shop \(klikk\)/);
     expect(Number((await pg.query<{ n: number }>(`select count(*)::int as n from shops where base_url like '%klikk%'`)).rows[0]!.n)).toBe(1);
   });

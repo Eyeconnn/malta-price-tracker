@@ -5,6 +5,7 @@ import { Notice } from '@/components/site/DealList';
 import { useMode } from '@/components/site/ModeProvider';
 import { SegmentedControl } from '@/components/site/SegmentedControl';
 import { ShopBadge } from '@/components/site/ShopBadge';
+import { SuggestShop } from '@/components/site/SuggestShop';
 import { Button } from '@/components/ui/button';
 import { ApiError, api, type ShopSummary, useApi } from '@/lib/api';
 import { cn } from '@/lib/utils';
@@ -75,7 +76,7 @@ function sorted(shops: ShopSummary[], sort: Sort): ShopSummary[] {
 
 /**
  * Shops: every shop we follow with its RATING (A to F, or N/A while it has too few judged deals), a search by name
- * and a best or worst first order. Advanced shows the same as a table.
+ * and a best or worst first order. Advanced shows the same as a table. Below the list, visitors can suggest a shop.
  */
 export function ShopsPage() {
   const { mode } = useMode();
@@ -198,6 +199,7 @@ export function ShopsPage() {
           </table>
         </div>
       )}
+      <SuggestShop />
     </>
   );
 }

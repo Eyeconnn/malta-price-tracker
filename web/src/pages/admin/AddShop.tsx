@@ -248,7 +248,10 @@ function RequestItem({ request, onChanged }: { request: AdminShopRequest; onChan
           </>
         )}
         <dt className="text-muted-foreground">Added</dt>
-        <dd>{when.format(new Date(r.requestedAt))}</dd>
+        <dd>
+          {when.format(new Date(r.requestedAt))}
+          {r.source === 'visitor' ? ', suggested by a visitor' : ''}
+        </dd>
         {r.checkedAt && (
           <>
             <dt className="text-muted-foreground">Checked</dt>

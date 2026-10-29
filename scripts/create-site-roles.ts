@@ -1,5 +1,6 @@
 // Creates (or re-passwords) the two least-privilege roles used by the public site Worker, and retires the old site_writer.
-//   site_reporter  insert on reports; select (ip_hash, created_at) on reports for rate limiting. Nothing else.
+//   site_reporter  insert on reports; select (ip_hash, created_at) on reports for rate limiting; visitor shop
+//                  suggestions: look an address up in shops and shop_requests (public columns) and add one. Nothing else.
 //   site_admin     admin panel: read the site tables, edit settings, resolve reports, hide shops, confirm matches,
 //                  add shop requests and change their status (retry, reject).
 // Writes REPORTER_DATABASE_URL and ADMIN_DATABASE_URL to .env (skipped for a local dev database).
@@ -17,6 +18,11 @@ const ROLES = [
       'insert on reports',
       'select (ip_hash, created_at) on reports',
       'usage on sequence reports_id_seq',
+      // Suggest a shop on /shops (migration 018)
+      'select (id, slug, name, base_url, active, site_hidden, unavailable_reason) on shops',
+      'select (id, origin, status, reason, source, ip_hash, requested_at) on shop_requests',
+      'insert (origin, display_name, source, ip_hash) on shop_requests',
+      'usage on sequence shop_requests_id_seq',
     ],
   },
   {
