@@ -8,6 +8,7 @@ const install = await readFile('scripts/install-tasks.ps1', 'utf8');
 describe('run-names-nightly.ps1', () => {
   it('runs the capped Haiku high-effort run from the checkout, logs per date and passes on the exit code', () => {
     expect(run).toContain('pnpm normalise-names --model haiku --effort high --max-batches 400 --max-cost 5 --parallel 3');
+    expect(run).toContain('pnpm judge-matches --model sonnet --effort medium --max-batches 200 --max-cost 3 --parallel 3');
     expect(run).not.toMatch(/--dry-run|--bare|ANTHROPIC_API_KEY/);
     expect(run).toContain('$repo = Split-Path -Parent $PSScriptRoot');
     expect(run).toContain('("out\\names\\nightly-" + (Get-Date -Format ' + "'yyyy-MM-dd'" + ')');

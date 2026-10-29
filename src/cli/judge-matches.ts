@@ -1,6 +1,6 @@
 // pnpm judge-matches --model sonnet [--effort low] [--pilot] [--limit 300] [--seed pilot] [--category phones ...]
 //   [--batch-size 15] [--max-listings 120] [--parallel 2] [--max-batches N] [--max-cost 5] [--dry-run] [--timeout 600]
-//   [--save-raw] [--merge-pass | --no-merge-pass] [--title "iphone 17 pro"] [--plan]
+//   [--save-raw] [--merge-pass | --no-merge-pass] [--title "iphone 17 pro"] [--plan] [--rejudge]
 // Design "Update 23 Oct, afternoon: Claude judges candidate groups side by side". Builds the candidate groups of fresh
 // listings (src/match/candidates.ts), skips those whose stored judgement has the current fingerprint, and sends the
 // rest to Claude Code (claude -p on the owner's own login, the billing-safe runner of the name normaliser: never
@@ -11,7 +11,9 @@
 // and merged only when Claude says same and the veto agrees (--no-merge-pass skips it). --merge-pass runs the merge
 // pass alone. Both passes share the caps (--max-batches and --max-cost count both, --pilot samples --limit merge
 // groups). --title keeps only groups with a listing whose title has the text; --plan prints the plan and calls Claude
-// for nothing. Every run
+// for nothing. --rejudge also judges again every group whose stored judgement came from another model or effort than
+// this run's (owner decision 29 Oct: every Haiku judgement again with Sonnet); a stopped run resumes where it left off,
+// since the groups it already judged carry this run's model and effort. Every run
 // writes a report to out/judge/. Saved judgements replace older ones sharing their listings only at the end of the run
 // (src/match/store.ts supersedeJudgements), and only a complete run (not stopped, no failed batch, no --pilot,
 // --category or --title, not --merge-pass alone, no batch cut by --max-batches) removes those with listings it did
@@ -80,6 +82,7 @@ const { values } = parseArgs({
     'no-merge-pass': { type: 'boolean', default: false },
     title: { type: 'string' },
     plan: { type: 'boolean', default: false },
+    rejudge: { type: 'boolean', default: false },
   },
 });
 
@@ -134,7 +137,10 @@ async function main() {
   }
   const keep = (c: Candidate) => (categories.length === 0 || categories.includes(c.category)) && (title === undefined || hasTitle(c, title));
   const all = mergeOnly ? [] : buildCandidates(listings).filter(keep);
-  const todo = all.filter((c) => stored.get(c.key) !== c.fingerprint);
+  // --rejudge: a current judgement by another model or effort is judged again
+  const judgedBy = new Map(storedJudgements.map((j) => [j.key, `${j.model}/${j.effort ?? ''}`]));
+  const runner = `${model}/${effort ?? ''}`;
+  const todo = all.filter((c) => stored.get(c.key) !== c.fingerprint || (values.rejudge && judgedBy.get(c.key) !== runner));
   const chosen = pilot ? spreadSample(todo, limit, values.seed) : todo;
   const planned = makeJudgeBatches(chosen, batchSize, maxListings);
   const batches = planned.slice(0, maxBatches ?? Infinity);
