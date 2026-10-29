@@ -17,3 +17,7 @@ dist/
 
 # git worktrees for feature work
 .worktrees/
+
+# the page renderer's Python environment (tools/renderer/README.md)
+tools/renderer/.venv/
+__pycache__/

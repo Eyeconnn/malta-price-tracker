@@ -49,6 +49,20 @@ export interface ShopConfig {
   sku_is_gtin?: boolean;
   /** regex with one capture group, applied to SKU to extract an MPN */
   mpn_from_sku?: string;
+  /**
+   * "browser": HTML pages are rendered in a headless browser (Crawl4AI, src/http/renderer.ts) for shops whose
+   * products only appear after JavaScript runs. Needs the renderer installed, so such a shop runs on the PC (runner local).
+   */
+  render?: 'browser';
+  /** with render "browser": a CSS selector to wait for before the page is read (e.g. the product grid) */
+  render_wait_for?: string;
+  /**
+   * with render "browser": a "Load more" button on listing pages, clicked at the shop's own pace (one click per gap,
+   * each counted as a request) until it is gone or adds no `items` (a CSS selector for the product tiles)
+   */
+  render_load_more?: { button: string; items: string; max_clicks?: number };
+  /** with render "browser": only HTML pages whose address matches this regex are rendered (e.g. listing pages) */
+  render_urls?: string;
   /** adapter specific settings (selectors etc.) */
   [key: string]: unknown;
 }

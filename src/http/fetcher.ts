@@ -1,4 +1,6 @@
 import { safeFetch } from './safeNet.js';
+import { existsSync } from 'node:fs';
+import { type PageRenderer, rendererPython, sharedRenderer } from './renderer.js';
 import { parseRobots, type RobotsRules } from './robots.js';
 import type { ShopConfig } from '../types.js';
 
@@ -91,6 +93,17 @@ export interface FetcherOptions {
   maxRedirects?: number;
   /** a hard stop (a deadline): once aborted, waits and requests end at once with ShopAbortError */
   signal?: AbortSignal;
+  /**
+   * renders HTML page requests (accept text/html) in a headless browser instead of a plain GET (config.render =
+   * "browser", renderer.ts). robots.txt, the gap, Crawl-delay, retries and the request count apply as to any request.
+   */
+  renderer?: PageRenderer;
+  /** a CSS selector the renderer waits for before it hands the page back (config.render_wait_for) */
+  renderWaitFor?: string;
+  /** a "Load more" button the renderer clicks on listing pages, each click a request to the shop (config.render_load_more) */
+  renderLoadMore?: { button: string; items: string; max_clicks?: number };
+  /** only HTML pages whose address matches are rendered; the rest stay plain HTTP (config.render_urls) */
+  renderUrls?: RegExp;
   log?: (msg: string) => void;
 }
 
@@ -122,6 +135,17 @@ function compilePatterns(list: unknown, log: (m: string) => void): RegExp[] {
 }
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+/** Load more clicks per listing page unless the shop's config says otherwise. */
+const DEFAULT_LOAD_MORE_CLICKS = 20;
+
+/** config.render_load_more, when it names a button and the items it adds. */
+function loadMoreConfig(v: unknown): { button: string; items: string; max_clicks?: number } | undefined {
+  if (typeof v !== 'object' || v === null) return undefined;
+  const o = v as Record<string, unknown>;
+  if (typeof o.button !== 'string' || typeof o.items !== 'string') return undefined;
+  return { button: o.button, items: o.items, max_clicks: typeof o.max_clicks === 'number' && o.max_clicks >= 0 ? Math.floor(o.max_clicks) : undefined };
+}
 const RETRYABLE = new Set([408, 425, 429, 500, 502, 503, 504, 520, 521, 522, 523, 524]);
 /** Statuses the fetcher retries with backoff (timeouts, 429, server errors, Cloudflare 52x). */
 export const isRetryableStatus = (status: number): boolean => RETRYABLE.has(status);
@@ -145,6 +169,10 @@ export class ShopFetcher {
   private budget?: RequestBudget;
   private maxRedirects: number;
   private signal?: AbortSignal;
+  private renderer?: PageRenderer;
+  private renderWaitFor?: string;
+  private renderLoadMore?: { button: string; items: string; max_clicks?: number };
+  private renderUrls?: RegExp;
   private abortReason?: string;
   private log: (msg: string) => void;
   private robots = new Map<string, Promise<RobotsRules>>();
@@ -171,6 +199,10 @@ export class ShopFetcher {
     this.budget = opts.budget;
     this.maxRedirects = opts.maxRedirects ?? 5;
     this.signal = opts.signal;
+    this.renderer = opts.renderer;
+    this.renderWaitFor = opts.renderWaitFor;
+    this.renderLoadMore = opts.renderLoadMore;
+    this.renderUrls = opts.renderUrls;
     this.log = opts.log ?? (() => {});
   }
 
@@ -183,7 +215,14 @@ export class ShopFetcher {
     extra: Pick<FetcherOptions, 'maxRequests' | 'budget' | 'maxRetries' | 'minDelayMs' | 'maxDelayMs' | 'maxBodyBytes' | 'maxRedirects' | 'signal'> = {},
   ): ShopFetcher {
     const extraHosts = Array.isArray(cfg.extra_hosts) ? (cfg.extra_hosts as string[]) : [];
+    const browser = cfg.render === 'browser';
+    // a browser shop on a machine without the renderer (e.g. GitHub) stops at once, not after retrying every page
+    if (browser && !existsSync(rendererPython())) throw new Error(`this shop needs the page renderer (config.render = "browser"), which is not installed here; see tools/renderer/README.md`);
     return new ShopFetcher({
+      renderer: browser ? sharedRenderer(userAgent, log) : undefined,
+      renderWaitFor: browser && typeof cfg.render_wait_for === 'string' ? cfg.render_wait_for : undefined,
+      renderLoadMore: browser ? loadMoreConfig(cfg.render_load_more) : undefined,
+      renderUrls: browser && typeof cfg.render_urls === 'string' ? new RegExp(cfg.render_urls) : undefined,
       allowedHosts: [scopeHost(baseUrl), ...extraHosts],
       userAgent,
       minDelayMs: cfg.min_delay_ms,
@@ -414,7 +453,7 @@ export class ShopFetcher {
       let errMsg = '';
       let tooLarge = false;
       try {
-        const res = await this.fetchFollowingRedirects(url, opts);
+        const res = this.shouldRender(url, opts.accept) ? await this.renderPage(url, opts) : await this.fetchFollowingRedirects(url, opts);
         status = res.status;
         if (allow.has(status)) {
           this.lastRequestEnd.set(key, Date.now());
@@ -455,6 +494,70 @@ export class ShopFetcher {
       }
       throw status ? new HttpError(url, status, retryAfterMs, waitTooLong) : new Error(`${errMsg} for ${url}`);
     }
+  }
+
+  /**
+   * An HTML page through the headless renderer. The browser follows redirects itself, only within the shop's hosts
+   * (the renderer refuses any other navigation); the page it ends on must be in scope and allowed by robots.txt,
+   * or its content is dropped.
+   */
+  private async renderPage(url: string, opts: { timeoutMs?: number }): Promise<FetchResult> {
+    const page = await this.renderer!.render(url, {
+      allowedHosts: this.allowedHosts ?? [scopeHost(url)],
+      waitFor: this.renderWaitFor,
+      timeoutMs: opts.timeoutMs ?? this.timeoutMs,
+      loadMore: await this.loadMoreFor(url),
+    });
+    // the page itself was counted before it was sent; each Load more answer is a request to the shop too
+    this.countExtra(Math.max(0, (page.requests ?? 1) - 1));
+    if (page.clicks) this.log(`${url}: Load more clicked ${page.clicks} times (${page.requests ?? 1} requests)`);
+    const final = page.url || url;
+    if (final !== url) {
+      if (!this.inScope(final)) throw new RedirectOutOfScopeError(final);
+      if (!(await this.isAllowed(final))) {
+        this.stats.disallowed++;
+        throw new DisallowedError(final);
+      }
+    }
+    const body = Buffer.from(page.html, 'utf8');
+    return {
+      url: final,
+      status: page.status,
+      headers: new Headers({ 'content-type': 'text/html; charset=utf-8' }),
+      body,
+      text: () => body.toString('utf8'),
+      json: <T>() => parseJsonLenient(body.toString('utf8')) as T,
+    };
+  }
+
+  /** HTML page requests of a browser shop, limited to render_urls when the shop gives it. */
+  private shouldRender(url: string, accept: string | undefined): boolean {
+    if (!this.renderer || !accept?.startsWith('text/html')) return false;
+    return !this.renderUrls || this.renderUrls.test(url);
+  }
+
+  /**
+   * Load more for this page: the gap before each click is the fetcher's own (2 to 5 s, or a longer Crawl-delay),
+   * and the clicks never take the run past its request cap.
+   */
+  private async loadMoreFor(url: string) {
+    const lm = this.renderLoadMore;
+    if (!lm) return undefined;
+    const crawlDelay = (await this.robotsFor(url)).crawlDelayMs;
+    const left = Math.min(
+      this.maxRequests === undefined ? Infinity : this.maxRequests - this.stats.requests,
+      this.budget ? this.budget.max - this.budget.used : Infinity,
+    );
+    const maxClicks = Math.max(0, Math.min(lm.max_clicks ?? DEFAULT_LOAD_MORE_CLICKS, left));
+    if (maxClicks === 0) return undefined;
+    return { button: lm.button, items: lm.items, maxClicks, gapMs: [Math.max(crawlDelay, this.minDelay), Math.max(crawlDelay, this.maxDelay)] as [number, number] };
+  }
+
+  /** Requests the browser made beyond the counted page (Load more answers); counted, never over the caps by design. */
+  private countExtra(n: number) {
+    if (n <= 0) return;
+    this.stats.requests += n;
+    if (this.budget) this.budget.used += n;
   }
 
   private async fetchFollowingRedirects(

@@ -518,12 +518,47 @@
       "name": "The Atrium",
       "base_url": "https://www.theatrium.com.mt",
       "category": "home",
-      "adapter": "headless",
+      "adapter": "html",
       "tier": "P1",
-      "active": false,
-      "config": {},
-      "notes": "ASP.NET postback pagination; needs Playwright (later session).",
-      "unavailable_reason": "needs_setup"
+      "active": true,
+      "config": {
+        "runner": "local",
+        "render": "browser",
+        "render_urls": "^https://www\\.theatrium\\.com\\.mt/(?!product/|search-site-results)[a-z0-9-]+/[a-z0-9-]+/?$",
+        "render_load_more": {
+          "button": "#LoadMoreItems",
+          "items": ".product-card",
+          "max_clicks": 60
+        },
+        "html": {
+          "category_links": "a[href]",
+          "category_pattern": "^https://www\\.theatrium\\.com\\.mt/(?!product/|search-site-results)[a-z0-9-]+/[a-z0-9-]+/?$",
+          "max_pages": 1,
+          "tile": ".product-card",
+          "link": "a.product-card-link",
+          "title": ".product-card-title",
+          "sku": ".product-card-code",
+          "price": ".product-card-price",
+          "old_price": ".product-card-wasprice",
+          "stock": ".product-card-stock",
+          "in_stock": "in stock|low stock",
+          "out_of_stock": "out of stock|sold out|not available",
+          "image": "img.product-card-img",
+          "id": {
+            "url_regex": "/product/(?:[^/]+/){2}([^/?#]+)"
+          },
+          "product": {
+            "title": "h1.pdp-title",
+            "price": ".mbb-price-current",
+            "old_price": ".mbb-price-original",
+            "stock": ".stock-headline",
+            "id": {
+              "url_regex": "/product/(?:[^/]+/){2}([^/?#]+)"
+            }
+          }
+        }
+      },
+      "notes": "Listing pages load more products through an ASP.NET 'Load more' postback: rendered with the page renderer (Crawl4AI, config.render), which clicks it at the usual 2 to 5 s pace. Product pages are plain HTML. Set up 29 Oct 2026."
     },
     {
       "slug": "topchoice",
@@ -659,8 +694,8 @@
       "tier": "P2",
       "active": false,
       "config": {},
-      "notes": "Headless SvelteKit front end; Store API not on this host. Needs investigation before enabling.",
-      "unavailable_reason": "needs_setup"
+      "notes": "Brand catalogue and health services site: no prices on its pages, even rendered in a browser (checked 29 Oct 2026). Not an online shop we can track.",
+      "unavailable_reason": "not_readable"
     },
     {
       "slug": "agenda",
