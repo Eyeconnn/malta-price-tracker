@@ -940,15 +940,9 @@
       "adapter": "magento",
       "tier": "P2",
       "active": false,
-      "config": {
-        "extra_disallow": [
-          "/rest/",
-          "/graphql",
-          "?(?!p=d+$)"
-        ]
-      },
-      "notes": "robots.txt blocks /rest, /graphql and query strings except ?p=. Crawl-delay 2.",
-      "unavailable_reason": "robots"
+      "config": {},
+      "notes": "Every page answers our crawler with a Cloudflare block ('Sorry, you have been blocked', 403), checked 29 Oct 2026; not worked around. robots.txt allows its /amfeed product feed, but its address is not public: ask Pandora for it.",
+      "unavailable_reason": "bot_protection"
     },
     {
       "slug": "womensecret",
@@ -1036,6 +1030,46 @@
         "images_minutes": 150
       },
       "notes": "Base URL carries the /en-mt path prefix."
+    },
+    {
+      "slug": "megastore",
+      "name": "Megastore",
+      "base_url": "https://www.megastore.com.mt",
+      "category": "home",
+      "adapter": "html",
+      "tier": "P2",
+      "active": true,
+      "config": {
+        "runner": "local",
+        "html": {
+          "category_links": "a.mainlevel",
+          "category_pattern": "^https://www\\.megastore\\.com\\.mt/en_MT/c/[^/]+/\\d+/1/default/5/f_availability_10/1/f_availability_2/1$",
+          "page_url": [
+            "/(\\d+)/1/default/5/",
+            "/$1/{page}/default/5/"
+          ],
+          "last_page": ".paginator a",
+          "max_pages": 700,
+          "tile": ".product-main-wrap",
+          "link": "a.prodname",
+          "title": ".productname",
+          "brand": "a.brand",
+          "price": ".price em",
+          "old_price": ".price del",
+          "image": "img.lazypic",
+          "id": {
+            "attr": "data-product-id"
+          },
+          "product": {
+            "title": "h1",
+            "price": ".main-price",
+            "id": {
+              "url_regex": "/p/[^/]+/(\\d+)"
+            }
+          }
+        }
+      },
+      "notes": "Shoper platform. Walks the six top-level menu categories (IKEA, Home & Living, Outdoor, Toys, Electronics; Tyres left out), 30 products a page, page N in the path. Set up 29 Oct 2026."
     }
   ]
 }
