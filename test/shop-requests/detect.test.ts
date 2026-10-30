@@ -111,6 +111,16 @@ describe('probeShop', () => {
     expect(f.requests.length).toBeLessThanOrEqual(10);
   });
 
+  it('links with a doubled slash ("//") count as the shop, not as another host', async () => {
+    const home = `<html><body><a href="${O}//">Home</a><a href="${O}//en/1-tee.html">Tee</a><nav><a href="//shop.example.mt//books">Books</a></nav></body></html>`;
+    const f = fakeFetcher(O, { [`${O}/`]: page(home), [`${O}/en/1-tee.html`]: page(fixture('unknown-product.html')) });
+    const d = await probeShop(f, O);
+    expect(d.kind).toBe('unsupported');
+    if (d.kind !== 'unsupported') return;
+    expect(d.details.productPagesChecked).toEqual(['/en/1-tee.html']);
+    expect(d.details.categoryLinks).toEqual(['/books']);
+  });
+
   it('follows a redirect to www. and uses that origin as the base address', async () => {
     const W = 'https://www.shop.example.mt';
     const f = fakeFetcher(O, {

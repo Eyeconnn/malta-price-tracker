@@ -175,13 +175,14 @@ function pageLinks(html: string, base: string): { products: string[]; categories
     try {
       const u = new URL(href, base);
       if ((u.protocol !== 'https:' && u.protocol !== 'http:') || hostKey(u.hostname) !== scope) return null;
-      const path = `${u.pathname}${u.search}`;
+      // "https://shop.mt//x" has the path "//x", which a later new URL(path, base) would read as host "x"
+      const path = `${u.pathname.replace(/^\/{2,}/, '/')}${u.search}`;
       return path === '/' ? null : path.slice(0, 200);
     } catch {
       return null;
     }
   };
-  const productLike = (p: string) => /\/(product|products|p|item|items)\/[^/]+/i.test(p) || /\.html?$/i.test(new URL(p, base).pathname);
+  const productLike = (p: string) => /\/(product|products|p|item|items)\/[^/]+/i.test(p) || /\.html?$/i.test(p.split('?')[0]!);
   const products: string[] = [];
   const categories: string[] = [];
   $('a[href]').each((_, el) => {
