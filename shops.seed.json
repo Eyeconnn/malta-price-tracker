@@ -298,7 +298,7 @@
       "category": "electronics",
       "adapter": "woo",
       "tier": "P1",
-      "active": true,
+      "active": false,
       "config": {
         "page_size": 100,
         "runner": "local",
